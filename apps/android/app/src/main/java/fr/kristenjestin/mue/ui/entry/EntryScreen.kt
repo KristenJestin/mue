@@ -72,7 +72,6 @@ private const val SlideHint = "SLIDE TO ADJUST"
 private const val TypeHint = "TYPE YOUR WEIGHT"
 private const val ManualEntryLabel = "Weight in kilograms"
 private const val SaveLabel = "Save measurement"
-private const val SaveSuccessLabel = "Saved ✓"
 private const val DecreaseLabel = "Decrease weight by 0.05 kilograms"
 private const val IncreaseLabel = "Increase weight by 0.05 kilograms"
 private const val WeightUnit = "kg"
@@ -271,7 +270,6 @@ internal fun EntryContent(
 
         MuePrimaryButton(
             label = SaveLabel,
-            successLabel = SaveSuccessLabel,
             success = state.justSaved,
             onSuccessFinished = onSaveConfirmationFinished,
             onClick = {

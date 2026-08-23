@@ -52,8 +52,32 @@ object MueMotion {
     /** BMI value and reference marker. */
     const val BmiMillis: Int = 250
 
-    /** How long a success label stays on a button after a save. */
-    const val SaveConfirmationMillis: Int = 1000
+    /*
+     * The save confirmation of PRD 13, timed by the approved `both` prototype: the button
+     * discharges its light and then goes quiet. One press, one beat — the halo leaves as the
+     * fill dims, rather than the two happening in turn.
+     */
+
+    /** Whole confirmation, from the press to the button coming back. */
+    const val SaveConfirmationMillis: Int = 960
+
+    /** How long the touch contraction is held before it is released. */
+    const val SavePressHoldMillis: Int = 170
+
+    /** Cross-fade of the button label, both on the way in and on the way out. */
+    const val SaveLabelFadeMillis: Int = 130
+
+    /** When the fill drops to soft amber — the instant the label comes back as `Saved`. */
+    const val SaveQuietOnsetMillis: Int = 140
+
+    /** When the quiet ends and the original label starts fading back in. */
+    const val SaveQuietEndMillis: Int = 830
+
+    /** The halo radiating off the button, and the screen echo that travels with it. */
+    const val SaveHaloMillis: Int = 950
+
+    /** The vertical hop Profile's BMI readout gives when the halo reaches it. */
+    const val SaveHopMillis: Int = 600
 
     /** Vertical roll of a single digit. */
     const val NumberRollMillis: Int = 220
