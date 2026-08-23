@@ -96,6 +96,7 @@ class ProfileViewModel(
             ),
             hapticsEnabled = preferences.hapticsEnabled,
             profileSaved = transientState.profileSaved,
+            saveEchoCount = transientState.saveEchoCount,
             saveError = transientState.saveError,
             export = transientState.export,
         )
@@ -177,7 +178,13 @@ class ProfileViewModel(
                     // Echo back what was actually stored, so a trimmed name is not a surprise.
                     savedStateHandle[KEY_DISPLAY_NAME] = validation.profile.displayName.orEmpty()
                     savedStateHandle[KEY_HEIGHT] = validation.profile.heightCm?.toString().orEmpty()
-                    transient.update { it.copy(profileSaved = true, saveError = null) }
+                    transient.update {
+                        it.copy(
+                            profileSaved = true,
+                            saveError = null,
+                            saveEchoCount = it.saveEchoCount + 1,
+                        )
+                    }
                 }
             }
         }
@@ -236,6 +243,7 @@ class ProfileViewModel(
     /** State that is meaningless after a process death and therefore stays out of saved state. */
     private data class TransientState(
         val profileSaved: Boolean = false,
+        val saveEchoCount: Int = 0,
         val saveError: String? = null,
         val export: ExportState = ExportState.Idle,
     )

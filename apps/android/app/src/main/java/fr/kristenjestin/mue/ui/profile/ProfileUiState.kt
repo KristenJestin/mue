@@ -22,13 +22,15 @@ data class ProfileUiState(
     val heightError: String? = null,
     val birthDateError: String? = null,
     /**
-     * Recomputed from the *form* and the latest measurement, so the card follows the height
-     * being typed. The case matters: only [Bmi.Classified] may show the reference bar.
+     * Recomputed from the *form* and the latest measurement, so the readout follows the
+     * height being typed. The case matters: only [Bmi.Classified] may be named.
      */
     val bmi: Bmi = Bmi.Unavailable,
     val hapticsEnabled: Boolean = UserPreferences.DEFAULT.hapticsEnabled,
-    /** Drives the transient `Profile saved ✓` label (PRD FR-PROFILE-003). */
+    /** Drives the transient `Saved` confirmation on the button (PRD FR-PROFILE-003). */
     val profileSaved: Boolean = false,
+    /** Bumped on every successful save so the BMI readout can hop once (PRD 13). */
+    val saveEchoCount: Int = 0,
     /** A storage failure, which PRD 15.4 forbids from looking like a success. */
     val saveError: String? = null,
     val export: ExportState = ExportState.Idle,

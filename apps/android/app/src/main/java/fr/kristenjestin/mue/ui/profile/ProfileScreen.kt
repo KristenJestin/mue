@@ -47,13 +47,13 @@ import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
+import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
 
 private const val SCREEN_EYEBROW = "Your reference points"
 private const val SCREEN_TITLE = "Tracking shaped around you."
 private const val SAVE_LABEL = "Save profile"
-private const val SAVE_SUCCESS_LABEL = "Profile saved ✓"
 private const val EXPORT_LABEL = "Export weight data"
 private const val EXPORT_CHOOSER_TITLE = "Export weight data"
 private const val PRIVACY_TITLE = "Why do we use this data?"
@@ -140,9 +140,6 @@ internal fun ProfileScreen(
                 modifier = Modifier.padding(top = MueContentTopFade),
             )
 
-            // No height or no measurement means no BMI at all (PRD 15.1, 15.2).
-            state.bmiAvailable?.let { BmiCard(it) }
-
             ProfileForm(
                 state = state,
                 onDisplayNameChange = onDisplayNameChange,
@@ -162,7 +159,6 @@ internal fun ProfileScreen(
                     },
                     modifier = Modifier.testTag(ProfileTestTags.SAVE_BUTTON),
                     success = state.profileSaved,
-                    successLabel = SAVE_SUCCESS_LABEL,
                     onSuccessFinished = onSaveConfirmationFinished,
                 )
                 state.saveError?.let { StatusLine(it, MueTheme.colors.error, assertive = true) }
@@ -250,7 +246,7 @@ private fun ProfileForm(
     onOpenDatePicker: () -> Unit,
 ) {
     val spacing = MueTheme.spacing
-    val locale = rememberProfileLocale()
+    val locale = rememberMueLocale()
     val focusManager = LocalFocusManager.current
 
     Column(verticalArrangement = Arrangement.spacedBy(spacing.md)) {
@@ -269,20 +265,31 @@ private fun ProfileForm(
             ),
         )
 
-        MueTextField(
-            label = "Height",
-            value = state.heightInput,
-            onValueChange = onHeightChange,
-            modifier = Modifier.testTag(ProfileTestTags.HEIGHT_FIELD),
-            placeholder = NOT_SET,
-            suffix = "cm",
-            errorMessage = state.heightError,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
+            MueTextField(
+                label = "Height",
+                value = state.heightInput,
+                onValueChange = onHeightChange,
+                modifier = Modifier.testTag(ProfileTestTags.HEIGHT_FIELD),
+                placeholder = NOT_SET,
+                suffix = "cm",
+                errorMessage = state.heightError,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+            )
+            // No height or no measurement means no BMI at all (PRD 15.1, 15.2). The full
+            // card lives on Progress, which is where a state is read rather than entered.
+            state.bmiAvailable?.let { available ->
+                BmiReadout(
+                    bmi = available,
+                    echoCount = state.saveEchoCount,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
 
         Column(verticalArrangement = Arrangement.spacedBy(spacing.xs)) {
             MuePickerField(
