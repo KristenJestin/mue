@@ -222,7 +222,8 @@ internal fun ProfileScreen(
                 }
             }
 
-            Spacer(Modifier.height(spacing.screenBottom))
+            // Leaves the last card breathing room above the tab bar, as on Progress.
+            Spacer(Modifier.height(spacing.xxxl))
         }
 
         BirthDatePickerSheet(

@@ -140,7 +140,9 @@ internal fun ProgressContent(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag(ProgressTestTags.LIST),
-            contentPadding = PaddingValues(top = spacing.xl, bottom = spacing.screenBottom),
+            // The bottom padding is what leaves the last history row breathing room above
+            // the tab bar; the screen gutter alone brought it right up against the hairline.
+            contentPadding = PaddingValues(top = spacing.xl, bottom = spacing.xxxl),
         ) {
             item(key = "title") {
                 MueScreenTitle(title = SCREEN_TITLE, eyebrow = SCREEN_EYEBROW)
