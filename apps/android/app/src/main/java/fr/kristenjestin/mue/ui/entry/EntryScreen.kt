@@ -80,6 +80,10 @@ private val ManualEntrySlide: Dp = 24.dp
  */
 private val ScaleEdgeInset: Dp = 12.dp
 
+/** Share of the free height above and below the hero block; more of it below, as in the prototype. */
+private const val HeroLeadWeight = 1f
+private const val HeroTrailWeight = 1.5f
+
 /**
  * The Entry tab: the hero readout, the touch scale, the date of the measurement and the save
  * action (PRD FR-ENTRY-001 to 007).
@@ -151,6 +155,18 @@ internal fun EntryContent(
             modifier = Modifier.padding(top = spacing.xl),
         )
 
+        /*
+         * The hero block floats between the title and the bottom actions rather than sitting
+         * straight under the title.
+         *
+         * The prototype is 844 px tall and its single `mt-auto` gap reads as breathing room;
+         * on a phone half again as tall the very same gap piles up under the ruler and reads
+         * as a hole. Splitting the slack — most of it still below, as in the prototype —
+         * keeps the readout near the optical centre at any height, while the date row and
+         * the button stay pinned to the bottom.
+         */
+        Spacer(modifier = Modifier.weight(HeroLeadWeight))
+
         HeroReadout(
             weight = state.weight,
             manualEntry = state.manualEntry,
@@ -197,7 +213,7 @@ internal fun EntryContent(
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.weight(HeroTrailWeight))
 
         state.saveError?.let { message ->
             MueText(
