@@ -24,6 +24,14 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // An unsigned APK cannot be installed, so the minified build could never be
+            // exercised on a device. `-PmueDebugSigning` signs it with the local debug key
+            // for that purpose only; the store key is supplied out of band and no keystore
+            // or credential belongs in this repository.
+            if (providers.gradleProperty("mueDebugSigning").isPresent) {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 
