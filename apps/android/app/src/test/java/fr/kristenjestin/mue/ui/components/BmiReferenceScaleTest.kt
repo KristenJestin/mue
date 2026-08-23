@@ -1,8 +1,8 @@
-package fr.kristenjestin.mue.ui.profile
+package fr.kristenjestin.mue.ui.components
 
+import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import org.junit.Test
-import java.time.LocalDate
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -57,7 +57,7 @@ class BmiReferenceScaleTest {
     }
 }
 
-class ProfileFormattingTest {
+class MueBmiFormattingTest {
 
     @Test
     fun `the BMI always shows one decimal`() {
@@ -70,17 +70,23 @@ class ProfileFormattingTest {
         assertEquals("23,0", formatBmiValue(23.0, Locale.FRANCE))
     }
 
+    /** PRD FR-PROGRESS-003: a period with no measurement reads as a dash, never as a zero. */
     @Test
-    fun `the birth date follows the phone's language`() {
-        val date = LocalDate.of(1992, 4, 16)
-        assertEquals("April 16, 1992", formatBirthDate(date, Locale.US))
-        assertEquals("16 avril 1992", formatBirthDate(date, Locale.FRANCE))
+    fun `no value at all reads as a dash`() {
+        assertEquals(BMI_UNAVAILABLE, formatBmiValue(null, Locale.US))
+        assertEquals(BMI_UNAVAILABLE, formatBmiValue(null, Locale.FRANCE))
     }
 
     @Test
-    fun `a single year is not pluralised`() {
-        assertEquals("1 year", formatAge(1))
-        assertEquals("0 years", formatAge(0))
-        assertEquals("34 years", formatAge(34))
+    fun `TalkBack names the band only when the domain layer allows one`() {
+        assertEquals(
+            "Body mass index unavailable",
+            bmiDescription(Bmi.Unavailable, BMI_UNAVAILABLE),
+        )
+        assertEquals("Body mass index 23.0", bmiDescription(Bmi.ValueOnly(23.0), "23.0"))
+        assertEquals(
+            "Body mass index 23.0, Healthy weight",
+            bmiDescription(Bmi.Classified(23.0, BmiCategory.HEALTHY_WEIGHT), "23.0"),
+        )
     }
 }

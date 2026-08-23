@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.ui.profile
+package fr.kristenjestin.mue.ui.components
 
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 

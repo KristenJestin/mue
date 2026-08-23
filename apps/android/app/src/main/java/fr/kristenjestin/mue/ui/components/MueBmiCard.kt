@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.ui.profile
+package fr.kristenjestin.mue.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,24 +26,39 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.intl.Locale as ComposeLocale
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.BmiCategory
-import fr.kristenjestin.mue.ui.components.MueAccentCard
-import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
-import fr.kristenjestin.mue.ui.components.MueText
-import fr.kristenjestin.mue.ui.components.MueValueChip
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import java.text.NumberFormat
+import java.util.Locale
 import kotlin.math.roundToInt
 
 private val BarHeight = 8.dp
 private val MarkerSize = 16.dp
 private val MarkerRing = 3.dp
+
+/** Title of the card, and the word TalkBack leads with wherever a BMI is shown. */
+internal const val BMI_LABEL: String = "Body mass index"
+
+/** Chip text when the age does not allow a band to be named (PRD FR-BMI-002). */
+private const val REFERENCE_CHIP = "Reference"
+
+/** Shown instead of a value when the period holds no measurement (PRD FR-PROGRESS-003). */
+internal const val BMI_UNAVAILABLE: String = "—"
+
+/** Handles for the Compose tests: the card's whole point is sometimes to be absent. */
+internal object MueBmiCardTags {
+    const val CARD: String = "bmi:card"
+    const val REFERENCE_BAR: String = "bmi:referenceBar"
+}
 
 /** The four band fills of the prototype, left to right. Decoration only, never load-bearing. */
 private val BandColors = listOf(
@@ -53,22 +69,27 @@ private val BandColors = listOf(
 )
 
 /**
- * The amber card of the Profile prototype.
+ * The amber BMI card: the value, the four-band reference scale and the caution text.
  *
- * Only a [Bmi.Available] reaches here — a missing height or an empty history means no card at
- * all (PRD 15.1, 15.2) — and only a [Bmi.Classified] gets the named reference bar and its
- * marker (PRD FR-BMI-002). The case is decided by the domain layer and read here, never
- * re-derived from the age.
+ * It lives here because Progress reads it and Profile echoes it. Progress is where the user
+ * *reads* their state, so that screen gets the card in full; Profile, where the height is
+ * entered, keeps the compact readout instead.
+ *
+ * Only a [Bmi.Classified] gets the named reference bar and its marker (PRD FR-BMI-002), and
+ * that case is decided by the domain layer and read here, never re-derived from the age. A
+ * [Bmi.Unavailable] still draws the card — on Progress an empty period must show `—` rather
+ * than fall back on a value from outside it — but with no bar and no caution to attach it to.
  */
 @Composable
-internal fun BmiCard(bmi: Bmi.Available, modifier: Modifier = Modifier) {
+fun MueBmiCard(bmi: Bmi, modifier: Modifier = Modifier) {
     val colors = MueTheme.colors
     val typography = MueTheme.typography
     val spacing = MueTheme.spacing
+    val available = bmi as? Bmi.Available
     val category = (bmi as? Bmi.Classified)?.category
-    val value = formatBmiValue(bmi.value, rememberProfileLocale())
+    val value = formatBmiValue(available?.value, rememberMueLocale())
 
-    MueAccentCard(modifier = modifier.testTag(ProfileTestTags.BMI_CARD)) {
+    MueAccentCard(modifier = modifier.testTag(MueBmiCardTags.CARD)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -76,7 +97,7 @@ internal fun BmiCard(bmi: Bmi.Available, modifier: Modifier = Modifier) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 MueText(
-                    text = "Body mass index",
+                    text = BMI_LABEL,
                     style = typography.label,
                     color = colors.onAccentSecondary,
                 )
@@ -85,36 +106,37 @@ internal fun BmiCard(bmi: Bmi.Available, modifier: Modifier = Modifier) {
                     modifier = Modifier.padding(top = spacing.sm),
                     style = typography.metricDisplay,
                     color = colors.onAccent,
-                    // The label above and the chip beside already name the number; a longer
-                    // description here would only make TalkBack say them twice.
-                    contentDescription = value,
+                    contentDescription = bmiDescription(bmi, value),
                     durationMillis = MueMotion.BmiMillis,
                 )
             }
             MueValueChip(
                 // No category means no label: PRD FR-BMI-002 leaves only the value and the
                 // caution text when the age does not allow one.
-                text = category?.label ?: "Reference",
+                text = category?.label ?: REFERENCE_CHIP,
                 container = colors.onAccent.copy(alpha = 0.10f),
                 contentColor = colors.onAccent,
                 modifier = Modifier.padding(start = spacing.md),
             )
         }
 
-        category?.let {
+        if (available != null && category != null) {
             BmiReferenceBar(
-                value = bmi.value,
-                category = it,
+                value = available.value,
+                category = category,
                 modifier = Modifier.padding(top = spacing.xl),
             )
         }
 
-        MueText(
-            text = BmiCalculator.DISCLAIMER,
-            style = typography.caption,
-            color = colors.onAccentSecondary,
-            modifier = Modifier.padding(top = spacing.lg),
-        )
+        // PRD FR-BMI-002: the caution follows the value, so a card showing `—` carries none.
+        if (available != null) {
+            MueText(
+                text = BmiCalculator.DISCLAIMER,
+                style = typography.caption,
+                color = colors.onAccentSecondary,
+                modifier = Modifier.padding(top = spacing.lg),
+            )
+        }
     }
 }
 
@@ -138,7 +160,7 @@ private fun BmiReferenceBar(value: Double, category: BmiCategory, modifier: Modi
         modifier = modifier
             .fillMaxWidth()
             .clearAndSetSemantics {
-                testTag = ProfileTestTags.BMI_REFERENCE_BAR
+                testTag = MueBmiCardTags.REFERENCE_BAR
                 contentDescription = "Reference scale, ${category.label}"
             },
     ) {
@@ -182,5 +204,39 @@ private fun BmiReferenceBar(value: Double, category: BmiCategory, modifier: Modi
                 )
             }
         }
+    }
+}
+
+/** What TalkBack reads for a BMI, wherever it is shown. */
+internal fun bmiDescription(bmi: Bmi, value: String): String = when (bmi) {
+    is Bmi.Unavailable -> "$BMI_LABEL unavailable"
+    is Bmi.ValueOnly -> "$BMI_LABEL $value"
+    is Bmi.Classified -> "$BMI_LABEL $value, ${bmi.category.label}"
+}
+
+/** The phone's primary locale, as a `java.time` / `java.text` locale (PRD BR-010). */
+@Composable
+internal fun rememberMueLocale(): Locale {
+    val tag = ComposeLocale.current.toLanguageTag()
+    return remember(tag) { Locale.forLanguageTag(tag) }
+}
+
+/** One decimal, exactly as PRD FR-BMI-001 requires, in the phone's numbering. */
+internal fun formatBmiValue(value: Double?, locale: Locale): String =
+    value?.let {
+        NumberFormat.getNumberInstance(locale).apply {
+            minimumFractionDigits = 1
+            maximumFractionDigits = 1
+            isGroupingUsed = false
+        }.format(it)
+    } ?: BMI_UNAVAILABLE
+
+@Preview(name = "BMI card", showBackground = true, backgroundColor = 0xFF101012, widthDp = 390)
+@Composable
+private fun MueBmiCardPreview() {
+    MuePreviewHost {
+        MueBmiCard(Bmi.Classified(25.9, BmiCategory.OVERWEIGHT))
+        MueBmiCard(Bmi.ValueOnly(23.0))
+        MueBmiCard(Bmi.Unavailable)
     }
 }

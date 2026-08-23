@@ -18,6 +18,7 @@ import fr.kristenjestin.mue.ui.components.MueBottomSheetDefaults
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueText
+import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
 
@@ -67,7 +68,7 @@ internal fun BirthDatePickerSheet(
         }
     }
 
-    val locale = rememberProfileLocale()
+    val locale = rememberMueLocale()
     val selected = pickerState.selectedDateMillis?.toUtcLocalDate()
 
     MueBottomSheet(
