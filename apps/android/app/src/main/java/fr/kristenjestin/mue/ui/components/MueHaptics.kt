@@ -1,7 +1,6 @@
 package fr.kristenjestin.mue.ui.components
 
 import android.content.Context
-import android.media.AudioAttributes
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -17,9 +16,9 @@ import androidx.compose.ui.platform.LocalContext
  * The two sensations Mue produces, described without reference to any Android API so the
  * choice of one over the other stays testable on the JVM.
  *
- * The fallbacks are what a motor without predefined effects is asked for. They are short on
- * purpose: the tick fires every half kilogram of a drag (PRD FR-ENTRY-002) and has to read as
- * a graduation passing under the finger, not as a notification.
+ * The fallbacks are what a motor with no predefined effects is asked for instead. They are
+ * short on purpose: the tick fires every half kilogram of a drag (PRD FR-ENTRY-002) and has
+ * to read as a graduation passing under the finger, not as a notification.
  */
 enum class MueHaptic(val fallbackDurationMillis: Long, val fallbackAmplitude: Int) {
 
@@ -55,7 +54,7 @@ enum class MueHaptic(val fallbackDurationMillis: Long, val fallbackAmplitude: In
  * not allocate there.
  */
 @Immutable
-class MueHaptics(private val vibrator: Vibrator?, val enabled: Boolean) {
+class MueHaptics(vibrator: Vibrator?, val enabled: Boolean) {
 
     private val motor: Vibrator? =
         vibrator?.takeIf { enabled && runCatching { it.hasVibrator() }.getOrDefault(false) }
@@ -79,35 +78,34 @@ class MueHaptics(private val vibrator: Vibrator?, val enabled: Boolean) {
         if (effect == null) return
         // A vendor can refuse a vibration outright; a missing tick must never take the app down.
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                TouchVibration.play(motor, effect)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Detent.play(motor, effect)
             } else {
-                @Suppress("DEPRECATION")
-                motor.vibrate(effect, LegacyTouchFeedback)
+                motor.vibrate(effect)
             }
         }
     }
 
     /**
-     * Marks the vibration as touch feedback, which is what it is: the system then scales it to
-     * the strength the user chose for that category. That is a different setting from the
-     * touch-feedback switch, which gates `performHapticFeedback` and not this call.
+     * The vibration is declared as a physical emulation, not as touch feedback.
+     *
+     * That is what it is — a graduation clicking past under the finger, the detent of a dial —
+     * and it is also the only honest way to keep the promise of FR-PROFILE-004. Measured on
+     * API 36 with the system's touch-feedback switch off: a `USAGE_TOUCH` vibration is dropped
+     * with `ignored_for_settings`, and so is one with no usage at all, because Android
+     * reclassifies short undeclared vibrations as touch feedback. `USAGE_PHYSICAL_EMULATION`
+     * plays. The system's other controls — vibrate off, battery saver, its own intensity for
+     * this category — still apply, and should.
      */
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    private object TouchVibration {
+    @RequiresApi(Build.VERSION_CODES.R)
+    private object Detent {
         private val attributes: VibrationAttributes =
-            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH)
+            VibrationAttributes.createForUsage(VibrationAttributes.USAGE_PHYSICAL_EMULATION)
 
         fun play(motor: Vibrator, effect: VibrationEffect) = motor.vibrate(effect, attributes)
     }
 
     private companion object {
-
-        /** The same intent expressed the only way Android understood before 13. */
-        val LegacyTouchFeedback: AudioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
 
         fun Vibrator.effectFor(haptic: MueHaptic): VibrationEffect {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

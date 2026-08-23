@@ -29,6 +29,13 @@ class MueHapticTest {
         )
     }
 
+    /** Two ticks must never run into each other and read as one long buzz. */
+    @Test
+    fun `two consecutive ticks stay separable`() {
+        val gapBetweenGraduations = 1000L / 5
+        assertTrue(MueHaptic.Tick.fallbackDurationMillis * 4 < gapBetweenGraduations)
+    }
+
     @Test
     fun `every amplitude is a legal motor request`() {
         MueHaptic.entries.forEach {
