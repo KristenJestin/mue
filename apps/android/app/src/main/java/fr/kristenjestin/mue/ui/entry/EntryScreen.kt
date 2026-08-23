@@ -73,6 +73,14 @@ private const val SaveSuccessLabel = "Saved ✓"
 private val ManualEntrySlide: Dp = 24.dp
 
 /**
+ * How far the `−` and `+` controls stay from the screen edge.
+ *
+ * Narrower than the screen gutter on purpose: every dp taken back here is a dp of ruler,
+ * and the ruler is the one element that gets more legible the wider it is.
+ */
+private val ScaleEdgeInset: Dp = 12.dp
+
+/**
  * The Entry tab: the hero readout, the touch scale, the date of the measurement and the save
  * action (PRD FR-ENTRY-001 to 007).
  *
@@ -169,6 +177,7 @@ internal fun EntryContent(
                     saveFlareCount = state.saveFlareCount,
                     modifier = Modifier
                         .fullBleed(spacing.screenHorizontal)
+                        .padding(horizontal = ScaleEdgeInset)
                         .graphicsLayer {
                             alpha = 1f - manualProgress
                             translationY = if (reduceMotion) 0f else manualProgress * slidePx

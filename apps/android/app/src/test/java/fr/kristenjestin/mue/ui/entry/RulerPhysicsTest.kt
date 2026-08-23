@@ -191,6 +191,18 @@ class RulerPhysicsTest {
         assertEquals(mid, RulerPhysics.edgeAlpha(-80f, halfWidthPx = 100f))
     }
 
+    /**
+     * The `−` and `+` controls take their width from the row, so the strip is roughly this
+     * narrow on a 411 dp phone. The kilogram either side of the marker is what the eye aims
+     * at, and it has to survive the fade at that width.
+     */
+    @Test
+    fun `the kilogram either side of the marker survives the edge fade`() {
+        val halfWidthDp = 130f
+        assertEquals(1f, RulerPhysics.edgeAlpha(RulerPhysics.DP_PER_KILOGRAM, halfWidthDp))
+        assertEquals(1f, RulerPhysics.edgeAlpha(-RulerPhysics.DP_PER_KILOGRAM, halfWidthDp))
+    }
+
     // --- Feedback --------------------------------------------------------------------
 
     @Test

@@ -44,8 +44,14 @@ object RulerPhysics {
     const val TENTHS_PER_MEDIUM_TICK: Int = 5
     const val TENTHS_PER_MAJOR_TICK: Int = TENTHS_PER_KILOGRAM
 
-    /** Fraction of the half-width that stays fully opaque before the ruler fades to nothing. */
-    const val EDGE_FADE_START: Float = 0.55f
+    /**
+     * Fraction of the half-width that stays fully opaque before the ruler fades to nothing.
+     *
+     * The `−` and `+` controls flank the ruler rather than covering it, so the strip is
+     * narrower than the screen and the fade has to start late: a short ramp keeps the
+     * kilogram either side of the marker crisp and still suggests that the scale runs on.
+     */
+    const val EDGE_FADE_START: Float = 0.72f
 
     // --- Fling ----------------------------------------------------------------------
 

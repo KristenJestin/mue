@@ -15,11 +15,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -427,11 +428,13 @@ private suspend fun repeatStep(onStep: () -> Unit) {
 }
 
 /**
- * The scale as the screen uses it: the ruler running the full width of the phone with the two
- * accessible controls floating over its faded ends.
+ * The scale as the screen uses it: the two accessible controls flanking the ruler, which
+ * takes every pixel left between them.
  *
- * The controls sit where the ruler has already dimmed to nothing, so they hide no graduation
- * the user could be aiming at while staying permanently visible, as PRD FR-ENTRY-003 requires.
+ * PRD FR-ENTRY-003 asks for the controls to be permanently visible *on either side of* the
+ * scale. They therefore claim their width from the row rather than floating over the ruler:
+ * an overlay would cover the outermost kilogram labels, which are exactly the ones a user
+ * looks at to judge how far a drag has to go.
  */
 @Composable
 fun WeightScale(
@@ -444,7 +447,18 @@ fun WeightScale(
     onHapticTick: () -> Unit = {},
     saveFlareCount: Int = 0,
 ) {
-    Box(modifier = modifier.fillMaxWidth().height(WeightRulerHeight)) {
+    Row(
+        modifier = modifier.fillMaxWidth().height(WeightRulerHeight),
+        // Clearance between a control and the first graduation it must not hide.
+        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RulerStepButton(
+            glyph = "−",
+            stepDescription = "Decrease weight by 0.1 kilograms",
+            onStep = { onStep(-RulerPhysics.STEP_TENTHS) },
+            enabled = enabled && weight.tenthsKg > Weight.MIN_TENTHS,
+        )
         WeightRuler(
             weight = weight,
             onWeightChange = onWeightChange,
@@ -452,24 +466,13 @@ fun WeightScale(
             enabled = enabled,
             onHapticTick = onHapticTick,
             saveFlareCount = saveFlareCount,
-        )
-        RulerStepButton(
-            glyph = "−",
-            stepDescription = "Decrease weight by 0.1 kilograms",
-            onStep = { onStep(-RulerPhysics.STEP_TENTHS) },
-            enabled = enabled && weight.tenthsKg > Weight.MIN_TENTHS,
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = MueTheme.spacing.md),
+            modifier = Modifier.weight(1f),
         )
         RulerStepButton(
             glyph = "+",
             stepDescription = "Increase weight by 0.1 kilograms",
             onStep = { onStep(RulerPhysics.STEP_TENTHS) },
             enabled = enabled && weight.tenthsKg < Weight.MAX_TENTHS,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = MueTheme.spacing.md),
         )
     }
 }
