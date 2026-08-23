@@ -35,13 +35,11 @@ import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.ProgressStatistics
 import fr.kristenjestin.mue.domain.logic.StatisticsCalculator
-import fr.kristenjestin.mue.domain.logic.categoryOrNull
-import fr.kristenjestin.mue.domain.logic.valueOrNull
 import fr.kristenjestin.mue.domain.model.Measurement
 import fr.kristenjestin.mue.domain.model.Period
 import fr.kristenjestin.mue.domain.model.Weight
-import fr.kristenjestin.mue.ui.components.MueAccentCard
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
+import fr.kristenjestin.mue.ui.components.MueBmiCard
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
@@ -56,12 +54,10 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
 
 private val ChartHeight = 176.dp
-private val IndicatorCardMinHeight = 108.dp
 
 internal const val SCREEN_EYEBROW = "Your journey"
 internal const val SCREEN_TITLE = "Slowly, surely."
 internal const val CURRENT_WEIGHT_LABEL = "Current weight"
-internal const val CURRENT_BMI_LABEL = "Current BMI"
 internal const val AVERAGE_PACE_LABEL = "Average pace"
 internal const val PACE_UNIT = "kg / week"
 internal const val HISTORY_TITLE = "Latest measurements"
@@ -176,19 +172,11 @@ internal fun ProgressContent(
                 )
             }
 
-            item(key = "indicators") {
-                IndicatorRow(state = state, modifier = Modifier.padding(top = spacing.md))
-            }
-
-            if (state.bmi is Bmi.Available) {
-                item(key = "disclaimer") {
-                    MueText(
-                        text = BmiCalculator.DISCLAIMER,
-                        style = MueTheme.typography.caption,
-                        color = MueTheme.colors.textTertiary,
-                        modifier = Modifier.padding(top = spacing.md),
-                    )
-                }
+            // PRD 9.4 moved here from Profile: this is the screen where a state is read.
+            // It is the only amber-filled block of the region, which is why the pace went
+            // up into the chart card rather than staying beside it.
+            item(key = "bmi") {
+                MueBmiCard(bmi = state.bmi, modifier = Modifier.padding(top = spacing.md))
             }
 
             item(key = "historyTitle") {
@@ -330,6 +318,45 @@ private fun ChartCard(
                 ChartAxisLabels(points = state.chartPoints, today = state.today)
             }
         }
+
+        PaceLine(statistics = statistics, modifier = Modifier.padding(top = MueTheme.spacing.lg))
+    }
+}
+
+/**
+ * The weekly pace, at the foot of the chart card.
+ *
+ * It used to be an amber tile beside the small BMI one. With the full BMI card taking that
+ * region, a second amber block would have fought it and a lone half-width tile would have
+ * read as a leftover. The pace belongs to the curve above it anyway — it is nothing but the
+ * two endpoints of that very line divided by the days between them (PRD FR-PROGRESS-003) —
+ * so it closes the card that draws them instead of sitting in its own.
+ */
+@Composable
+private fun PaceLine(statistics: ProgressStatistics, modifier: Modifier = Modifier) {
+    val colors = MueTheme.colors
+    val type = MueTheme.typography
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        MueDivider()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = MueTheme.spacing.md),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MueText(AVERAGE_PACE_LABEL, type.label, color = colors.textTertiary)
+            MueAnimatedNumber(
+                text = ProgressFormat.signedPace(statistics.weeklyPaceKg),
+                style = type.metricMedium,
+                color = colors.accent,
+                suffix = PACE_UNIT,
+                suffixStyle = type.micro,
+                durationMillis = MueMotion.PeriodChangeMillis,
+                contentDescription = paceDescription(statistics),
+            )
+        }
     }
 }
 
@@ -363,54 +390,6 @@ private fun ChartAxisLabels(points: List<Measurement>, today: LocalDate) {
                     color = color,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun IndicatorRow(state: ProgressUiState, modifier: Modifier = Modifier) {
-    val colors = MueTheme.colors
-    val type = MueTheme.typography
-    val category = state.bmi.categoryOrNull
-
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
-    ) {
-        MueSurfaceCard(
-            modifier = Modifier.weight(1f).heightIn(min = IndicatorCardMinHeight),
-            shape = MueTheme.shapes.field,
-            contentPadding = PaddingValues(MueTheme.spacing.lg),
-        ) {
-            MueText(CURRENT_BMI_LABEL, type.label, color = colors.textTertiary)
-            MueAnimatedNumber(
-                text = ProgressFormat.bmi(state.bmi.valueOrNull),
-                style = type.metricMedium,
-                durationMillis = MueMotion.BmiMillis,
-                contentDescription = bmiDescription(state.bmi),
-                modifier = Modifier.padding(top = MueTheme.spacing.sm),
-            )
-            // PRD FR-BMI-002: only the domain layer decides whether a band may be named.
-            if (category != null) {
-                MueText(category.label, type.caption, color = colors.accent)
-            }
-        }
-
-        MueAccentCard(
-            modifier = Modifier.weight(1f).heightIn(min = IndicatorCardMinHeight),
-            shape = MueTheme.shapes.field,
-            contentPadding = PaddingValues(MueTheme.spacing.lg),
-        ) {
-            MueText(AVERAGE_PACE_LABEL, type.label, color = colors.onAccentSecondary)
-            MueAnimatedNumber(
-                text = ProgressFormat.signedPace(state.statistics.weeklyPaceKg),
-                style = type.metricMedium,
-                color = colors.onAccent,
-                durationMillis = MueMotion.PeriodChangeMillis,
-                contentDescription = paceDescription(state.statistics),
-                modifier = Modifier.padding(top = MueTheme.spacing.sm),
-            )
-            MueText(PACE_UNIT, type.micro, color = colors.onAccentSecondary)
         }
     }
 }
@@ -475,12 +454,6 @@ private fun paceDescription(statistics: ProgressStatistics): String =
     statistics.weeklyPaceKg
         ?.let { "$AVERAGE_PACE_LABEL ${ProgressFormat.signedPace(it)} kilograms per week" }
         ?: "$AVERAGE_PACE_LABEL unavailable"
-
-private fun bmiDescription(bmi: Bmi): String = when (bmi) {
-    is Bmi.Unavailable -> "$CURRENT_BMI_LABEL unavailable"
-    is Bmi.ValueOnly -> "$CURRENT_BMI_LABEL ${ProgressFormat.bmi(bmi.value)}"
-    is Bmi.Classified -> "$CURRENT_BMI_LABEL ${ProgressFormat.bmi(bmi.value)}, ${bmi.category.label}"
-}
 
 private fun chartDescription(state: ProgressUiState): String {
     val points = state.chartPoints
