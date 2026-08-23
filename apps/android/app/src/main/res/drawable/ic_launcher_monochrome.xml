@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The touch scale of the Entry screen reduced to its essentials: four graduations around the
-  tall centre marker the ruler slides under.
-
-  Flat amber, five pills, no gradient and no letterform — the shape has to survive being drawn
-  at 48 dp and being cropped by any launcher mask, so everything sits inside the 72 dp the
-  system guarantees is visible.
+  Themed-icon layer: the same five graduations, flat white. The launcher tints this shape with
+  the user's wallpaper colours, so it carries geometry only — never the product amber, which
+  would fight the tint.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -13,18 +10,18 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#EFB45F"
+        android:fillColor="#FFFFFF"
         android:pathData="M22,58 A4,4 0 0 1 30,58 V66 A4,4 0 0 1 22,66 Z" />
     <path
-        android:fillColor="#EFB45F"
+        android:fillColor="#FFFFFF"
         android:pathData="M36,50 A4,4 0 0 1 44,50 V66 A4,4 0 0 1 36,66 Z" />
     <path
-        android:fillColor="#EFB45F"
+        android:fillColor="#FFFFFF"
         android:pathData="M48,36 A6,6 0 0 1 60,36 V64 A6,6 0 0 1 48,64 Z" />
     <path
-        android:fillColor="#EFB45F"
+        android:fillColor="#FFFFFF"
         android:pathData="M64,50 A4,4 0 0 1 72,50 V66 A4,4 0 0 1 64,66 Z" />
     <path
-        android:fillColor="#EFB45F"
+        android:fillColor="#FFFFFF"
         android:pathData="M78,58 A4,4 0 0 1 86,58 V66 A4,4 0 0 1 78,66 Z" />
 </vector>
