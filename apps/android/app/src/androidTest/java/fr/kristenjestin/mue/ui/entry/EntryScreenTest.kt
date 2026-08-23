@@ -12,9 +12,11 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertRangeInfoEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
@@ -22,6 +24,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -220,6 +224,47 @@ class EntryScreenTest {
         start()
         composeRule.onNodeWithContentDescription(INCREASE).assertIsDisplayed()
         composeRule.onNodeWithContentDescription(DECREASE).assertIsDisplayed()
+    }
+
+    /**
+     * They flank the readout, not the graduations: the eye is already on the number while
+     * adjusting, and the scale keeps the whole width.
+     */
+    @Test
+    fun the_controls_sit_level_with_the_readout() {
+        start()
+        val value = readout().getUnclippedBoundsInRoot()
+
+        listOf(DECREASE, INCREASE).forEach { label ->
+            val control = composeRule.onNodeWithContentDescription(label)
+                .getUnclippedBoundsInRoot()
+            val centre = control.top + control.height / 2
+            assertTrue(
+                "$label is at $centre, outside the readout's ${value.top}..${value.bottom}",
+                centre >= value.top && centre <= value.bottom,
+            )
+        }
+    }
+
+    @Test
+    fun the_controls_keep_a_full_touch_target() {
+        start()
+        listOf(DECREASE, INCREASE).forEach { label ->
+            val size = composeRule.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
+            assertTrue(
+                "$label is only ${size.width} x ${size.height}",
+                size.width >= 48.dp && size.height >= 48.dp,
+            )
+        }
+    }
+
+    /** Nothing crowds the scale any more, so every pixel of width is a pixel of ruler. */
+    @Test
+    fun the_scale_runs_the_full_width_of_the_screen() {
+        start()
+        val screen = composeRule.onRoot().getUnclippedBoundsInRoot().width
+        val ruler = scale().getUnclippedBoundsInRoot().width
+        assertEquals(screen.value, ruler.value, 1f)
     }
 
     @Test

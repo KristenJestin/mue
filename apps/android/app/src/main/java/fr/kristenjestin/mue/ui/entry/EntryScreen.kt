@@ -1,8 +1,5 @@
 package fr.kristenjestin.mue.ui.entry
 
-import android.os.Build
-import android.view.HapticFeedbackConstants
-import android.view.View
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,7 +32,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
@@ -52,12 +48,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
 import fr.kristenjestin.mue.ui.components.MueFieldContainer
+import fr.kristenjestin.mue.ui.components.MueHaptics
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueText
+import fr.kristenjestin.mue.ui.components.rememberMueHaptics
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -69,17 +67,11 @@ private const val TypeHint = "TYPE YOUR WEIGHT"
 private const val ManualEntryLabel = "Weight in kilograms"
 private const val SaveLabel = "Save measurement"
 private const val SaveSuccessLabel = "Saved ✓"
+private const val DecreaseLabel = "Decrease weight by 0.1 kilograms"
+private const val IncreaseLabel = "Increase weight by 0.1 kilograms"
 
 /** How far the ruler drops as it hands over to the keyboard (PRD 13, 180 ms). */
 private val ManualEntrySlide: Dp = 24.dp
-
-/**
- * How far the `−` and `+` controls stay from the screen edge.
- *
- * Narrower than the screen gutter on purpose: every dp taken back here is a dp of ruler,
- * and the ruler is the one element that gets more legible the wider it is.
- */
-private val ScaleEdgeInset: Dp = 12.dp
 
 /** Share of the free height above and below the hero block; more of it below, as in the prototype. */
 private const val HeroLeadWeight = 1f
@@ -133,7 +125,21 @@ internal fun EntryContent(
     val spacing = MueTheme.spacing
     val colors = MueTheme.colors
     val reduceMotion = LocalReduceMotion.current
-    val haptics = rememberEntryHaptics(state.hapticsEnabled)
+    val haptics = rememberMueHaptics(state.hapticsEnabled)
+
+    /*
+     * The scale's live position, owned here rather than by the ViewModel.
+     *
+     * Only the readout and the ruler's draw scope read it, which is what keeps a drag off the
+     * recomposition path entirely (PRD 16.2). The screen's own weight is what everything else
+     * uses and it catches up when the ruler stops.
+     */
+    val ruler = rememberRulerState(state.weight)
+    LaunchedEffect(state.weightRevision) {
+        // A gesture in flight owns the value: the history seed arriving mid-drag must not
+        // snatch it back (PRD FR-ENTRY-001).
+        if (!ruler.interacting) ruler.jumpTo(state.weight.tenthsKg)
+    }
 
     LaunchedEffect(state.saveFlareCount) {
         if (state.saveFlareCount > 0) haptics.confirm()
@@ -183,11 +189,16 @@ internal fun EntryContent(
         val slotMinHeight = lerp(WeightRulerHeight, 0.dp, manualProgress)
 
         HeroReadout(
-            weight = state.weight,
+            ruler = ruler,
             manualEntry = state.manualEntry,
             // Touching the value toggles, as in the prototype. It is also the way back out of a
             // value the keyboard refuses to accept, which `Done` deliberately will not do.
             onClick = if (state.manualEntry) onDismissManualEntry else onOpenManualEntry,
+            onStep = { steps -> stepWithHaptics(state.weight, steps, haptics, onStep) },
+            stepsEnabled = !state.manualEntry,
+            atLowerStop = state.isAtLowerStop,
+            atUpperStop = state.isAtUpperStop,
+            controlsAlpha = 1f - manualProgress,
             modifier = Modifier.padding(top = heroTopPadding),
         )
 
@@ -198,17 +209,15 @@ internal fun EntryContent(
                 .heightIn(min = slotMinHeight),
         ) {
             if (manualProgress < 1f) {
-                WeightScale(
+                WeightRuler(
+                    ruler = ruler,
                     weight = state.weight,
                     onWeightChange = onWeightChange,
-                    weightRevision = state.weightRevision,
-                    onStep = { steps -> stepWithHaptics(state.weight, steps, haptics, onStep) },
                     enabled = !state.manualEntry,
                     onHapticTick = haptics::tick,
                     saveFlareCount = state.saveFlareCount,
                     modifier = Modifier
                         .fullBleed(spacing.screenHorizontal)
-                        .padding(horizontal = ScaleEdgeInset)
                         .graphicsLayer {
                             alpha = 1f - manualProgress
                             translationY = if (reduceMotion) 0f else manualProgress * slidePx
@@ -255,7 +264,12 @@ internal fun EntryContent(
             successLabel = SaveSuccessLabel,
             success = state.justSaved,
             onSuccessFinished = onSaveConfirmationFinished,
-            onClick = onSave,
+            onClick = {
+                // The scale reports where it stopped, so a save landed on mid-glide would
+                // otherwise record the value the finger left rather than the one on screen.
+                onWeightChange(Weight.ofTenthsClamped(ruler.displayedTenths))
+                onSave()
+            },
             modifier = Modifier.padding(top = spacing.md),
         )
 
@@ -271,32 +285,57 @@ internal fun EntryContent(
     )
 }
 
-/** The value and its hint. Touching the value hands over to the keyboard (PRD FR-ENTRY-004). */
+/**
+ * The value, the two step controls that flank it and the hint underneath.
+ *
+ * PRD FR-ENTRY-003 wants `−` and `+` permanently visible on either side of the balance and
+ * leaves their placement to the implementation. They sit level with the readout rather than
+ * with the graduations: that is where the eye already is while adjusting, and it hands the
+ * whole screen width back to the ruler, which is the one element that only gets more legible
+ * the wider it is.
+ *
+ * They are pinned to the gutter instead of hugging the number. A control that tracked the
+ * width of `74.5` would shuffle sideways every time a digit came or went — on the readout the
+ * user is staring at, during the very gesture that changes it.
+ */
 @Composable
 private fun HeroReadout(
-    weight: Weight,
+    ruler: RulerState,
     manualEntry: Boolean,
     onClick: () -> Unit,
+    onStep: (Int) -> Unit,
+    stepsEnabled: Boolean,
+    atLowerStop: Boolean,
+    atUpperStop: Boolean,
+    controlsAlpha: Float,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        MueAnimatedNumber(
-            text = EntryFormat.weight(weight),
-            suffix = "kg",
-            contentDescription = EntryFormat.spokenWeight(weight),
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .clip(MueTheme.shapes.field)
-                .clickable(
-                    onClickLabel = if (manualEntry) "Go back to the scale" else "Type your weight",
-                    role = Role.Button,
-                    onClick = onClick,
-                )
-                .padding(horizontal = MueTheme.spacing.md, vertical = MueTheme.spacing.xs),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RulerStepButton(
+                glyph = "−",
+                stepDescription = DecreaseLabel,
+                onStep = { onStep(-RulerPhysics.STEP_TENTHS) },
+                enabled = stepsEnabled && !atLowerStop,
+                modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
+            )
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                HeroValue(ruler = ruler, manualEntry = manualEntry, onClick = onClick)
+            }
+            RulerStepButton(
+                glyph = "+",
+                stepDescription = IncreaseLabel,
+                onStep = { onStep(RulerPhysics.STEP_TENTHS) },
+                enabled = stepsEnabled && !atUpperStop,
+                modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
+            )
+        }
         MueText(
             text = if (manualEntry) TypeHint else SlideHint,
             style = MueTheme.typography.hint,
@@ -304,6 +343,33 @@ private fun HeroReadout(
             modifier = Modifier.fillMaxWidth().padding(top = MueTheme.spacing.md),
         )
     }
+}
+
+/**
+ * The number itself, and the only thing on the screen that recomposes while the finger moves.
+ *
+ * The live position is read here and nowhere above, so a drag rebuilds one text node instead
+ * of the screen. The digit roll is dropped for as long as the scale is moving: rolling is how
+ * one reading becomes another, and a drag has no readings, only a blur (PRD FR-ENTRY-002).
+ */
+@Composable
+private fun HeroValue(ruler: RulerState, manualEntry: Boolean, onClick: () -> Unit) {
+    val weight = Weight.ofTenthsClamped(ruler.displayedTenths)
+    MueAnimatedNumber(
+        text = EntryFormat.weight(weight),
+        suffix = "kg",
+        contentDescription = EntryFormat.spokenWeight(weight),
+        horizontalArrangement = Arrangement.Center,
+        rolling = !ruler.interacting,
+        modifier = Modifier
+            .clip(MueTheme.shapes.field)
+            .clickable(
+                onClickLabel = if (manualEntry) "Go back to the scale" else "Type your weight",
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = MueTheme.spacing.md, vertical = MueTheme.spacing.xs),
+    )
 }
 
 /**
@@ -396,7 +462,7 @@ private fun ManualWeightField(
 private fun stepWithHaptics(
     weight: Weight,
     steps: Int,
-    haptics: EntryHaptics,
+    haptics: MueHaptics,
     onStep: (Int) -> Unit,
 ) {
     if (RulerPhysics.crossesHapticStep(weight.tenthsKg, RulerPhysics.step(weight.tenthsKg, steps))) {
@@ -416,34 +482,6 @@ private fun Modifier.fullBleed(gutter: Dp): Modifier = layout { measurable, cons
     val width = constraints.maxWidth + bleed * 2
     val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
     layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
-}
-
-/**
- * The two vibrations of the Entry screen: the light tick every half kilogram of PRD
- * FR-ENTRY-002 and the confirmation of FR-ENTRY-006. Both obey the preference of
- * FR-PROFILE-004 and, underneath it, Android's own haptic setting.
- */
-internal class EntryHaptics(private val view: View?, private val enabled: Boolean) {
-
-    fun tick() = perform(HapticFeedbackConstants.CLOCK_TICK)
-
-    fun confirm() = perform(
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            HapticFeedbackConstants.CONFIRM
-        } else {
-            HapticFeedbackConstants.LONG_PRESS
-        }
-    )
-
-    private fun perform(constant: Int) {
-        if (enabled) view?.performHapticFeedback(constant)
-    }
-}
-
-@Composable
-private fun rememberEntryHaptics(enabled: Boolean): EntryHaptics {
-    val view = LocalView.current
-    return remember(view, enabled) { EntryHaptics(view, enabled) }
 }
 
 // --- Previews -----------------------------------------------------------------------
