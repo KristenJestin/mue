@@ -22,11 +22,18 @@ import androidx.core.view.WindowCompat
  * Material 3 is installed underneath purely as plumbing — ripples, text selection handles,
  * cursor colours — and every visible surface comes from the Mue scales instead. Nothing
  * in the app should read [MaterialTheme] directly.
+ *
+ * [reduceMotion] defaults to the device's own animation setting and is a parameter rather
+ * than a hardcoded lookup so a caller — a test, a preview — can state it. Reading the
+ * setting unconditionally here would silently overwrite any [LocalReduceMotion] the caller
+ * had provided, and the reduced paths would then never run.
  */
 @Composable
-fun MueTheme(content: @Composable () -> Unit) {
+fun MueTheme(
+    reduceMotion: Boolean = rememberReduceMotion(),
+    content: @Composable () -> Unit,
+) {
     val colors = MueDarkColors
-    val reduceMotion = rememberReduceMotion()
 
     ApplySystemBarAppearance()
 

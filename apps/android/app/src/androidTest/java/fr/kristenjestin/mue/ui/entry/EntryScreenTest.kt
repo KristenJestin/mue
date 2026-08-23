@@ -1,7 +1,6 @@
 package fr.kristenjestin.mue.ui.entry
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -22,9 +21,9 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.Weight
-import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -52,45 +51,43 @@ class EntryScreenTest {
 
     @Composable
     private fun Harness(reduceMotion: Boolean) {
-        CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
-            MueTheme {
-                EntryContent(
-                    state = state,
-                    onWeightChange = { state = state.copy(weight = it) },
-                    onStep = { steps ->
-                        state = state.withExternalWeight(
-                            Weight.ofTenthsClamped(
-                                RulerPhysics.step(state.weight.tenthsKg, steps)
-                            )
+        MueTheme(reduceMotion = reduceMotion) {
+            EntryContent(
+                state = state,
+                onWeightChange = { state = state.copy(weight = it) },
+                onStep = { steps ->
+                    state = state.withExternalWeight(
+                        Weight.ofTenthsClamped(
+                            RulerPhysics.step(state.weight.tenthsKg, steps)
                         )
-                    },
-                    onOpenManualEntry = {
-                        state = state.copy(
-                            manualEntry = true,
-                            manualInput = EntryFormat.weight(state.weight),
-                        )
-                    },
-                    onDismissManualEntry = {
-                        state = state.copy(manualEntry = false, manualError = null)
-                    },
-                    onManualInputChange = { raw -> state = state.withManualInput(raw) },
-                    onConfirmManualEntry = {
-                        val valid = state.manualError == null && state.manualInput.isNotBlank()
-                        if (valid) state = state.copy(manualEntry = false)
-                        valid
-                    },
-                    onOpenDatePicker = { state = state.copy(datePickerVisible = true) },
-                    onDismissDatePicker = { state = state.copy(datePickerVisible = false) },
-                    onDateSelected = { state = state.copy(date = it, datePickerVisible = false) },
-                    onSave = {
-                        state = state.copy(
-                            justSaved = true,
-                            saveFlareCount = state.saveFlareCount + 1,
-                        )
-                    },
-                    onSaveConfirmationFinished = { state = state.copy(justSaved = false) },
-                )
-            }
+                    )
+                },
+                onOpenManualEntry = {
+                    state = state.copy(
+                        manualEntry = true,
+                        manualInput = EntryFormat.weight(state.weight),
+                    )
+                },
+                onDismissManualEntry = {
+                    state = state.copy(manualEntry = false, manualError = null)
+                },
+                onManualInputChange = { raw -> state = state.withManualInput(raw) },
+                onConfirmManualEntry = {
+                    val valid = state.manualError == null && state.manualInput.isNotBlank()
+                    if (valid) state = state.copy(manualEntry = false)
+                    valid
+                },
+                onOpenDatePicker = { state = state.copy(datePickerVisible = true) },
+                onDismissDatePicker = { state = state.copy(datePickerVisible = false) },
+                onDateSelected = { state = state.copy(date = it, datePickerVisible = false) },
+                onSave = {
+                    state = state.copy(
+                        justSaved = true,
+                        saveFlareCount = state.saveFlareCount + 1,
+                    )
+                },
+                onSaveConfirmationFinished = { state = state.copy(justSaved = false) },
+            )
         }
     }
 
@@ -107,6 +104,14 @@ class EntryScreenTest {
     /** Starts at the centre so the drag can never begin on one of the step controls. */
     private fun SemanticsNodeInteraction.dragBy(dx: Float) = performTouchInput {
         swipe(start = center, end = Offset(center.x + dx, center.y), durationMillis = 120L)
+    }
+
+    /** Where the ruler lands on the finger's travel alone, with no inertia on top of it. */
+    private fun tenthsAfterDragOf(dx: Float): Int {
+        val pixelsPerTenth = with(composeRule.density) { RulerPhysics.DP_PER_TENTH.dp.toPx() }
+        return RulerPhysics.snapToTenth(
+            START_TENTHS + RulerPhysics.dragToTenths(dx, pixelsPerTenth)
+        )
     }
 
     // --- FR-ENTRY-002, the readout and the scale -------------------------------------
@@ -180,13 +185,31 @@ class EntryScreenTest {
         assertEquals(Weight.MIN_TENTHS, state.weight.tenthsKg)
     }
 
+    /** A flick with animations on glides on past the finger — the inertia of FR-ENTRY-002. */
+    @Test
+    fun a_flick_carries_the_scale_past_the_finger() {
+        start()
+        scale().dragBy(-200f)
+        composeRule.waitForIdle()
+
+        assertTrue(
+            "expected inertia beyond ${tenthsAfterDragOf(-200f)}, got ${state.weight.tenthsKg}",
+            state.weight.tenthsKg > tenthsAfterDragOf(-200f),
+        )
+    }
+
+    /**
+     * PRD 14: reduced animations drop the inertia, but the magnetism is an input aid and
+     * stays. The exact landing is what proves the reduced path ran — the same flick with
+     * animations on overshoots it.
+     */
     @Test
     fun the_magnetism_survives_reduced_animations() {
         start(reduceMotion = true)
         scale().dragBy(-200f)
         composeRule.waitForIdle()
 
-        assertTrue(state.weight.tenthsKg > START_TENTHS)
+        assertEquals(tenthsAfterDragOf(-200f), state.weight.tenthsKg)
         readout().assertIsDisplayed()
     }
 

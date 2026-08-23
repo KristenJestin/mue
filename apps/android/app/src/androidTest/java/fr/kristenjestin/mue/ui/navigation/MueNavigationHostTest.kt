@@ -3,7 +3,6 @@ package fr.kristenjestin.mue.ui.navigation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -16,7 +15,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -35,19 +33,15 @@ class MueNavigationHostTest {
 
     private fun setHost(reduceMotion: Boolean = false) {
         composeRule.setContent {
-            // Inside the theme on purpose: `MueTheme` publishes the device's own setting,
-            // and a provider wrapped around it would simply be overwritten.
-            MueTheme {
-                CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
-                    MueNavigationHost { destination ->
-                        var taps by rememberSaveable { mutableIntStateOf(0) }
-                        Column {
-                            Text("${destination.label} body")
-                            Text(
-                                text = "${destination.label} taps $taps",
-                                modifier = Modifier.clickable { taps++ },
-                            )
-                        }
+            MueTheme(reduceMotion = reduceMotion) {
+                MueNavigationHost { destination ->
+                    var taps by rememberSaveable { mutableIntStateOf(0) }
+                    Column {
+                        Text("${destination.label} body")
+                        Text(
+                            text = "${destination.label} taps $taps",
+                            modifier = Modifier.clickable { taps++ },
+                        )
                     }
                 }
             }
