@@ -3,7 +3,6 @@ package fr.kristenjestin.mue.ui.profile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -12,11 +11,10 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.ui.components.MueBottomSheet
+import fr.kristenjestin.mue.ui.components.MueBottomSheetDefaults
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueText
@@ -77,6 +75,11 @@ internal fun BirthDatePickerSheet(
         onDismissRequest = onDismissRequest,
         title = "Date of birth",
         scrimContentDescription = "Close the date of birth picker",
+        // The calendar carries its own inner padding; the full screen gutter on top of it
+        // squeezes the 48 dp day cells.
+        contentPadding = MueBottomSheetDefaults.contentPadding(
+            horizontal = MueTheme.spacing.lg,
+        ),
     ) {
         MueText(
             text = selected?.let { formatBirthDate(it, locale) } ?: "No date selected",
@@ -87,11 +90,7 @@ internal fun BirthDatePickerSheet(
 
         DatePicker(
             state = pickerState,
-            // The month grid needs 48 dp accessible cells; below its own container width the
-            // Material layout would clip, so it keeps its width and overflows the gutter.
-            modifier = Modifier
-                .align(Alignment.CenterHorizontally)
-                .requiredWidth(360.dp),
+            modifier = Modifier.fillMaxWidth(),
             title = null,
             headline = null,
             showModeToggle = false,

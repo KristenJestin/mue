@@ -11,6 +11,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import fr.kristenjestin.mue.ui.components.MueBottomSheet
+import fr.kristenjestin.mue.ui.components.MueBottomSheetDefaults
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.Instant
@@ -40,6 +41,11 @@ fun EntryDateSheet(
         modifier = modifier,
         title = "Measurement date",
         scrimContentDescription = "Close the date picker",
+        // The calendar carries its own inner padding; the full screen gutter on top of it
+        // squeezes the 48 dp day cells.
+        contentPadding = MueBottomSheetDefaults.contentPadding(
+            horizontal = MueTheme.spacing.lg,
+        ),
     ) {
         // Re-keyed on every opening so the calendar always reappears on the current date.
         key(visible, selected) {

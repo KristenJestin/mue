@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -44,9 +46,24 @@ import kotlinx.coroutines.launch
 /** Drag distance past which releasing dismisses the sheet. */
 private val DismissThreshold = 120.dp
 
+object MueBottomSheetDefaults {
+
+    /** The screen gutter, kept below the panel so the last action clears the home indicator. */
+    @Composable
+    fun contentPadding(
+        horizontal: Dp = MueTheme.spacing.screenHorizontal,
+        bottom: Dp = MueTheme.spacing.xxl,
+    ): PaddingValues = PaddingValues(start = horizontal, end = horizontal, bottom = bottom)
+}
+
 /**
  * Panel rising from the bottom over a dimmed canvas, host for the date picker and the
  * history edit panel. Closes on the scrim, on back, or on a downward drag (FR-ENTRY-005).
+ *
+ * [contentPadding] is a parameter rather than the screen gutter for everyone, because a
+ * child can have a width of its own: the Material calendar already carries its own inner
+ * padding and wants a narrower gutter to lay its 48 dp day cells out in. Without the knob
+ * such a child has to force its width and overflow the panel instead.
  *
  * Reduced motion keeps the scrim and the panel but drops the travel: the sheet simply
  * fades in place.
@@ -58,6 +75,7 @@ fun MueBottomSheet(
     modifier: Modifier = Modifier,
     title: String? = null,
     scrimContentDescription: String = "Close",
+    contentPadding: PaddingValues = MueBottomSheetDefaults.contentPadding(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var mounted by remember { mutableStateOf(false) }
@@ -139,11 +157,7 @@ fun MueBottomSheet(
                         },
                     )
                     .navigationBarsPadding()
-                    .padding(
-                        start = MueTheme.spacing.screenHorizontal,
-                        end = MueTheme.spacing.screenHorizontal,
-                        bottom = MueTheme.spacing.xxl,
-                    ),
+                    .padding(contentPadding),
                 verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
             ) {
                 Box(
