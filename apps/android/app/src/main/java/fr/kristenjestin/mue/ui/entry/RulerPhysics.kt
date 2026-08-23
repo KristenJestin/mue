@@ -242,6 +242,65 @@ object RulerPhysics {
         return (remaining * remaining).coerceIn(0f, 1f)
     }
 
+    // --- Save echo ------------------------------------------------------------------
+
+    /*
+     * The ruler's answer to the save confirmation: the marker flares, a wave runs out along
+     * the strip and the graduations nearest the marker lift and settle back. All three read
+     * one progress value going from 0 to 1 over the life of the button's halo, so the light
+     * that leaves the button is the light that arrives here.
+     *
+     * They are pure functions rather than animation specs because the draw loop calls them
+     * once per graduation: they have to be cheap, and the shape of the wave has to be
+     * provable without a device.
+     */
+
+    /** Fraction of the echo at which the marker's flare is at its brightest. */
+    const val ECHO_FLARE_PEAK: Float = 0.22f
+
+    /** How far the wave front travels, as a multiple of the ruler's half-width. */
+    const val ECHO_REACH: Float = 1.15f
+
+    /** Thickness of the wave, as a fraction of the half-width. */
+    const val ECHO_WAVE_WIDTH: Float = 0.34f
+
+    /** Fraction of the echo over which the graduations around the marker come back down. */
+    const val ECHO_LIFT_END: Float = 0.44f
+
+    /** How far either side of the marker that lift is felt, as a fraction of the half-width. */
+    const val ECHO_LIFT_REACH: Float = 0.30f
+
+    /** Brightness of the marker's halo: a fast bloom, then a long fall. */
+    fun echoFlare(progress: Float): Float = when {
+        progress <= 0f || progress >= 1f -> 0f
+        progress < ECHO_FLARE_PEAK -> progress / ECHO_FLARE_PEAK
+        else -> (1f - progress) / (1f - ECHO_FLARE_PEAK)
+    }
+
+    /** Distance of the wave front from the marker. It decelerates as it runs out of energy. */
+    fun echoFront(progress: Float, halfWidthPx: Float): Float {
+        val remaining = 1f - progress.coerceIn(0f, 1f)
+        return (1f - remaining * remaining) * halfWidthPx * ECHO_REACH
+    }
+
+    /** How much of the wave a graduation sitting [distanceFromCentrePx] away is carrying. */
+    fun echoWave(distanceFromCentrePx: Float, halfWidthPx: Float, progress: Float): Float {
+        if (progress <= 0f || progress >= 1f || halfWidthPx <= 0f) return 0f
+        val width = halfWidthPx * ECHO_WAVE_WIDTH
+        val delta = abs(abs(distanceFromCentrePx) - echoFront(progress, halfWidthPx))
+        if (delta >= width) return 0f
+        val crest = 1f - delta / width
+        return crest * crest * (1f - progress)
+    }
+
+    /** The brief lift of the graduations framing the marker, independent of the wave. */
+    fun echoLift(distanceFromCentrePx: Float, halfWidthPx: Float, progress: Float): Float {
+        if (progress <= 0f || progress >= ECHO_LIFT_END || halfWidthPx <= 0f) return 0f
+        val near = 1f - abs(distanceFromCentrePx) / (halfWidthPx * ECHO_LIFT_REACH)
+        if (near <= 0f) return 0f
+        return near * near * (1f - progress / ECHO_LIFT_END)
+    }
+
     // --- Feedback -------------------------------------------------------------------
 
     /**

@@ -31,6 +31,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -55,6 +58,7 @@ import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
+import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -84,8 +88,18 @@ private val StepButtonSize: Dp = MueMinTouchTarget
 private const val MinorTickAlpha = 0.6f
 private const val MediumTickAlpha = 1f
 
-/** How long the amber flare lingers on the marker after a save (PRD 13). */
-private const val SaveFlareMillis = 700
+/** An echo that has run its course. Also its resting value, so nothing extra is drawn at rest. */
+private const val EchoSpent = 1f
+
+/** How far the marker's halo blooms past its resting radius at the peak of the flare. */
+private const val MarkerFlareGrowth = 1.7f
+
+/** Opacity of the marker halo at rest and at the top of its bloom. */
+private const val MarkerGlowAlpha = 0.30f
+private const val MarkerFlareAlpha = 0.55f
+
+/** Opacity of the wave at its middle. It is light spreading, not a stroke: the edges dissolve. */
+private const val EchoWaveAlpha = 0.34f
 
 /** Discrete positions TalkBack can stop on: one per 0.05 kg, ends excluded. */
 private val AdjustableSteps: Int =
@@ -138,11 +152,16 @@ fun WeightRuler(
         }
     }
 
-    val flare = remember { Animatable(0f) }
+    /*
+     * The screen's echo of the save confirmation, on the button's own clock: the marker
+     * flares, a wave runs out along the strip and the nearby graduations lift. Linear, so
+     * `progress` is time and the three effects can shape their own curves from it.
+     */
+    val echo = remember { Animatable(EchoSpent) }
     LaunchedEffect(saveFlareCount) {
         if (saveFlareCount > 0 && !reduceMotion) {
-            flare.snapTo(1f)
-            flare.animateTo(0f, tween(SaveFlareMillis, easing = LinearEasing))
+            echo.snapTo(0f)
+            echo.animateTo(EchoSpent, tween(MueMotion.SaveHaloMillis, easing = LinearEasing))
         }
     }
 
@@ -208,7 +227,7 @@ fun WeightRuler(
                 }
                 if (!enabled) disabled()
             }
-            .rulerGraduations(ruler, flare, textMeasurer, labelStyle, tickPalette),
+            .rulerGraduations(ruler, echo, textMeasurer, labelStyle, tickPalette),
     )
 }
 
@@ -216,11 +235,12 @@ fun WeightRuler(
 private class RulerPalette(val quiet: Color, val major: Color, val accent: Color)
 
 /**
- * Everything that does not move: the geometry in pixels and the marker's halo shader.
+ * Everything that does not move: the geometry in pixels and the marker's two halo shaders.
  *
- * Rebuilt only when the strip is resized or when the save flare animates, never while the
- * ruler slides. That matters most for the halo: a radial gradient rebuilt per frame is a new
- * shader for the GPU to upload on every one of them.
+ * Rebuilt only when the strip is resized — not while the ruler slides, and not while the save
+ * echo runs. Both halos are built up front and cross-faded by opacity instead of one being
+ * rebuilt at a new radius each frame: a radial gradient rebuilt per frame is a new shader for
+ * the GPU to upload on every one of them.
  */
 private class RulerCanvasCache(
     val centreX: Float,
@@ -230,27 +250,33 @@ private class RulerCanvasCache(
     val glowCentre: Offset,
     val glowRadius: Float,
     val glow: Brush,
+    val flareRadius: Float,
+    val flare: Brush,
+    val wave: Brush,
 )
 
 /**
- * Paints the graduations, their labels and the centre marker.
+ * Paints the graduations, their labels, the centre marker and the save echo.
  *
  * [Modifier.drawWithCache] rather than a `Canvas`: the position is read inside `onDrawBehind`,
- * so a drag invalidates the draw phase and nothing else — no recomposition, no relayout.
+ * so a drag invalidates the draw phase and nothing else — no recomposition, no relayout. The
+ * echo is read there too, and costs a single comparison per graduation while it is not running.
  */
 private fun Modifier.rulerGraduations(
     ruler: RulerState,
-    flare: Animatable<Float, *>,
+    echo: Animatable<Float, *>,
     textMeasurer: TextMeasurer,
     labelStyle: TextStyle,
     palette: RulerPalette,
 ): Modifier = drawWithCache {
-    val cache = buildCanvasCache(palette.accent, flare.value)
+    val cache = buildCanvasCache(palette.accent)
 
     onDrawBehind {
         val position = ruler.positionHundredths
         val centreX = cache.centreX
         val pixelsPerHundredth = cache.pixelsPerHundredth
+        val progress = echo.value
+        val echoing = progress > 0f && progress < EchoSpent
 
         // Indexed by graduation, not by reachable value: the scale settles every 0.05 kg but
         // still draws a line every 0.1 kg (PRD FR-ENTRY-002), so this loop is the length it
@@ -278,7 +304,7 @@ private fun Modifier.rulerGraduations(
             }
 
             drawLine(
-                color = tint,
+                color = if (echoing) tint.lit(x - centreX, centreX, progress, palette.accent) else tint,
                 start = Offset(x, cache.tickCentre - halfHeight),
                 end = Offset(x, cache.tickCentre + halfHeight),
                 strokeWidth = strokeWidth,
@@ -299,16 +325,32 @@ private fun Modifier.rulerGraduations(
             }
         }
 
-        drawMarker(centreX, palette.accent, cache)
+        if (echoing) drawEchoWave(progress, cache)
+        drawMarker(centreX, palette.accent, cache, if (echoing) progress else EchoSpent)
     }
 }
 
 /** Dims a palette colour without discarding the transparency the token already carries. */
 private fun Color.scaleAlpha(factor: Float): Color = copy(alpha = alpha * factor)
 
-private fun CacheDrawScope.buildCanvasCache(accent: Color, flare: Float): RulerCanvasCache {
+/** A graduation caught by the wave, or standing next to the marker, borrows the amber. */
+private fun Color.lit(
+    distanceFromCentre: Float,
+    halfWidth: Float,
+    progress: Float,
+    accent: Color,
+): Color {
+    val boost = (
+        RulerPhysics.echoWave(distanceFromCentre, halfWidth, progress) +
+            RulerPhysics.echoLift(distanceFromCentre, halfWidth, progress)
+        ).coerceIn(0f, 1f)
+    return if (boost <= 0f) this else lerp(this, accent, boost)
+}
+
+private fun CacheDrawScope.buildCanvasCache(accent: Color): RulerCanvasCache {
     val centreX = size.width / 2f
-    val glowRadius = MarkerGlowRadius.toPx() * (1f + 0.6f * flare)
+    val glowRadius = MarkerGlowRadius.toPx()
+    val flareRadius = glowRadius * MarkerFlareGrowth
     val glowCentre = Offset(centreX, (MarkerTop.toPx() + MarkerBottom.toPx()) / 2f)
     return RulerCanvasCache(
         centreX = centreX,
@@ -318,15 +360,64 @@ private fun CacheDrawScope.buildCanvasCache(accent: Color, flare: Float): RulerC
         glowCentre = glowCentre,
         glowRadius = glowRadius,
         glow = Brush.radialGradient(
-            colors = listOf(accent.copy(alpha = 0.30f + 0.45f * flare), Color.Transparent),
+            colors = listOf(accent.copy(alpha = MarkerGlowAlpha), Color.Transparent),
+            center = glowCentre,
+            radius = glowRadius,
+        ),
+        flareRadius = flareRadius,
+        flare = Brush.radialGradient(
+            colors = listOf(accent.copy(alpha = MarkerFlareAlpha), Color.Transparent),
+            center = glowCentre,
+            radius = flareRadius,
+        ),
+        wave = Brush.radialGradient(
+            colors = listOf(accent.copy(alpha = EchoWaveAlpha), Color.Transparent),
             center = glowCentre,
             radius = glowRadius,
         ),
     )
 }
 
-private fun DrawScope.drawMarker(centreX: Float, accent: Color, cache: RulerCanvasCache) {
+/**
+ * The wave itself: one soft disc leaving the marker, clipped to the strip so it reads as
+ * travelling *along* the ruler rather than blooming over the screen.
+ *
+ * The gradient is built once at the marker's own radius and grown by scaling the canvas
+ * around it. Rebuilding a radial gradient at a new radius every frame would mean a new
+ * shader every frame, next to the one gesture in the app that cannot afford one.
+ */
+private fun DrawScope.drawEchoWave(progress: Float, cache: RulerCanvasCache) {
+    val front = RulerPhysics.echoFront(progress, cache.centreX)
+    if (front <= 0f) return
+    val remaining = EchoSpent - progress
+    clipRect {
+        scale(scale = front / cache.glowRadius, pivot = cache.glowCentre) {
+            drawCircle(
+                brush = cache.wave,
+                radius = cache.glowRadius,
+                center = cache.glowCentre,
+                alpha = remaining * remaining,
+            )
+        }
+    }
+}
+
+private fun DrawScope.drawMarker(
+    centreX: Float,
+    accent: Color,
+    cache: RulerCanvasCache,
+    progress: Float,
+) {
     drawCircle(brush = cache.glow, radius = cache.glowRadius, center = cache.glowCentre)
+    val flare = RulerPhysics.echoFlare(progress)
+    if (flare > 0f) {
+        drawCircle(
+            brush = cache.flare,
+            radius = cache.flareRadius,
+            center = cache.glowCentre,
+            alpha = flare,
+        )
+    }
     drawLine(
         color = accent,
         start = Offset(centreX, MarkerTop.toPx()),
