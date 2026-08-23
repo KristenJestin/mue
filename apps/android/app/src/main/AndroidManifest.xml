@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
       Mue runs entirely offline. The absence of android.permission.INTERNET is a
@@ -19,14 +20,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Mue">
 
+        <!--
+          Portrait is a product decision, not an oversight: PRD 20.1 fixes the orientation and
+          PRD 5 puts landscape and tablet outside the V1. The scale is a horizontal gesture
+          sized against the screen width, so a landscape layout is a redesign, not a rotation.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:screenOrientation="portrait"
             android:configChanges="uiMode|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|orientation"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.Mue">
+            android:theme="@style/Theme.Mue"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

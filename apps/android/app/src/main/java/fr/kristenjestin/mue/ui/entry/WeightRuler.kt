@@ -188,18 +188,24 @@ fun WeightRuler(
         Modifier.pointerInput(pixelsPerTenth) {
             coroutineScope {
                 while (isActive) {
-                    val down = awaitPointerEventScope { awaitFirstDown(requireUnconsumed = false) }
-                    // PRD FR-ENTRY-002: a new touch interrupts the inertia immediately.
-                    position.stop()
-                    dragging = true
-
-                    // The target is accumulated here rather than read back from the Animatable
-                    // so a burst of drag events can never apply out of order.
-                    var target = position.value
-                    val tracker = VelocityTracker()
-                    tracker.addPosition(down.uptimeMillis, down.position)
-
+                    // One scope from touch down to lift. Pointer events are only queued
+                    // inside it, so splitting the gesture across two would open a window
+                    // where movement is dropped — on the one control that has to track the
+                    // finger without a perceptible lag (PRD 16.2).
                     awaitPointerEventScope {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // PRD FR-ENTRY-002: a new touch interrupts the inertia immediately.
+                        // Launched rather than awaited because the pointer scope restricts
+                        // suspension to its own members, and nothing here needs the result.
+                        launch { position.stop() }
+                        dragging = true
+
+                        // The target is accumulated here rather than read back from the
+                        // Animatable so a burst of drag events can never apply out of order.
+                        var target = position.value
+                        val tracker = VelocityTracker()
+                        tracker.addPosition(down.uptimeMillis, down.position)
+
                         horizontalDrag(down.id) { change ->
                             tracker.addPosition(change.uptimeMillis, change.position)
                             target = RulerPhysics.clampPosition(
@@ -212,14 +218,14 @@ fun WeightRuler(
                             launch { position.snapTo(frameTarget) }
                             change.consume()
                         }
-                    }
 
-                    val velocity = RulerPhysics.velocityToTenths(
-                        tracker.calculateVelocity().x,
-                        pixelsPerTenth,
-                    )
-                    dragging = false
-                    launch { settleRuler(position, velocity, decay, settleSpec, allowFling) }
+                        val velocity = RulerPhysics.velocityToTenths(
+                            tracker.calculateVelocity().x,
+                            pixelsPerTenth,
+                        )
+                        dragging = false
+                        launch { settleRuler(position, velocity, decay, settleSpec, allowFling) }
+                    }
                 }
             }
         }
@@ -386,14 +392,17 @@ fun RulerStepButton(
                 if (!enabled) return@pointerInput
                 coroutineScope {
                     while (isActive) {
-                        val down = awaitPointerEventScope { awaitFirstDown() }
-                        down.consume()
-                        pressed = true
-                        currentOnStep()
-                        val repeat = launch { repeatStep { currentOnStep() } }
-                        awaitPointerEventScope { waitForUpOrCancellation() }
-                        repeat.cancel()
-                        pressed = false
+                        // Press and release stay in the same scope: between two of them no
+                        // pointer event is queued, and a quick tap could fall in the gap.
+                        awaitPointerEventScope {
+                            awaitFirstDown().consume()
+                            pressed = true
+                            currentOnStep()
+                            val repeat = launch { repeatStep { currentOnStep() } }
+                            waitForUpOrCancellation()
+                            repeat.cancel()
+                            pressed = false
+                        }
                     }
                 }
             }

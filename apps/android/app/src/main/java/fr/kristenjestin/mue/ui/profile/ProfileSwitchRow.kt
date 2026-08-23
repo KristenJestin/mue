@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
@@ -106,7 +107,9 @@ private fun MueSwitchTrack(checked: Boolean) {
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .offset(x = thumbOffset)
+                // Lambda overload: the offset is animated, and reading it here keeps the
+                // travel in the layout phase instead of recomposing the thumb every frame.
+                .offset { IntOffset(thumbOffset.roundToPx(), 0) }
                 .size(ThumbSize)
                 .clip(CircleShape)
                 .background(thumb),
