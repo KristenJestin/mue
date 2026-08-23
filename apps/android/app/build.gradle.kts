@@ -83,10 +83,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // Navigation
-    implementation(libs.androidx.navigation3.ui)
-    implementation(libs.androidx.navigation3.runtime)
-    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+    // No navigation library: the shell is three sibling tabs with no back stack to model,
+    // so `MueNavigationHost` is a saved integer and Compose's own AnimatedContent.
 
     // Storage
     implementation(libs.androidx.room.runtime)
