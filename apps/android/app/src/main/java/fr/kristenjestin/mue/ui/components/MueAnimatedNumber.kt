@@ -35,7 +35,10 @@ private class PreviousText(var value: String)
  * number grows. Separators and the optional [suffix] stay put.
  *
  * When the system animation scale is off the rolling is skipped entirely and the value is
- * swapped instantly, as required by PRD 14.
+ * swapped instantly, as required by PRD 14. [rolling] switches the same plain rendering on
+ * for a value that is *being* dragged: a roll is a transition between two readings, and a
+ * number changing several times a frame has no readings to transition between — only a pile
+ * of overlapping transitions on the very frames the gesture needs (PRD 16.2).
  */
 @Composable
 fun MueAnimatedNumber(
@@ -49,8 +52,9 @@ fun MueAnimatedNumber(
     contentDescription: String? = null,
     durationMillis: Int = MueMotion.NumberRollMillis,
     horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
+    rolling: Boolean = true,
 ) {
-    val reduceMotion = LocalReduceMotion.current
+    val plain = LocalReduceMotion.current || !rolling
     val previous = remember { PreviousText(text) }
     val upwards = remember(text) {
         val growing = text.digitsAsLong() >= previous.value.digitsAsLong()
@@ -70,28 +74,34 @@ fun MueAnimatedNumber(
         horizontalArrangement = horizontalArrangement,
         verticalAlignment = Alignment.Bottom,
     ) {
-        text.forEachIndexed { index, character ->
-            if (reduceMotion || !character.isDigit()) {
-                MueText(character.toString(), style, color = color)
-            } else {
-                key(index) {
-                    AnimatedContent(
-                        targetState = character,
-                        modifier = Modifier.clipToBounds(),
-                        transitionSpec = {
-                            ContentTransform(
-                                targetContentEnter = slideInVertically(offsetSpec) { height ->
-                                    direction * height
-                                } + fadeIn(fadeSpec),
-                                initialContentExit = slideOutVertically(offsetSpec) { height ->
-                                    -direction * height
-                                } + fadeOut(fadeSpec),
-                                sizeTransform = SizeTransform(clip = false),
-                            )
-                        },
-                        label = "digit",
-                    ) { rolled ->
-                        MueText(rolled.toString(), style, color = color)
+        if (plain) {
+            // One text node rather than one per character: nothing needs to move on its own
+            // here, so the whole number lays out once instead of once per glyph.
+            MueText(text, style, color = color)
+        } else {
+            text.forEachIndexed { index, character ->
+                if (!character.isDigit()) {
+                    MueText(character.toString(), style, color = color)
+                } else {
+                    key(index) {
+                        AnimatedContent(
+                            targetState = character,
+                            modifier = Modifier.clipToBounds(),
+                            transitionSpec = {
+                                ContentTransform(
+                                    targetContentEnter = slideInVertically(offsetSpec) { height ->
+                                        direction * height
+                                    } + fadeIn(fadeSpec),
+                                    initialContentExit = slideOutVertically(offsetSpec) { height ->
+                                        -direction * height
+                                    } + fadeOut(fadeSpec),
+                                    sizeTransform = SizeTransform(clip = false),
+                                )
+                            },
+                            label = "digit",
+                        ) { rolled ->
+                            MueText(rolled.toString(), style, color = color)
+                        }
                     }
                 }
             }

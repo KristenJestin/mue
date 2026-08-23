@@ -1,39 +1,31 @@
 package fr.kristenjestin.mue.ui.entry
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationEndReason
-import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.DecayAnimationSpec
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.exponentialDecay
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.CacheDrawScope
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -53,6 +45,8 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
@@ -66,7 +60,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /** Height of the whole scale strip: graduations, labels and the centre marker. */
 val WeightRulerHeight: Dp = 100.dp
@@ -101,17 +94,16 @@ private const val SaveFlareMillis = 700
  * *increases* the weight because values grow left to right along the ruler
  * (PRD FR-ENTRY-002) — that direction is the one thing here which is not tunable.
  *
- * The continuous position lives in an [Animatable] measured in tenths of a kilogram. That
- * buys three PRD requirements at once: [Animatable.updateBounds] turns 30.0 and 250.0 into
- * dead stops with no rebound, the decay is genuinely cancellable by a new touch, and the
- * magnetism is a plain `animateTo` onto the nearest whole tenth.
+ * Nothing about the movement is composed. The gesture writes into [ruler], the graduations
+ * read it back inside the draw scope, and [onWeightChange] is called once, when the scale has
+ * stopped. What recomposes during a drag is therefore nothing at all in this file.
  */
 @Composable
 fun WeightRuler(
+    ruler: RulerState,
     weight: Weight,
     onWeightChange: (Weight) -> Unit,
     modifier: Modifier = Modifier,
-    weightRevision: Int = 0,
     enabled: Boolean = true,
     onHapticTick: () -> Unit = {},
     saveFlareCount: Int = 0,
@@ -121,56 +113,25 @@ fun WeightRuler(
     val reduceMotion = LocalReduceMotion.current
     val pixelsPerTenth = with(density) { RulerPhysics.DP_PER_TENTH.dp.toPx() }
 
-    val position = remember {
-        Animatable(weight.tenthsKg.toFloat()).apply {
-            updateBounds(RulerPhysics.LOWER_STOP, RulerPhysics.UPPER_STOP)
-        }
-    }
-    var dragging by remember { mutableStateOf(false) }
-    val settling = position.isRunning
-    val displayedTenths by remember { derivedStateOf { RulerPhysics.snapToTenth(position.value) } }
-
     val currentOnWeightChange by rememberUpdatedState(onWeightChange)
     val currentOnHapticTick by rememberUpdatedState(onHapticTick)
     val allowFling by rememberUpdatedState(!reduceMotion)
 
-    val lastTicked = remember { mutableIntStateOf(weight.tenthsKg) }
-    LaunchedEffect(displayedTenths) {
-        val previous = lastTicked.intValue
-        lastTicked.intValue = displayedTenths
-        // Only movement of the ruler ticks; a value arriving from the keyboard stays silent.
-        if ((dragging || settling) && RulerPhysics.crossesHapticStep(previous, displayedTenths)) {
-            currentOnHapticTick()
-        }
-        currentOnWeightChange(Weight.ofTenthsClamped(displayedTenths))
-    }
-
     /*
-     * The history seed, the `−` / `+` controls and the keyboard move the ruler from outside.
+     * The half-kilogram ticks of PRD FR-ENTRY-002.
      *
-     * The trigger is [weightRevision] and never [weight] itself: the screen's value trails the
-     * ruler's position by a frame, so a ruler watching that value would keep mistaking a stale
-     * echo of its own movement for an order to jump, and would fight its own inertia.
+     * Observed through a snapshot flow rather than through a `LaunchedEffect` key: a key is a
+     * composition read, and reading the live value here would undo the whole point of keeping
+     * it out of composition. Only movement of the ruler ticks — a value arriving from the
+     * keyboard or from `−` / `+` leaves [RulerState.interacting] false and stays silent.
      */
-    LaunchedEffect(weightRevision) {
-        if (RulerPhysics.snapToTenth(position.value) != weight.tenthsKg) {
-            lastTicked.intValue = weight.tenthsKg
-            // Also cancels a running fling, which is what an incoming order should do.
-            position.snapTo(weight.tenthsKg.toFloat())
+    LaunchedEffect(ruler) {
+        var previous = ruler.displayedTenths
+        snapshotFlow { ruler.displayedTenths }.collect { tenths ->
+            val crossed = RulerPhysics.crossesHapticStep(previous, tenths)
+            previous = tenths
+            if (crossed && ruler.interacting) currentOnHapticTick()
         }
-    }
-
-    val decay = remember {
-        exponentialDecay<Float>(
-            frictionMultiplier = RulerPhysics.FLING_FRICTION_MULTIPLIER,
-            absVelocityThreshold = RulerPhysics.FLING_VELOCITY_THRESHOLD,
-        )
-    }
-    val settleSpec = remember {
-        spring<Float>(
-            dampingRatio = RulerPhysics.SETTLE_DAMPING_RATIO,
-            stiffness = RulerPhysics.SETTLE_STIFFNESS,
-        )
     }
 
     val flare = remember { Animatable(0f) }
@@ -183,50 +144,35 @@ fun WeightRuler(
 
     val textMeasurer = rememberTextMeasurer(cacheSize = 24)
     val labelStyle = MueTheme.typography.micro.copy(color = colors.textQuiet)
+    val tickPalette = remember(colors) {
+        RulerPalette(quiet = colors.textQuiet, major = colors.textSecondary, accent = colors.accent)
+    }
 
     val gestureModifier = if (enabled) {
         Modifier.pointerInput(pixelsPerTenth) {
-            coroutineScope {
-                while (isActive) {
-                    // One scope from touch down to lift. Pointer events are only queued
-                    // inside it, so splitting the gesture across two would open a window
-                    // where movement is dropped — on the one control that has to track the
-                    // finger without a perceptible lag (PRD 16.2).
-                    awaitPointerEventScope {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        // PRD FR-ENTRY-002: a new touch interrupts the inertia immediately.
-                        // Launched rather than awaited because the pointer scope restricts
-                        // suspension to its own members, and nothing here needs the result.
-                        launch { position.stop() }
-                        dragging = true
+            awaitEachGesture {
+                // One scope from touch down to lift, so no pointer event can fall between two
+                // of them — on the one control that has to track the finger without a
+                // perceptible lag (PRD 16.2).
+                val down = awaitFirstDown(requireUnconsumed = false)
+                ruler.onDragStart()
 
-                        // The target is accumulated here rather than read back from the
-                        // Animatable so a burst of drag events can never apply out of order.
-                        var target = position.value
-                        val tracker = VelocityTracker()
-                        tracker.addPosition(down.uptimeMillis, down.position)
+                val tracker = VelocityTracker()
+                tracker.addPosition(down.uptimeMillis, down.position)
 
-                        horizontalDrag(down.id) { change ->
-                            tracker.addPosition(change.uptimeMillis, change.position)
-                            target = RulerPhysics.clampPosition(
-                                target + RulerPhysics.dragToTenths(
-                                    change.positionChange().x,
-                                    pixelsPerTenth,
-                                ),
-                            )
-                            val frameTarget = target
-                            launch { position.snapTo(frameTarget) }
-                            change.consume()
-                        }
-
-                        val velocity = RulerPhysics.velocityToTenths(
-                            tracker.calculateVelocity().x,
-                            pixelsPerTenth,
-                        )
-                        dragging = false
-                        launch { settleRuler(position, velocity, decay, settleSpec, allowFling) }
-                    }
+                horizontalDrag(down.id) { change ->
+                    tracker.addPosition(change.uptimeMillis, change.position)
+                    ruler.onDrag(change.positionChange().x, pixelsPerTenth)
+                    change.consume()
                 }
+
+                ruler.onDragEnd(
+                    velocityTenthsPerSecond = RulerPhysics.velocityToTenths(
+                        tracker.calculateVelocity().x,
+                        pixelsPerTenth,
+                    ),
+                    allowFling = allowFling,
+                ) { tenths -> currentOnWeightChange(Weight.ofTenthsClamped(tenths)) }
             }
         }
     } else {
@@ -247,88 +193,135 @@ fun WeightRuler(
                     steps = Weight.MAX_TENTHS - Weight.MIN_TENTHS - 1,
                 )
                 setProgress { value ->
-                    currentOnWeightChange(Weight.ofTenthsClamped(value.roundToInt()))
+                    val tenths = RulerPhysics.snapToTenth(value)
+                    // The ruler is moved here rather than through the screen's state: an
+                    // accessibility action is an order, and orders move the scale directly.
+                    ruler.jumpTo(tenths)
+                    currentOnWeightChange(Weight.ofTenthsClamped(tenths))
                     true
                 }
                 if (!enabled) disabled()
-            },
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val centreX = size.width / 2f
-            val tickCentre = TickCentreY.toPx()
-            val currentPosition = position.value
+            }
+            .rulerGraduations(ruler, flare, textMeasurer, labelStyle, tickPalette),
+    )
+}
 
-            for (tenth in RulerPhysics.visibleTenths(currentPosition, centreX, pixelsPerTenth)) {
-                val x = RulerPhysics.tickX(tenth, currentPosition, pixelsPerTenth, centreX)
-                val alpha = RulerPhysics.edgeAlpha(x - centreX, centreX)
-                if (alpha <= 0.01f) continue
+/** The three greys of a graduation and the amber of the marker, resolved once. */
+private class RulerPalette(val quiet: Color, val major: Color, val accent: Color)
 
-                val tick = RulerPhysics.tickOf(tenth)
-                val halfHeight = when (tick) {
-                    RulerTick.Minor -> MinorTickHalfHeight
-                    RulerTick.Medium -> MediumTickHalfHeight
-                    RulerTick.Major -> MajorTickHalfHeight
-                }.toPx()
-                val strokeWidth = when (tick) {
-                    RulerTick.Minor -> MinorTickWidth
-                    RulerTick.Medium -> MediumTickWidth
-                    RulerTick.Major -> MajorTickWidth
-                }.toPx()
-                val tint = when (tick) {
-                    RulerTick.Minor -> colors.textQuiet.scaleAlpha(MinorTickAlpha * alpha)
-                    RulerTick.Medium -> colors.textQuiet.scaleAlpha(MediumTickAlpha * alpha)
-                    RulerTick.Major -> colors.textSecondary.scaleAlpha(alpha)
-                }
+/**
+ * Everything that does not move: the geometry in pixels and the marker's halo shader.
+ *
+ * Rebuilt only when the strip is resized or when the save flare animates, never while the
+ * ruler slides. That matters most for the halo: a radial gradient rebuilt per frame is a new
+ * shader for the GPU to upload on every one of them.
+ */
+private class RulerCanvasCache(
+    val centreX: Float,
+    val pixelsPerTenth: Float,
+    val tickCentre: Float,
+    val labelTop: Float,
+    val glowCentre: Offset,
+    val glowRadius: Float,
+    val glow: Brush,
+)
 
-                drawLine(
-                    color = tint,
-                    start = Offset(x, tickCentre - halfHeight),
-                    end = Offset(x, tickCentre + halfHeight),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round,
-                )
+/**
+ * Paints the graduations, their labels and the centre marker.
+ *
+ * [Modifier.drawWithCache] rather than a `Canvas`: the position is read inside `onDrawBehind`,
+ * so a drag invalidates the draw phase and nothing else — no recomposition, no relayout.
+ */
+private fun Modifier.rulerGraduations(
+    ruler: RulerState,
+    flare: Animatable<Float, *>,
+    textMeasurer: TextMeasurer,
+    labelStyle: TextStyle,
+    palette: RulerPalette,
+): Modifier = drawWithCache {
+    val cache = buildCanvasCache(palette.accent, flare.value)
 
-                if (tick == RulerTick.Major) {
-                    val label = textMeasurer.measure(
-                        (tenth / RulerPhysics.TENTHS_PER_KILOGRAM).toString(),
-                        labelStyle,
-                    )
-                    drawText(
-                        textLayoutResult = label,
-                        color = colors.textQuiet,
-                        topLeft = Offset(x - label.size.width / 2f, LabelTop.toPx()),
-                        alpha = alpha,
-                    )
-                }
+    onDrawBehind {
+        val position = ruler.positionTenths
+        val centreX = cache.centreX
+        val pixelsPerTenth = cache.pixelsPerTenth
+
+        for (tenth in RulerPhysics.visibleTenths(position, centreX, pixelsPerTenth)) {
+            val x = RulerPhysics.tickX(tenth, position, pixelsPerTenth, centreX)
+            val alpha = RulerPhysics.edgeAlpha(x - centreX, centreX)
+            if (alpha <= 0.01f) continue
+
+            val tick = RulerPhysics.tickOf(tenth)
+            val halfHeight = when (tick) {
+                RulerTick.Minor -> MinorTickHalfHeight
+                RulerTick.Medium -> MediumTickHalfHeight
+                RulerTick.Major -> MajorTickHalfHeight
+            }.toPx()
+            val strokeWidth = when (tick) {
+                RulerTick.Minor -> MinorTickWidth
+                RulerTick.Medium -> MediumTickWidth
+                RulerTick.Major -> MajorTickWidth
+            }.toPx()
+            val tint = when (tick) {
+                RulerTick.Minor -> palette.quiet.scaleAlpha(MinorTickAlpha * alpha)
+                RulerTick.Medium -> palette.quiet.scaleAlpha(MediumTickAlpha * alpha)
+                RulerTick.Major -> palette.major.scaleAlpha(alpha)
             }
 
-            drawMarker(centreX = centreX, accent = colors.accent, flare = flare.value)
+            drawLine(
+                color = tint,
+                start = Offset(x, cache.tickCentre - halfHeight),
+                end = Offset(x, cache.tickCentre + halfHeight),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+
+            if (tick == RulerTick.Major) {
+                val label = textMeasurer.measure(
+                    (tenth / RulerPhysics.TENTHS_PER_KILOGRAM).toString(),
+                    labelStyle,
+                )
+                drawText(
+                    textLayoutResult = label,
+                    color = palette.quiet,
+                    topLeft = Offset(x - label.size.width / 2f, cache.labelTop),
+                    alpha = alpha,
+                )
+            }
         }
+
+        drawMarker(centreX, palette.accent, cache)
     }
 }
 
 /** Dims a palette colour without discarding the transparency the token already carries. */
 private fun Color.scaleAlpha(factor: Float): Color = copy(alpha = alpha * factor)
 
-private fun DrawScope.drawMarker(centreX: Float, accent: Color, flare: Float) {
-    val markerTop = MarkerTop.toPx()
-    val markerBottom = MarkerBottom.toPx()
+private fun CacheDrawScope.buildCanvasCache(accent: Color, flare: Float): RulerCanvasCache {
+    val centreX = size.width / 2f
     val glowRadius = MarkerGlowRadius.toPx() * (1f + 0.6f * flare)
-    val glowCentre = Offset(centreX, (markerTop + markerBottom) / 2f)
-
-    drawCircle(
-        brush = Brush.radialGradient(
+    val glowCentre = Offset(centreX, (MarkerTop.toPx() + MarkerBottom.toPx()) / 2f)
+    return RulerCanvasCache(
+        centreX = centreX,
+        pixelsPerTenth = RulerPhysics.DP_PER_TENTH.dp.toPx(),
+        tickCentre = TickCentreY.toPx(),
+        labelTop = LabelTop.toPx(),
+        glowCentre = glowCentre,
+        glowRadius = glowRadius,
+        glow = Brush.radialGradient(
             colors = listOf(accent.copy(alpha = 0.30f + 0.45f * flare), Color.Transparent),
             center = glowCentre,
             radius = glowRadius,
         ),
-        radius = glowRadius,
-        center = glowCentre,
     )
+}
+
+private fun DrawScope.drawMarker(centreX: Float, accent: Color, cache: RulerCanvasCache) {
+    drawCircle(brush = cache.glow, radius = cache.glowRadius, center = cache.glowCentre)
     drawLine(
         color = accent,
-        start = Offset(centreX, markerTop),
-        end = Offset(centreX, markerBottom),
+        start = Offset(centreX, MarkerTop.toPx()),
+        end = Offset(centreX, MarkerBottom.toPx()),
         strokeWidth = MarkerWidth.toPx(),
         cap = StrokeCap.Round,
     )
@@ -337,28 +330,6 @@ private fun DrawScope.drawMarker(centreX: Float, accent: Color, flare: Float) {
         radius = MarkerDotRadius.toPx(),
         center = Offset(centreX, MarkerDotY.toPx()),
     )
-}
-
-/**
- * The fling of PRD FR-ENTRY-002 followed by the magnetic settle.
- *
- * Reaching an end stop returns early: the bound is already an exact tenth and the ruler must
- * stay dead still there. When animations are reduced the inertia is dropped but the settle is
- * kept — landing on a valid tenth is an input aid, not decoration (PRD 14).
- */
-private suspend fun settleRuler(
-    position: Animatable<Float, AnimationVector1D>,
-    velocityTenthsPerSecond: Float,
-    decay: DecayAnimationSpec<Float>,
-    settleSpec: AnimationSpec<Float>,
-    allowFling: Boolean,
-) {
-    if (allowFling && RulerPhysics.isFlingWorthwhile(velocityTenthsPerSecond)) {
-        val result = position.animateDecay(velocityTenthsPerSecond, decay)
-        if (result.endReason == AnimationEndReason.BoundReached) return
-    }
-    val target = RulerPhysics.snapToTenth(position.value).toFloat()
-    if (position.value != target) position.animateTo(target, settleSpec)
 }
 
 /**
@@ -433,55 +404,5 @@ private suspend fun repeatStep(onStep: () -> Unit) {
         onStep()
         delay(RulerPhysics.repeatIntervalMillis(iteration))
         iteration++
-    }
-}
-
-/**
- * The scale as the screen uses it: the two accessible controls flanking the ruler, which
- * takes every pixel left between them.
- *
- * PRD FR-ENTRY-003 asks for the controls to be permanently visible *on either side of* the
- * scale. They therefore claim their width from the row rather than floating over the ruler:
- * an overlay would cover the outermost kilogram labels, which are exactly the ones a user
- * looks at to judge how far a drag has to go.
- */
-@Composable
-fun WeightScale(
-    weight: Weight,
-    onWeightChange: (Weight) -> Unit,
-    onStep: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    weightRevision: Int = 0,
-    enabled: Boolean = true,
-    onHapticTick: () -> Unit = {},
-    saveFlareCount: Int = 0,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth().height(WeightRulerHeight),
-        // Clearance between a control and the first graduation it must not hide.
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RulerStepButton(
-            glyph = "−",
-            stepDescription = "Decrease weight by 0.1 kilograms",
-            onStep = { onStep(-RulerPhysics.STEP_TENTHS) },
-            enabled = enabled && weight.tenthsKg > Weight.MIN_TENTHS,
-        )
-        WeightRuler(
-            weight = weight,
-            onWeightChange = onWeightChange,
-            weightRevision = weightRevision,
-            enabled = enabled,
-            onHapticTick = onHapticTick,
-            saveFlareCount = saveFlareCount,
-            modifier = Modifier.weight(1f),
-        )
-        RulerStepButton(
-            glyph = "+",
-            stepDescription = "Increase weight by 0.1 kilograms",
-            onStep = { onStep(RulerPhysics.STEP_TENTHS) },
-            enabled = enabled && weight.tenthsKg < Weight.MAX_TENTHS,
-        )
     }
 }

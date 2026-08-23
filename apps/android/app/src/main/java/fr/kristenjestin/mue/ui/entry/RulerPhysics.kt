@@ -47,11 +47,11 @@ object RulerPhysics {
     /**
      * Fraction of the half-width that stays fully opaque before the ruler fades to nothing.
      *
-     * The `−` and `+` controls flank the ruler rather than covering it, so the strip is
-     * narrower than the screen and the fade has to start late: a short ramp keeps the
-     * kilogram either side of the marker crisp and still suggests that the scale runs on.
+     * The strip now runs the full width of the screen, so the ramp can be long: it starts
+     * around a kilogram and a half either side of the marker, which keeps the graduations the
+     * eye aims at crisp while the ends dissolve rather than being cut off.
      */
-    const val EDGE_FADE_START: Float = 0.72f
+    const val EDGE_FADE_START: Float = 0.55f
 
     // --- Fling ----------------------------------------------------------------------
 
@@ -187,12 +187,17 @@ object RulerPhysics {
     // --- Feedback -------------------------------------------------------------------
 
     /**
+     * Which half-kilogram bucket a value falls in. The tick fires when this number changes,
+     * whatever distance the ruler covered in between.
+     */
+    fun hapticStepOf(tenths: Int): Int = Math.floorDiv(tenths, TENTHS_PER_HAPTIC_STEP)
+
+    /**
      * True when moving from [fromTenths] to [toTenths] crosses a half-kilogram graduation.
      * Reaching an end stop cannot cross one, so no end-stop tick is ever produced.
      */
     fun crossesHapticStep(fromTenths: Int, toTenths: Int): Boolean =
-        Math.floorDiv(fromTenths, TENTHS_PER_HAPTIC_STEP) !=
-            Math.floorDiv(toTenths, TENTHS_PER_HAPTIC_STEP)
+        hapticStepOf(fromTenths) != hapticStepOf(toTenths)
 
     /** Interval before the [iteration]-th auto-repeat of a held `−` / `+` press. */
     fun repeatIntervalMillis(iteration: Int): Long {

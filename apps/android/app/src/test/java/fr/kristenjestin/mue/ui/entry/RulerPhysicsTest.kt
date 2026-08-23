@@ -192,15 +192,26 @@ class RulerPhysicsTest {
     }
 
     /**
-     * The `−` and `+` controls take their width from the row, so the strip is roughly this
-     * narrow on a 411 dp phone. The kilogram either side of the marker is what the eye aims
-     * at, and it has to survive the fade at that width.
+     * The strip runs the full width of the screen, so the half-width is roughly this on a
+     * 411 dp phone. The kilogram either side of the marker is what the eye aims at, and it
+     * has to survive the fade at that width — as does the one beyond it, in part.
      */
     @Test
     fun `the kilogram either side of the marker survives the edge fade`() {
-        val halfWidthDp = 130f
+        val halfWidthDp = 206f
         assertEquals(1f, RulerPhysics.edgeAlpha(RulerPhysics.DP_PER_KILOGRAM, halfWidthDp))
         assertEquals(1f, RulerPhysics.edgeAlpha(-RulerPhysics.DP_PER_KILOGRAM, halfWidthDp))
+        val second = RulerPhysics.edgeAlpha(2 * RulerPhysics.DP_PER_KILOGRAM, halfWidthDp)
+        assertTrue(second > 0f, "the second kilogram must still be readable, got $second")
+    }
+
+    /** The fade must dissolve the ends rather than cut them: no visible step at the edge. */
+    @Test
+    fun `the fade reaches nothing exactly at the edge`() {
+        val halfWidth = 200f
+        val nearEdge = RulerPhysics.edgeAlpha(halfWidth * 0.99f, halfWidth)
+        assertTrue(nearEdge < 0.02f, "expected the ramp to be spent at the edge, got $nearEdge")
+        assertEquals(0f, RulerPhysics.edgeAlpha(halfWidth, halfWidth))
     }
 
     // --- Feedback --------------------------------------------------------------------
@@ -212,6 +223,36 @@ class RulerPhysicsTest {
         assertFalse(RulerPhysics.crossesHapticStep(745, 746))
         assertFalse(RulerPhysics.crossesHapticStep(746, 747))
         assertFalse(RulerPhysics.crossesHapticStep(745, 745))
+    }
+
+    @Test
+    fun `the bucket changes exactly on the half kilograms`() {
+        assertEquals(RulerPhysics.hapticStepOf(745), RulerPhysics.hapticStepOf(749))
+        assertEquals(RulerPhysics.hapticStepOf(740), RulerPhysics.hapticStepOf(744))
+        assertTrue(RulerPhysics.hapticStepOf(744) < RulerPhysics.hapticStepOf(745))
+    }
+
+    /**
+     * A drag delivers a burst of tenths, not one at a time. What matters is that the ruler
+     * ticks once per half kilogram of *travel*, whatever size the steps between two frames
+     * happen to be — the scale must feel the same slow and fast.
+     */
+    @Test
+    fun `a drag ticks once per half kilogram whatever the frame rate`() {
+        fun ticksAlong(path: List<Int>): Int =
+            path.zipWithNext().count { (from, to) -> RulerPhysics.crossesHapticStep(from, to) }
+
+        val slow = (740..760).toList()
+        val fast = listOf(740, 747, 752, 758, 760)
+        assertEquals(4, ticksAlong(slow), "expected 74.5, 75.0, 75.5 and 76.0")
+        assertEquals(4, ticksAlong(fast))
+    }
+
+    @Test
+    fun `a drag that turns back ticks on the way back too`() {
+        val path = listOf(745, 750, 755, 750, 745)
+        val ticks = path.zipWithNext().count { (from, to) -> RulerPhysics.crossesHapticStep(from, to) }
+        assertEquals(4, ticks)
     }
 
     @Test
