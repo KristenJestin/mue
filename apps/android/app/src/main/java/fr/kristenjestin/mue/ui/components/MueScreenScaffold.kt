@@ -14,6 +14,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -22,10 +28,18 @@ import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.theme.mueAmberGlow
 
+/** Length of the ramp a scrolling screen dissolves into under the header. */
+val MueContentTopFade: Dp = 24.dp
+
 /**
  * Shared shell of the three screens: canvas, amber glow bleeding from the top edge, the
  * `MUE` wordmark with a contextual [trailing] slot, then the content column already gutted
  * to the screen padding.
+ *
+ * A screen whose content scrolls passes [topFade] so that content leaves under the header
+ * through a short ramp; without it the first pixels below the wordmark are cut straight
+ * across and the screen reads as truncated rather than scrolled. Entry does not scroll and
+ * leaves it at zero.
  *
  * The bottom tab bar is intentionally *not* part of this scaffold: it lives above the
  * navigation host so it never moves during a tab transition (PRD 8).
@@ -36,6 +50,7 @@ fun MueScreenScaffold(
     horizontalPadding: Dp = MueTheme.spacing.screenHorizontal,
     trailing: @Composable (() -> Unit)? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    topFade: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val spacing = MueTheme.spacing
@@ -73,12 +88,35 @@ fun MueScreenScaffold(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    .topFade(topFade)
                     .padding(horizontal = horizontalPadding),
                 verticalArrangement = verticalArrangement,
                 content = content,
             )
         }
     }
+}
+
+/**
+ * Dissolves the top [height] of the content instead of cutting it.
+ *
+ * The alpha of the content itself is masked rather than a scrim being painted over it, so
+ * the amber glow behind the screen keeps showing through the ramp at full strength.
+ */
+private fun Modifier.topFade(height: Dp): Modifier {
+    if (height <= 0.dp) return this
+    return graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+        .drawWithContent {
+            drawContent()
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black),
+                    startY = 0f,
+                    endY = height.toPx(),
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
 }
 
 /** Eyebrow plus title block that opens each screen. [eyebrow] is hidden when null. */

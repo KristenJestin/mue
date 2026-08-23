@@ -42,6 +42,7 @@ import fr.kristenjestin.mue.domain.model.Period
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.components.MueAccentCard
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
@@ -137,12 +138,13 @@ internal fun ProgressContent(
                 color = MueTheme.colors.textTertiary,
             )
         },
+        topFade = MueContentTopFade,
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag(ProgressTestTags.LIST),
-            // The bottom padding is what leaves the last history row breathing room above
-            // the tab bar; the screen gutter alone brought it right up against the hairline.
-            contentPadding = PaddingValues(top = spacing.xl, bottom = spacing.xxxl),
+            // The top padding keeps the title clear of the header fade at rest; the bottom
+            // one leaves the last history row breathing room above the tab bar.
+            contentPadding = PaddingValues(top = MueContentTopFade, bottom = spacing.xxxl),
         ) {
             item(key = "title") {
                 MueScreenTitle(title = SCREEN_TITLE, eyebrow = SCREEN_EYEBROW)

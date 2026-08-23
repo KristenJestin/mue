@@ -37,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
@@ -123,6 +124,7 @@ internal fun ProfileScreen(
     MueScreenScaffold(
         modifier = modifier,
         trailing = { MueHeaderChip("Health profile") },
+        topFade = MueContentTopFade,
     ) {
         Column(
             modifier = Modifier
@@ -134,7 +136,8 @@ internal fun ProfileScreen(
             MueScreenTitle(
                 title = SCREEN_TITLE,
                 eyebrow = SCREEN_EYEBROW,
-                modifier = Modifier.padding(top = spacing.lg),
+                // Clears the header fade, so nothing looks dimmed before the user scrolls.
+                modifier = Modifier.padding(top = MueContentTopFade),
             )
 
             // No height or no measurement means no BMI at all (PRD 15.1, 15.2).
