@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.Weight
+import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -471,7 +473,9 @@ class EntryScreenTest {
         composeRule.onNodeWithText("Save measurement").performClick()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Saved ✓").assertIsDisplayed()
+        // The button lets `Save measurement` go before `Saved` arrives, so the confirmation
+        // is a sequence rather than the state of the frame the tap landed on.
+        composeRule.awaitText(MueSaveConfirmationLabel)
         composeRule.onNodeWithText("Where are you today?").assertIsDisplayed()
     }
 

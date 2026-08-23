@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.ui.profile
 
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
@@ -19,6 +20,11 @@ import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.components.BmiReferenceScale
+import fr.kristenjestin.mue.ui.components.MueBmiCardTags
+import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.components.formatBmiValue
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Rule
 import org.junit.Test
@@ -30,6 +36,9 @@ import org.junit.Assert.assertEquals
 /**
  * The screen rendered from a fixed state, so every case PRD 15.2 distinguishes can be shown
  * on demand: a classified BMI, a value with no category, and no BMI at all.
+ *
+ * The full amber card lives on Progress now; what Profile keeps is the compact readout under
+ * the Height field, whose job is to confirm that what is being typed took effect.
  */
 @RunWith(AndroidJUnit4::class)
 class ProfileScreenTest {
@@ -40,7 +49,7 @@ class ProfileScreenTest {
     private val today = LocalDate.of(2026, 8, 23)
 
     @Test
-    fun classifiedBmiShowsTheValueTheCategoryTheBarAndTheDisclaimer() {
+    fun classifiedBmiShowsTheValueTheBandAndTheDisclaimer() {
         setContent(
             ProfileUiState(
                 heightInput = "180",
@@ -50,30 +59,45 @@ class ProfileScreenTest {
             ),
         )
 
-        composeRule.onNodeWithContentDescription(bmiDescription(23.0)).assertExists()
-        composeRule.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertExists()
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_REFERENCE_BAR).assertExists()
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT)
+            .assertContentDescriptionEquals(bmiDescription(23.0, BmiCategory.HEALTHY_WEIGHT))
+        composeRule.onNodeWithText("BMI 23.0 · Healthy weight").assertExists()
         composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
     }
 
+    /** The full card and its reference bar belong to Progress; Profile never draws them. */
     @Test
-    fun aValueOnlyBmiHidesTheBarAndEveryBandLabel() {
-        setContent(ProfileUiState(heightInput = "180", bmi = Bmi.ValueOnly(23.0)))
+    fun theFullCardStaysOnProgress() {
+        setContent(
+            ProfileUiState(
+                heightInput = "180",
+                bmi = Bmi.Classified(23.0, BmiCategory.HEALTHY_WEIGHT),
+            ),
+        )
 
-        composeRule.onNodeWithContentDescription(bmiDescription(23.0)).assertExists()
-        composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_REFERENCE_BAR).assertDoesNotExist()
-        composeRule.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertDoesNotExist()
+        composeRule.onNodeWithTag(MueBmiCardTags.CARD).assertDoesNotExist()
+        composeRule.onNodeWithTag(MueBmiCardTags.REFERENCE_BAR).assertDoesNotExist()
         BmiReferenceScale.SHORT_LABELS.forEach { label ->
             composeRule.onNodeWithText(label).assertDoesNotExist()
         }
     }
 
     @Test
-    fun noBmiMeansNoCardAtAll() {
+    fun aValueOnlyBmiIsNeverNamed() {
+        setContent(ProfileUiState(heightInput = "180", bmi = Bmi.ValueOnly(23.0)))
+
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT)
+            .assertContentDescriptionEquals(bmiDescription(23.0, category = null))
+        composeRule.onNodeWithText("BMI 23.0").assertExists()
+        composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
+        composeRule.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertDoesNotExist()
+    }
+
+    @Test
+    fun noBmiMeansNoReadoutAtAll() {
         setContent(ProfileUiState())
 
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_CARD).assertDoesNotExist()
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT).assertDoesNotExist()
         composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertDoesNotExist()
     }
 
@@ -138,7 +162,9 @@ class ProfileScreenTest {
     fun aSuccessfulSaveShowsItsConfirmation() {
         setContent(ProfileUiState(profileSaved = true))
 
-        composeRule.onNodeWithText("Profile saved ✓").assertExists()
+        // The word arrives once the label has let go of `Save profile`, not on the frame of
+        // the tap: the button fades one out before the other comes in.
+        composeRule.awaitText(MueSaveConfirmationLabel)
     }
 
     @Test
@@ -146,7 +172,7 @@ class ProfileScreenTest {
         setContent(ProfileUiState(saveError = ProfileViewModel.SAVE_ERROR))
 
         composeRule.onNodeWithText(ProfileViewModel.SAVE_ERROR).assertExists()
-        composeRule.onNodeWithText("Profile saved ✓").assertDoesNotExist()
+        composeRule.onNodeWithText(MueSaveConfirmationLabel).assertDoesNotExist()
     }
 
     @Test
@@ -233,8 +259,11 @@ class ProfileScreenTest {
         }
     }
 
-    /** The rolling readout exposes its value as a description, not as text per digit. */
-    private fun bmiDescription(value: Double): String = formatBmiValue(value, Locale.getDefault())
+    /** What TalkBack reads, which is the full name rather than the compact `BMI 23.0`. */
+    private fun bmiDescription(value: Double, category: BmiCategory?): String {
+        val formatted = formatBmiValue(value, Locale.getDefault())
+        return "Body mass index $formatted" + (category?.let { ", ${it.label}" } ?: "")
+    }
 
     private fun setContent(
         state: ProfileUiState,

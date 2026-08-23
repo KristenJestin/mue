@@ -252,6 +252,35 @@ class ProfileViewModelTest {
         assertFalse(harness.state().profileSaved)
     }
 
+    /**
+     * The BMI readout hops on the echo counter rather than on [ProfileUiState.profileSaved]:
+     * the flag is a state the screen leaves and re-enters, which cannot tell a second save
+     * from the first.
+     */
+    @Test
+    fun `every successful save gives the readout something to answer`() = runTest {
+        val harness = harness()
+
+        assertEquals(0, harness.state().saveEchoCount)
+
+        harness.viewModel.saveProfile()
+        assertEquals(1, harness.state().saveEchoCount)
+
+        harness.viewModel.onSaveConfirmationFinished()
+        harness.viewModel.saveProfile()
+        assertEquals(2, harness.state().saveEchoCount)
+    }
+
+    @Test
+    fun `a refused form leaves the readout still`() = runTest {
+        val harness = harness()
+
+        harness.viewModel.onHeightChange("300")
+        harness.viewModel.saveProfile()
+
+        assertEquals(0, harness.state().saveEchoCount)
+    }
+
     @Test
     fun `the height field keeps digits only and at most three of them`() = runTest {
         val harness = harness()

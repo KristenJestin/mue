@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import fr.kristenjestin.mue.domain.logic.Bmi
+import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.logic.ProgressStatistics
@@ -22,6 +24,8 @@ import fr.kristenjestin.mue.domain.logic.StatisticsCalculator
 import fr.kristenjestin.mue.domain.model.Measurement
 import fr.kristenjestin.mue.domain.model.Period
 import fr.kristenjestin.mue.domain.model.Weight
+import fr.kristenjestin.mue.ui.components.BMI_LABEL
+import fr.kristenjestin.mue.ui.components.MueBmiCardTags
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -69,18 +73,39 @@ class ProgressScreenTest {
 
         compose.onNodeWithText(EMPTY_STATE_TITLE).assertIsDisplayed()
         compose.onNodeWithText(HISTORY_TITLE).assertDoesNotExist()
-        compose.onNodeWithText(CURRENT_BMI_LABEL).assertDoesNotExist()
+        compose.onNodeWithTag(MueBmiCardTags.CARD).assertDoesNotExist()
     }
 
+    /**
+     * PRD FR-PROGRESS-003: the BMI follows the period like every other indicator, and an
+     * empty one never falls back on a value recorded outside it.
+     */
     @Test
     fun anEmptyPeriodShowsDashesEverywhereAndKeepsTheChart() {
         setContent(state(emptyList(), hasAnyMeasurement = true))
 
         compose.onNodeWithContentDescription("$CURRENT_WEIGHT_LABEL unavailable").assertExists()
         compose.onNodeWithContentDescription("$AVERAGE_PACE_LABEL unavailable").assertExists()
-        compose.onNodeWithContentDescription("$CURRENT_BMI_LABEL unavailable").assertExists()
+        compose.onNodeWithTag(ProgressTestTags.LIST)
+            .performScrollToNode(hasTestTag(MueBmiCardTags.CARD))
+        compose.onNodeWithContentDescription("$BMI_LABEL unavailable").assertExists()
+        compose.onNodeWithText(BmiCalculator.DISCLAIMER).assertDoesNotExist()
         compose.onNodeWithTag(ProgressTestTags.CHART).assertExists()
         compose.onNodeWithText(EMPTY_STATE_TITLE).assertDoesNotExist()
+    }
+
+    /** PRD 9.4 in its new home: the amber card, its scale and its caution now live here. */
+    @Test
+    fun theFullBmiCardIsOnThisScreen() {
+        setContent(state(populated(), bmi = Bmi.Classified(23.0, BmiCategory.HEALTHY_WEIGHT)))
+
+        compose.onNodeWithTag(ProgressTestTags.LIST)
+            .performScrollToNode(hasTestTag(MueBmiCardTags.CARD))
+        compose.onNodeWithContentDescription(
+            "$BMI_LABEL ${ProgressFormat.bmi(23.0)}, ${BmiCategory.HEALTHY_WEIGHT.label}",
+        ).assertExists()
+        compose.onNodeWithTag(MueBmiCardTags.REFERENCE_BAR).assertExists()
+        compose.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
     }
 
     @Test
@@ -122,14 +147,17 @@ class ProgressScreenTest {
         )
         setContent(current)
 
+        compose.onNodeWithTag(ProgressTestTags.LIST)
+            .performScrollToNode(hasTestTag(MueBmiCardTags.CARD))
         compose.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertExists()
 
         current.value = state(populated(), bmi = Bmi.ValueOnly(23.0))
         compose.waitForIdle()
 
         compose.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertDoesNotExist()
+        compose.onNodeWithTag(MueBmiCardTags.REFERENCE_BAR).assertDoesNotExist()
         compose.onNodeWithContentDescription(
-            "$CURRENT_BMI_LABEL ${ProgressFormat.bmi(23.0)}",
+            "$BMI_LABEL ${ProgressFormat.bmi(23.0)}",
         ).assertExists()
     }
 

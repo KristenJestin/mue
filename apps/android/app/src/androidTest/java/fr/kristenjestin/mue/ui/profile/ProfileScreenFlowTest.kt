@@ -22,6 +22,8 @@ import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
+import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,7 +79,7 @@ class ProfileScreenFlowTest {
         composeRule.waitForIdle()
 
         assertEquals(UserProfile("Kris", 180, null), profiles.stored)
-        composeRule.onNodeWithText("Profile saved ✓").assertExists()
+        composeRule.awaitText(MueSaveConfirmationLabel)
     }
 
     @Test
@@ -85,27 +87,26 @@ class ProfileScreenFlowTest {
         measurements.set(listOf(Measurement(TODAY, weight(74.5))))
         start()
 
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_CARD).assertDoesNotExist()
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT).assertDoesNotExist()
 
         typeHeight("180")
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_CARD).assertExists()
-        // No birth date, so the value stands alone (PRD 15.2).
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_REFERENCE_BAR).assertDoesNotExist()
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT).assertExists()
+        // No birth date, so the value stands alone with no band named (PRD 15.2).
+        composeRule.onNodeWithText("BMI 23.0").assertExists()
 
         typeHeight("")
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_CARD).assertDoesNotExist()
+        composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT).assertDoesNotExist()
     }
 
     @Test
-    fun theReferenceBarAppearsForAnAdult() {
+    fun theBandIsNamedForAnAdult() {
         profiles.set(UserProfile(null, 180, LocalDate.of(1992, 4, 16)))
         measurements.set(listOf(Measurement(TODAY, weight(74.5))))
         start()
 
-        composeRule.onNodeWithTag(ProfileTestTags.BMI_REFERENCE_BAR).assertExists()
-        composeRule.onNodeWithText("Healthy weight").assertExists()
+        composeRule.onNodeWithText("BMI 23.0 · Healthy weight").assertExists()
     }
 
     @Test
