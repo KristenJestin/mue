@@ -28,7 +28,7 @@ class StatisticsCalculatorTest {
     @Test
     fun `a single measurement gives a current weight but no change or pace`() {
         val stats = StatisticsCalculator.compute(listOf(measurementOf("2026-08-20", 74.8)))
-        assertEquals(748, stats.currentWeight?.tenthsKg)
+        assertEquals(7_480, stats.currentWeight?.hundredthsKg)
         assertNull(stats.changeKg)
         assertNull(stats.weeklyPaceKg)
         assertTrue(stats.hasData)
@@ -99,7 +99,7 @@ class StatisticsCalculatorTest {
         val stats = StatisticsCalculator.compute(
             listOf(measurementOf("2026-08-23", 70.0), measurementOf("2026-08-10", 90.0))
         )
-        assertEquals(700, stats.currentWeight?.tenthsKg)
+        assertEquals(7_000, stats.currentWeight?.hundredthsKg)
     }
 
     @Test
@@ -125,7 +125,7 @@ class StatisticsCalculatorTest {
     fun `a window holding a single measurement keeps the change unavailable`() {
         val all = listOf(measurementOf("2026-06-01", 90.0), measurementOf("2026-08-23", 74.5))
         val stats = StatisticsCalculator.compute(all, Period.SEVEN_DAYS.windowEndingOn(today))
-        assertEquals(745, stats.currentWeight?.tenthsKg)
+        assertEquals(7_450, stats.currentWeight?.hundredthsKg)
         assertNull(stats.changeKg)
         assertNull(stats.weeklyPaceKg)
     }
@@ -154,11 +154,21 @@ class StatisticsCalculatorTest {
     }
 
     @Test
-    fun `the change is exact because it is computed from stored tenths`() {
+    fun `the change is exact because it is computed from stored hundredths`() {
         val stats = StatisticsCalculator.compute(
             listOf(measurementOf("2026-08-01", 74.4), measurementOf("2026-08-08", 74.1))
         )
         assertEquals(-0.3, stats.changeKg!!, 1e-12)
+    }
+
+    /** The 0.05 kg step of BR-003 has to survive into the change, not round away. */
+    @Test
+    fun `a change of a single step is reported exactly`() {
+        val stats = StatisticsCalculator.compute(
+            listOf(measurementOf("2026-08-01", 74.05), measurementOf("2026-08-08", 74.0))
+        )
+        assertEquals(-0.05, stats.changeKg!!, 1e-12)
+        assertEquals(-0.05, stats.weeklyPaceKg!!, 1e-12)
     }
 
     private companion object {

@@ -16,29 +16,38 @@ import kotlin.test.assertTrue
  */
 class EntryFormatTest {
 
-    private val weight = Weight.ofTenthsClamped(745)
+    private val weight = Weight.ofHundredthsClamped(7_405)
     private val today = LocalDate.of(2026, 8, 23)
 
     @Test
     fun `an english phone shows a decimal point`() {
-        assertEquals("74.5", EntryFormat.weight(weight, Locale.UK))
+        assertEquals("74.05", EntryFormat.weight(weight, Locale.UK))
     }
 
     @Test
     fun `a french phone shows a decimal comma`() {
-        assertEquals("74,5", EntryFormat.weight(weight, Locale.FRANCE))
+        assertEquals("74,05", EntryFormat.weight(weight, Locale.FRANCE))
     }
 
     @Test
-    fun `the value always carries exactly one decimal`() {
-        assertEquals("70.0", EntryFormat.weight(Weight.DEFAULT, Locale.UK))
-        assertEquals("30.0", EntryFormat.weight(Weight.ofTenthsClamped(300), Locale.UK))
-        assertEquals("250.0", EntryFormat.weight(Weight.ofTenthsClamped(2500), Locale.UK))
+    fun `the value always carries exactly two decimals`() {
+        assertEquals("70.00", EntryFormat.weight(Weight.DEFAULT, Locale.UK))
+        assertEquals("30.00", EntryFormat.weight(Weight.ofHundredthsClamped(3_000), Locale.UK))
+        assertEquals("250.00", EntryFormat.weight(Weight.ofHundredthsClamped(25_000), Locale.UK))
+        assertEquals("74.50", EntryFormat.weight(Weight.ofHundredthsClamped(7_450), Locale.UK))
+    }
+
+    /** The half-step is the whole point of the second decimal; it must not round away. */
+    @Test
+    fun `a value between two graduations reads as itself`() {
+        assertEquals("74.05", EntryFormat.weight(Weight.ofHundredthsClamped(7_405), Locale.UK))
+        assertEquals("74.15", EntryFormat.weight(Weight.ofHundredthsClamped(7_415), Locale.UK))
+        assertEquals("74.95", EntryFormat.weight(Weight.ofHundredthsClamped(7_495), Locale.UK))
     }
 
     @Test
     fun `TalkBack hears kilograms spelled out`() {
-        assertEquals("74.5 kilograms", EntryFormat.spokenWeight(weight, Locale.UK))
+        assertEquals("74.05 kilograms", EntryFormat.spokenWeight(weight, Locale.UK))
     }
 
     @Test

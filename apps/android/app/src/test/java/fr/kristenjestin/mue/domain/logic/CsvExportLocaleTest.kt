@@ -21,16 +21,16 @@ class CsvExportLocaleTest {
     val localeRule = LocaleRule(Locale.FRANCE)
 
     private val measurements = listOf(
-        measurementOf("2026-08-12", 74.8),
-        measurementOf("2026-08-18", 74.9),
-        measurementOf("2026-08-23", 74.5),
+        measurementOf("2026-08-12", 74.80),
+        measurementOf("2026-08-18", 74.95),
+        measurementOf("2026-08-23", 74.55),
     )
 
     @Test
     fun `the rule really switches the default locale`() {
         assertEquals(Locale.FRANCE, Locale.getDefault())
         // Proof that this locale would break a formatter-based implementation.
-        assertNotEquals("74.5", String.format("%.1f", 74.5))
+        assertNotEquals("74.55", String.format("%.2f", 74.55))
     }
 
     @Test
@@ -48,7 +48,7 @@ class CsvExportLocaleTest {
 
     @Test
     fun `the decimal separator stays a dot`() {
-        assertEquals("74.5", CsvExport.formatWeight(measurements.last().weight))
+        assertEquals("74.55", CsvExport.formatWeight(measurements.last().weight))
     }
 
     @Test
@@ -64,7 +64,7 @@ class CsvExportLocaleTest {
 
     private companion object {
         const val EXPECTED_CONTENT =
-            "date,weight_kg\n2026-08-12,74.8\n2026-08-18,74.9\n2026-08-23,74.5\n"
+            "date,weight_kg\n2026-08-12,74.80\n2026-08-18,74.95\n2026-08-23,74.55\n"
     }
 }
 
@@ -79,8 +79,8 @@ class CsvExportNonLatinLocaleTest {
 
     @Test
     fun `digits stay ASCII whatever the numbering system is`() {
-        val content = CsvExport.buildContent(listOf(measurementOf("2026-08-23", 74.5)))
-        assertEquals("date,weight_kg\n2026-08-23,74.5\n", content)
+        val content = CsvExport.buildContent(listOf(measurementOf("2026-08-23", 74.55)))
+        assertEquals("date,weight_kg\n2026-08-23,74.55\n", content)
         assertContentEquals(content.toByteArray(Charsets.UTF_8), content.toByteArray(Charsets.US_ASCII))
     }
 }

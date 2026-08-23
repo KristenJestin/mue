@@ -37,7 +37,7 @@ class CsvExportWriterTest {
 
     @Test
     fun writesTheFileWhereTheFileProviderExpectsIt() = runTest {
-        val file = writer.write(listOf(measurement("2026-08-23", 745)), exportDate)
+        val file = writer.write(listOf(measurement("2026-08-23", 7_450)), exportDate)
 
         assertEquals("mue-weight-2026-08-23.csv", file.name)
         assertEquals("exports", file.parentFile?.name)
@@ -47,12 +47,12 @@ class CsvExportWriterTest {
     @Test
     fun theBytesOnDiskMatchTheGeneratedContent() = runTest {
         val file = writer.write(
-            listOf(measurement("2026-08-12", 748), measurement("2026-08-23", 745)),
+            listOf(measurement("2026-08-12", 7_480), measurement("2026-08-23", 7_405)),
             exportDate,
         )
 
         assertEquals(
-            "date,weight_kg\n2026-08-12,74.8\n2026-08-23,74.5\n",
+            "date,weight_kg\n2026-08-12,74.80\n2026-08-23,74.05\n",
             file.readText(Charsets.UTF_8),
         )
     }
@@ -66,7 +66,7 @@ class CsvExportWriterTest {
 
     @Test
     fun noPartialFileIsLeftBehind() = runTest {
-        val file = writer.write(listOf(measurement("2026-08-23", 745)), exportDate)
+        val file = writer.write(listOf(measurement("2026-08-23", 7_450)), exportDate)
 
         val leftovers = file.parentFile?.listFiles()?.map { it.name }.orEmpty()
         assertEquals(listOf("mue-weight-2026-08-23.csv"), leftovers)
@@ -74,21 +74,21 @@ class CsvExportWriterTest {
 
     @Test
     fun exportingTwiceOverwritesTheEarlierFile() = runTest {
-        writer.write(listOf(measurement("2026-08-23", 745)), exportDate)
-        val second = writer.write(listOf(measurement("2026-08-23", 802)), exportDate)
+        writer.write(listOf(measurement("2026-08-23", 7_450)), exportDate)
+        val second = writer.write(listOf(measurement("2026-08-23", 8_020)), exportDate)
 
-        assertEquals("date,weight_kg\n2026-08-23,80.2\n", second.readText(Charsets.UTF_8))
+        assertEquals("date,weight_kg\n2026-08-23,80.20\n", second.readText(Charsets.UTF_8))
         assertEquals(1, second.parentFile?.listFiles()?.size)
     }
 
     @Test
     fun aNewerExportDateReplacesTheOlderFile() = runTest {
-        writer.write(listOf(measurement("2026-08-23", 745)), exportDate)
-        val second = writer.write(listOf(measurement("2026-08-24", 750)), exportDate.plusDays(1))
+        writer.write(listOf(measurement("2026-08-23", 7_450)), exportDate)
+        val second = writer.write(listOf(measurement("2026-08-24", 7_500)), exportDate.plusDays(1))
 
         assertEquals(listOf("mue-weight-2026-08-24.csv"), second.parentFile?.listFiles()?.map { it.name })
     }
 
-    private fun measurement(isoDate: String, weightDg: Int) =
-        Measurement(LocalDate.parse(isoDate), Weight.ofTenthsClamped(weightDg))
+    private fun measurement(isoDate: String, weightCg: Int) =
+        Measurement(LocalDate.parse(isoDate), Weight.ofHundredthsClamped(weightCg))
 }

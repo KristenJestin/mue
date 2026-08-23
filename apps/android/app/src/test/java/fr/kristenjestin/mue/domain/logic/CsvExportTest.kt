@@ -19,24 +19,25 @@ class CsvExportTest {
 
     @Test
     fun `a single measurement follows the header`() {
-        val content = CsvExport.buildContent(listOf(measurementOf("2026-08-23", 74.5)))
-        assertEquals("date,weight_kg\n2026-08-23,74.5\n", content)
+        val content = CsvExport.buildContent(listOf(measurementOf("2026-08-23", 74.55)))
+        assertEquals("date,weight_kg\n2026-08-23,74.55\n", content)
     }
 
+    /** The sample of PRD FR-CSV-003, two decimals included. */
     @Test
     fun `the PRD sample is reproduced exactly`() {
         val content = CsvExport.buildContent(
             listOf(
-                measurementOf("2026-08-12", 74.8),
-                measurementOf("2026-08-18", 74.9),
-                measurementOf("2026-08-23", 74.5),
+                measurementOf("2026-08-12", 74.80),
+                measurementOf("2026-08-18", 74.95),
+                measurementOf("2026-08-23", 74.55),
             )
         )
         assertEquals(
             "date,weight_kg\n" +
-                "2026-08-12,74.8\n" +
-                "2026-08-18,74.9\n" +
-                "2026-08-23,74.5\n",
+                "2026-08-12,74.80\n" +
+                "2026-08-18,74.95\n" +
+                "2026-08-23,74.55\n",
             content,
         )
     }
@@ -58,15 +59,18 @@ class CsvExportTest {
     fun `a long history keeps one row per measurement`() {
         val start = LocalDate.of(2026, 1, 1)
         val measurements = (0 until 365).map {
-            Measurement(start.plusDays(it.toLong()), Weight.ofTenthsClamped(700 + it % 100))
+            Measurement(
+                start.plusDays(it.toLong()),
+                Weight.ofHundredthsClamped(7_000 + (it % 100) * 5),
+            )
         }
         val lines = CsvExport.buildContent(measurements).split("\n")
         assertEquals("date,weight_kg", lines.first())
         // 1 header + 365 rows + the empty string after the final line ending.
         assertEquals(367, lines.size)
         assertEquals("", lines.last())
-        assertEquals("2026-01-01,70.0", lines[1])
-        assertEquals("2026-12-31,76.4", lines[365])
+        assertEquals("2026-01-01,70.00", lines[1])
+        assertEquals("2026-12-31,73.20", lines[365])
     }
 
     @Test
@@ -84,11 +88,19 @@ class CsvExportTest {
     }
 
     @Test
-    fun `weights always use a dot and always keep one decimal`() {
-        assertEquals("30.0", CsvExport.formatWeight(Weight.ofTenthsClamped(300)))
-        assertEquals("74.5", CsvExport.formatWeight(Weight.ofTenthsClamped(745)))
-        assertEquals("100.0", CsvExport.formatWeight(Weight.ofTenthsClamped(1000)))
-        assertEquals("250.0", CsvExport.formatWeight(Weight.ofTenthsClamped(2500)))
+    fun `weights always use a dot and always keep two decimals`() {
+        assertEquals("30.00", CsvExport.formatWeight(Weight.ofHundredthsClamped(3_000)))
+        assertEquals("74.05", CsvExport.formatWeight(Weight.ofHundredthsClamped(7_405)))
+        assertEquals("74.50", CsvExport.formatWeight(Weight.ofHundredthsClamped(7_450)))
+        assertEquals("100.00", CsvExport.formatWeight(Weight.ofHundredthsClamped(10_000)))
+        assertEquals("250.00", CsvExport.formatWeight(Weight.ofHundredthsClamped(25_000)))
+    }
+
+    /** A fraction below ten hundredths must keep its leading zero, not read as `74.5`. */
+    @Test
+    fun `a fraction below a tenth keeps its leading zero`() {
+        assertEquals("74.05", CsvExport.formatWeight(Weight.ofHundredthsClamped(7_405)))
+        assertEquals("80.00", CsvExport.formatWeight(Weight.ofHundredthsClamped(8_000)))
     }
 
     @Test

@@ -36,30 +36,30 @@ class MeasurementDaoTest {
 
     @Test
     fun insertsAndReadsBackASingleMeasurement() = runTest {
-        dao.upsert(entity("2026-08-23", 745))
+        dao.upsert(entity("2026-08-23", 7_450))
 
-        assertEquals(entity("2026-08-23", 745), dao.findByDate("2026-08-23"))
+        assertEquals(entity("2026-08-23", 7_450), dao.findByDate("2026-08-23"))
         assertEquals(1, dao.count())
     }
 
     @Test
     fun writingAnExistingDateReplacesItSilently() = runTest {
-        dao.upsert(entity("2026-08-23", 745))
-        dao.upsert(entity("2026-08-23", 802))
+        dao.upsert(entity("2026-08-23", 7_450))
+        dao.upsert(entity("2026-08-23", 8_020))
 
         assertEquals(1, dao.count())
-        assertEquals(802, dao.findByDate("2026-08-23")?.weightDg)
+        assertEquals(8_020, dao.findByDate("2026-08-23")?.weightCg)
     }
 
     @Test
     fun theDatabaseItselfRejectsADuplicateDate() = runTest {
-        dao.upsert(entity("2026-08-23", 745))
+        dao.upsert(entity("2026-08-23", 7_450))
 
         // Bypasses the DAO on purpose: the uniqueness must live in SQLite, not in
         // the conflict strategy Room happens to use (PRD 16.3).
         val error = runCatching {
             database.openHelper.writableDatabase.execSQL(
-                "INSERT INTO measurements (date, weight_dg) VALUES ('2026-08-23', 900)"
+                "INSERT INTO measurements (date, weight_cg) VALUES ('2026-08-23', 9000)"
             )
         }.exceptionOrNull()
 
@@ -68,7 +68,7 @@ class MeasurementDaoTest {
             error is SQLiteConstraintException ||
                 error?.message.orEmpty().contains("UNIQUE", ignoreCase = true),
         )
-        assertEquals(745, dao.findByDate("2026-08-23")?.weightDg)
+        assertEquals(7_450, dao.findByDate("2026-08-23")?.weightCg)
     }
 
     @Test
@@ -92,19 +92,19 @@ class MeasurementDaoTest {
 
     @Test
     fun deletesByDate() = runTest {
-        dao.upsert(entity("2026-08-22", 745))
-        dao.upsert(entity("2026-08-23", 748))
+        dao.upsert(entity("2026-08-22", 7_450))
+        dao.upsert(entity("2026-08-23", 7_480))
 
         dao.deleteByDate("2026-08-22")
 
         assertNull(dao.findByDate("2026-08-22"))
         assertEquals(1, dao.count())
-        assertEquals(748, dao.findByDate("2026-08-23")?.weightDg)
+        assertEquals(7_480, dao.findByDate("2026-08-23")?.weightCg)
     }
 
     @Test
     fun deletingAnAbsentDateChangesNothing() = runTest {
-        dao.upsert(entity("2026-08-23", 745))
+        dao.upsert(entity("2026-08-23", 7_450))
 
         dao.deleteByDate("2020-01-01")
 
@@ -113,10 +113,10 @@ class MeasurementDaoTest {
 
     @Test
     fun readsBackInChronologicalOrderWhateverTheInsertionOrder() = runTest {
-        dao.upsert(entity("2026-08-23", 745))
-        dao.upsert(entity("2025-12-31", 800))
-        dao.upsert(entity("2026-01-01", 799))
-        dao.upsert(entity("2026-08-09", 750))
+        dao.upsert(entity("2026-08-23", 7_450))
+        dao.upsert(entity("2025-12-31", 8_000))
+        dao.upsert(entity("2026-01-01", 7_990))
+        dao.upsert(entity("2026-08-09", 7_500))
 
         assertEquals(
             listOf("2025-12-31", "2026-01-01", "2026-08-09", "2026-08-23"),
@@ -185,42 +185,42 @@ class MeasurementDaoTest {
     fun theLatestMeasurementIsTheOneWithTheHighestDate() = runTest {
         assertNull(dao.observeLatest().first())
 
-        dao.upsert(entity("2026-08-23", 745))
-        dao.upsert(entity("2026-08-10", 900))
+        dao.upsert(entity("2026-08-23", 7_450))
+        dao.upsert(entity("2026-08-10", 9_000))
 
         assertEquals("2026-08-23", dao.observeLatest().first()?.date)
     }
 
     @Test
     fun replacingWithAMovedDateLeavesExactlyOneRow() = runTest {
-        dao.upsert(entity("2026-08-20", 745))
+        dao.upsert(entity("2026-08-20", 7_450))
 
-        dao.replace("2026-08-20", entity("2026-08-21", 750))
+        dao.replace("2026-08-20", entity("2026-08-21", 7_500))
 
         assertEquals(1, dao.count())
         assertNull(dao.findByDate("2026-08-20"))
-        assertEquals(750, dao.findByDate("2026-08-21")?.weightDg)
+        assertEquals(7_500, dao.findByDate("2026-08-21")?.weightCg)
     }
 
     @Test
     fun movingOntoAnOccupiedDateOverwritesIt() = runTest {
-        dao.upsert(entity("2026-08-20", 745))
-        dao.upsert(entity("2026-08-21", 999))
+        dao.upsert(entity("2026-08-20", 7_450))
+        dao.upsert(entity("2026-08-21", 9_990))
 
-        dao.replace("2026-08-20", entity("2026-08-21", 750))
+        dao.replace("2026-08-20", entity("2026-08-21", 7_500))
 
         assertEquals(1, dao.count())
-        assertEquals(750, dao.findByDate("2026-08-21")?.weightDg)
+        assertEquals(7_500, dao.findByDate("2026-08-21")?.weightCg)
     }
 
     @Test
     fun replacingWithoutMovingTheDateKeepsTheRow() = runTest {
-        dao.upsert(entity("2026-08-20", 745))
+        dao.upsert(entity("2026-08-20", 7_450))
 
-        dao.replace("2026-08-20", entity("2026-08-20", 751))
+        dao.replace("2026-08-20", entity("2026-08-20", 7_510))
 
         assertEquals(1, dao.count())
-        assertEquals(751, dao.findByDate("2026-08-20")?.weightDg)
+        assertEquals(7_510, dao.findByDate("2026-08-20")?.weightCg)
     }
 
     @Test
@@ -233,14 +233,14 @@ class MeasurementDaoTest {
 
     private suspend fun seedAugust() {
         listOf(
-            "2026-08-01" to 800,
-            "2026-08-10" to 790,
-            "2026-08-17" to 780,
-            "2026-08-20" to 775,
-            "2026-08-23" to 770,
-            "2026-08-24" to 765,
-        ).forEach { (date, weightDg) -> dao.upsert(entity(date, weightDg)) }
+            "2026-08-01" to 8_000,
+            "2026-08-10" to 7_900,
+            "2026-08-17" to 7_800,
+            "2026-08-20" to 7_750,
+            "2026-08-23" to 7_700,
+            "2026-08-24" to 7_650,
+        ).forEach { (date, weightCg) -> dao.upsert(entity(date, weightCg)) }
     }
 
-    private fun entity(date: String, weightDg: Int) = MeasurementEntity(date, weightDg)
+    private fun entity(date: String, weightCg: Int) = MeasurementEntity(date, weightCg)
 }

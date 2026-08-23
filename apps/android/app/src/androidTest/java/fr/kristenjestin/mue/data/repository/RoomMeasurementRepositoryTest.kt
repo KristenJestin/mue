@@ -44,29 +44,29 @@ class RoomMeasurementRepositoryTest {
     }
 
     @Test
-    fun roundTripsTheDomainModelWithoutLosingATenth() = runTest {
-        val measurement = measurement("2026-08-23", 745)
+    fun roundTripsTheDomainModelWithoutLosingAHundredth() = runTest {
+        val measurement = measurement("2026-08-23", 7_405)
 
         repository.save(measurement)
 
         assertEquals(measurement, repository.findByDate(LocalDate.of(2026, 8, 23)))
-        assertEquals(74.5, repository.findByDate(LocalDate.of(2026, 8, 23))!!.weight.kilograms, 0.0)
+        assertEquals(74.05, repository.findByDate(LocalDate.of(2026, 8, 23))!!.weight.kilograms, 0.0)
     }
 
     @Test
     fun savingTheSameDateTwiceKeepsOneMeasurement() = runTest {
-        repository.save(measurement("2026-08-23", 745))
-        repository.save(measurement("2026-08-23", 802))
+        repository.save(measurement("2026-08-23", 7_450))
+        repository.save(measurement("2026-08-23", 8_020))
 
         val all = repository.getAll()
         assertEquals(1, all.size)
-        assertEquals(802, all.single().weight.tenthsKg)
+        assertEquals(8_020, all.single().weight.hundredthsKg)
     }
 
     @Test
     fun readsBackOldestFirst() = runTest {
-        repository.save(measurement("2026-08-23", 745))
-        repository.save(measurement("2026-08-01", 800))
+        repository.save(measurement("2026-08-23", 7_450))
+        repository.save(measurement("2026-08-01", 8_000))
 
         assertEquals(
             listOf(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 23)),
@@ -76,9 +76,9 @@ class RoomMeasurementRepositoryTest {
 
     @Test
     fun filtersOnAPeriodWindow() = runTest {
-        repository.save(measurement("2026-06-01", 900))
-        repository.save(measurement("2026-08-18", 750))
-        repository.save(measurement("2026-08-23", 745))
+        repository.save(measurement("2026-06-01", 9_000))
+        repository.save(measurement("2026-08-18", 7_500))
+        repository.save(measurement("2026-08-23", 7_450))
 
         val window = Period.SEVEN_DAYS.windowEndingOn(today)
         val inWindow = repository.observeIn(window).first()
@@ -91,8 +91,8 @@ class RoomMeasurementRepositoryTest {
 
     @Test
     fun theAllPeriodIsUnbounded() = runTest {
-        repository.save(measurement("2010-01-01", 900))
-        repository.save(measurement("2026-08-23", 745))
+        repository.save(measurement("2010-01-01", 9_000))
+        repository.save(measurement("2026-08-23", 7_450))
 
         assertEquals(2, repository.observeIn(DateWindow.UNBOUNDED).first().size)
         assertEquals(2, repository.observeIn(Period.ALL.windowEndingOn(today)).first().size)
@@ -102,37 +102,37 @@ class RoomMeasurementRepositoryTest {
     fun reportsTheLatestMeasurement() = runTest {
         assertNull(repository.observeLatest().first())
 
-        repository.save(measurement("2026-08-10", 900))
-        repository.save(measurement("2026-08-23", 745))
+        repository.save(measurement("2026-08-10", 9_000))
+        repository.save(measurement("2026-08-23", 7_450))
 
         assertEquals(LocalDate.of(2026, 8, 23), repository.observeLatest().first()?.date)
     }
 
     @Test
     fun movingAMeasurementToAnotherDateLeavesNoOrphan() = runTest {
-        repository.save(measurement("2026-08-20", 745))
+        repository.save(measurement("2026-08-20", 7_450))
 
-        repository.replace(LocalDate.of(2026, 8, 20), measurement("2026-08-21", 750))
+        repository.replace(LocalDate.of(2026, 8, 20), measurement("2026-08-21", 7_500))
 
         val all = repository.getAll()
         assertEquals(1, all.size)
-        assertEquals(Measurement(LocalDate.of(2026, 8, 21), Weight.ofTenthsClamped(750)), all.single())
+        assertEquals(Measurement(LocalDate.of(2026, 8, 21), Weight.ofHundredthsClamped(7_500)), all.single())
     }
 
     @Test
     fun movingOntoAnOccupiedDateOverwritesWithoutConfirmation() = runTest {
-        repository.save(measurement("2026-08-20", 745))
-        repository.save(measurement("2026-08-21", 999))
+        repository.save(measurement("2026-08-20", 7_450))
+        repository.save(measurement("2026-08-21", 9_990))
 
-        repository.replace(LocalDate.of(2026, 8, 20), measurement("2026-08-21", 750))
+        repository.replace(LocalDate.of(2026, 8, 20), measurement("2026-08-21", 7_500))
 
-        assertEquals(listOf(750), repository.getAll().map { it.weight.tenthsKg })
+        assertEquals(listOf(7_500), repository.getAll().map { it.weight.hundredthsKg })
     }
 
     @Test
     fun deletesAMeasurement() = runTest {
-        repository.save(measurement("2026-08-20", 745))
-        repository.save(measurement("2026-08-23", 748))
+        repository.save(measurement("2026-08-20", 7_450))
+        repository.save(measurement("2026-08-23", 7_480))
 
         repository.delete(LocalDate.of(2026, 8, 20))
 
@@ -146,6 +146,6 @@ class RoomMeasurementRepositoryTest {
         assertNull(repository.findByDate(today))
     }
 
-    private fun measurement(isoDate: String, weightDg: Int) =
-        Measurement(LocalDate.parse(isoDate), Weight.ofTenthsClamped(weightDg))
+    private fun measurement(isoDate: String, weightCg: Int) =
+        Measurement(LocalDate.parse(isoDate), Weight.ofHundredthsClamped(weightCg))
 }

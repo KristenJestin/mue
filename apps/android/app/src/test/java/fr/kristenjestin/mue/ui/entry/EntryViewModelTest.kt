@@ -49,7 +49,7 @@ class EntryViewModelTest {
     @Test
     fun `an empty history starts the scale at 70 kg`() = runTest {
         assertEquals(Weight.DEFAULT, viewModel().uiState.value.weight)
-        assertEquals(700, viewModel().uiState.value.weight.tenthsKg)
+        assertEquals(7_000, viewModel().uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -61,7 +61,7 @@ class EntryViewModelTest {
                 measurementOf("2026-08-18", 74.9),
             ),
         )
-        assertEquals(742, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_420, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -77,11 +77,11 @@ class EntryViewModelTest {
         val history = listOf(measurementOf("2026-08-20", 80.0))
         val savedState = SavedStateHandle()
         viewModel(history = history, savedState = savedState)
-            .onWeightChanged(Weight.ofTenthsClamped(662))
+            .onWeightChanged(Weight.ofHundredthsClamped(6_620))
 
         val restored = viewModel(history = history, savedState = savedState)
 
-        assertEquals(662, restored.uiState.value.weight.tenthsKg)
+        assertEquals(6_620, restored.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -95,29 +95,37 @@ class EntryViewModelTest {
     // --- FR-ENTRY-002 / FR-ENTRY-003, moving the value -------------------------------
 
     @Test
-    fun `stepping moves the value one tenth at a time`() = runTest {
+    fun `stepping moves the value one twentieth of a kilogram at a time`() = runTest {
         val model = viewModel()
         model.onStep(1)
-        assertEquals(701, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_005, model.uiState.value.weight.hundredthsKg)
         model.onStep(-1)
-        assertEquals(700, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_000, model.uiState.value.weight.hundredthsKg)
+    }
+
+    /** PRD FR-ENTRY-003: twenty presses of `+` are one kilogram exactly, with no drift. */
+    @Test
+    fun `twenty presses add exactly one kilogram`() = runTest {
+        val model = viewModel()
+        repeat(20) { model.onStep(1) }
+        assertEquals(7_100, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
     fun `stepping stops dead at the lower end stop`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(Weight.MIN_TENTHS))
+        model.onWeightChanged(Weight.ofHundredthsClamped(Weight.MIN_HUNDREDTHS))
         model.onStep(-1)
-        assertEquals(Weight.MIN_TENTHS, model.uiState.value.weight.tenthsKg)
+        assertEquals(Weight.MIN_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
         assertTrue(model.uiState.value.isAtLowerStop)
     }
 
     @Test
     fun `stepping stops dead at the upper end stop`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(Weight.MAX_TENTHS))
+        model.onWeightChanged(Weight.ofHundredthsClamped(Weight.MAX_HUNDREDTHS))
         model.onStep(1)
-        assertEquals(Weight.MAX_TENTHS, model.uiState.value.weight.tenthsKg)
+        assertEquals(Weight.MAX_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
         assertTrue(model.uiState.value.isAtUpperStop)
     }
 
@@ -125,7 +133,7 @@ class EntryViewModelTest {
     fun `the scale moving does not order the scale to move`() = runTest {
         val model = viewModel()
         val revision = model.uiState.value.weightRevision
-        model.onWeightChanged(Weight.ofTenthsClamped(745))
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_450))
 
         assertEquals(revision, model.uiState.value.weightRevision)
     }
@@ -147,30 +155,30 @@ class EntryViewModelTest {
     fun `the history seed asks the scale to follow`() = runTest {
         val model = viewModel(history = listOf(measurementOf("2026-08-20", 80.0)))
 
-        assertEquals(800, model.uiState.value.weight.tenthsKg)
+        assertEquals(8_000, model.uiState.value.weight.hundredthsKg)
         assertTrue(model.uiState.value.weightRevision > 0)
     }
 
     @Test
     fun `a value the user already chose is not replaced by the history`() = runTest {
         val savedState = SavedStateHandle()
-        viewModel(savedState = savedState).onWeightChanged(Weight.ofTenthsClamped(662))
+        viewModel(savedState = savedState).onWeightChanged(Weight.ofHundredthsClamped(6_620))
 
         val restored = viewModel(
             history = listOf(measurementOf("2026-08-20", 80.0)),
             savedState = savedState,
         )
 
-        assertEquals(662, restored.uiState.value.weight.tenthsKg)
+        assertEquals(6_620, restored.uiState.value.weight.hundredthsKg)
     }
 
     @Test
     fun `the scale never reports a value outside the range`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(10))
-        assertEquals(Weight.MIN_TENTHS, model.uiState.value.weight.tenthsKg)
-        model.onWeightChanged(Weight.ofTenthsClamped(99_999))
-        assertEquals(Weight.MAX_TENTHS, model.uiState.value.weight.tenthsKg)
+        model.onWeightChanged(Weight.ofHundredthsClamped(10))
+        assertEquals(Weight.MIN_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
+        model.onWeightChanged(Weight.ofHundredthsClamped(99_999))
+        assertEquals(Weight.MAX_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
     }
 
     // --- FR-ENTRY-004, manual entry --------------------------------------------------
@@ -178,12 +186,12 @@ class EntryViewModelTest {
     @Test
     fun `manual entry opens on the value the scale is showing`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(745))
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_450))
         model.onManualEntryOpened()
 
         val state = model.uiState.value
         assertTrue(state.manualEntry)
-        assertEquals("74.5", state.manualInput)
+        assertEquals("74.50", state.manualInput)
         assertNull(state.manualError)
     }
 
@@ -191,9 +199,9 @@ class EntryViewModelTest {
     fun `a comma is accepted as a decimal separator`() = runTest {
         val model = viewModel()
         model.onManualEntryOpened()
-        model.onManualInputChanged("74,5")
+        model.onManualInputChanged("74,05")
 
-        assertEquals(745, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_405, model.uiState.value.weight.hundredthsKg)
         assertNull(model.uiState.value.manualError)
     }
 
@@ -201,19 +209,25 @@ class EntryViewModelTest {
     fun `a dot is accepted as a decimal separator`() = runTest {
         val model = viewModel()
         model.onManualEntryOpened()
-        model.onManualInputChanged("74.5")
+        model.onManualInputChanged("74.05")
 
-        assertEquals(745, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_405, model.uiState.value.weight.hundredthsKg)
         assertNull(model.uiState.value.manualError)
     }
 
+    /** PRD FR-ENTRY-004: two decimals are accepted, then snapped onto the 0.05 kg grid. */
     @Test
-    fun `a second decimal is rounded to the tenth`() = runTest {
+    fun `two decimals are accepted and rounded to the nearest step`() = runTest {
         val model = viewModel()
         model.onManualEntryOpened()
         model.onManualInputChanged("74.55")
+        assertEquals(7_455, model.uiState.value.weight.hundredthsKg)
 
-        assertEquals(746, model.uiState.value.weight.tenthsKg)
+        model.onManualInputChanged("74.53")
+        assertEquals(7_455, model.uiState.value.weight.hundredthsKg)
+
+        model.onManualInputChanged("74.52")
+        assertEquals(7_450, model.uiState.value.weight.hundredthsKg)
         assertNull(model.uiState.value.manualError)
     }
 
@@ -226,7 +240,7 @@ class EntryViewModelTest {
         val state = model.uiState.value
         assertEquals("Weight must be between 30.0 and 250.0 kg", state.manualError)
         assertEquals(MueValidation.WEIGHT_ERROR, state.manualError)
-        assertEquals(700, state.weight.tenthsKg)
+        assertEquals(7_000, state.weight.hundredthsKg)
         assertEquals("12", state.manualInput)
     }
 
@@ -247,7 +261,7 @@ class EntryViewModelTest {
         model.onManualInputChanged("seventy four")
 
         assertEquals(MueValidation.WEIGHT_ERROR, model.uiState.value.manualError)
-        assertEquals(700, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_000, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -257,7 +271,7 @@ class EntryViewModelTest {
         model.onManualInputChanged("")
 
         assertNull(model.uiState.value.manualError)
-        assertEquals(700, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_000, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -265,9 +279,9 @@ class EntryViewModelTest {
         val model = viewModel()
         model.onManualEntryOpened()
         model.onManualInputChanged("30")
-        assertEquals(Weight.MIN_TENTHS, model.uiState.value.weight.tenthsKg)
+        assertEquals(Weight.MIN_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
         model.onManualInputChanged("250")
-        assertEquals(Weight.MAX_TENTHS, model.uiState.value.weight.tenthsKg)
+        assertEquals(Weight.MAX_HUNDREDTHS, model.uiState.value.weight.hundredthsKg)
         assertNull(model.uiState.value.manualError)
     }
 
@@ -289,7 +303,7 @@ class EntryViewModelTest {
 
         assertTrue(model.onManualEntryConfirmed())
         assertFalse(model.uiState.value.manualEntry)
-        assertEquals(813, model.uiState.value.weight.tenthsKg)
+        assertEquals(8_130, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -325,7 +339,7 @@ class EntryViewModelTest {
         val state = model.uiState.value
         assertFalse(state.manualEntry)
         assertNull(state.manualError)
-        assertEquals(813, state.weight.tenthsKg)
+        assertEquals(8_130, state.weight.hundredthsKg)
     }
 
     // --- FR-ENTRY-005, the date ------------------------------------------------------
@@ -333,21 +347,21 @@ class EntryViewModelTest {
     @Test
     fun `changing the date never changes the weight`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(662))
+        model.onWeightChanged(Weight.ofHundredthsClamped(6_620))
         model.onDateSelected(LocalDate.of(2026, 8, 11))
 
-        assertEquals(662, model.uiState.value.weight.tenthsKg)
+        assertEquals(6_620, model.uiState.value.weight.hundredthsKg)
         assertEquals(LocalDate.of(2026, 8, 11), model.uiState.value.date)
     }
 
     @Test
     fun `a date that already holds a measurement still leaves the weight alone`() = runTest {
         val existing = LocalDate.of(2026, 8, 11)
-        val model = viewModel(history = listOf(Measurement(existing, Weight.ofTenthsClamped(901))))
-        model.onWeightChanged(Weight.ofTenthsClamped(662))
+        val model = viewModel(history = listOf(Measurement(existing, Weight.ofHundredthsClamped(9_010))))
+        model.onWeightChanged(Weight.ofHundredthsClamped(6_620))
         model.onDateSelected(existing)
 
-        assertEquals(662, model.uiState.value.weight.tenthsKg)
+        assertEquals(6_620, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test
@@ -383,21 +397,21 @@ class EntryViewModelTest {
     fun `saving creates the measurement`() = runTest {
         val repository = FakeMeasurementRepository()
         val model = viewModel(repository = repository)
-        model.onWeightChanged(Weight.ofTenthsClamped(745))
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_450))
         model.onSave()
 
-        assertEquals(listOf(Measurement(TODAY, Weight.ofTenthsClamped(745))), repository.stored)
+        assertEquals(listOf(Measurement(TODAY, Weight.ofHundredthsClamped(7_450))), repository.stored)
     }
 
     @Test
     fun `saving replaces the measurement already on that date`() = runTest {
         val repository = FakeMeasurementRepository(listOf(measurementOf("2026-08-23", 80.0)))
         val model = viewModel(repository = repository)
-        model.onWeightChanged(Weight.ofTenthsClamped(745))
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_450))
         model.onSave()
 
         assertEquals(1, repository.stored.size)
-        assertEquals(745, repository.stored.single().weight.tenthsKg)
+        assertEquals(7_450, repository.stored.single().weight.hundredthsKg)
     }
 
     @Test
@@ -409,7 +423,7 @@ class EntryViewModelTest {
         model.onSave()
 
         assertEquals(1, repository.stored.size)
-        assertEquals(701, repository.stored.single().weight.tenthsKg)
+        assertEquals(7_005, repository.stored.single().weight.hundredthsKg)
     }
 
     @Test
@@ -435,10 +449,10 @@ class EntryViewModelTest {
     @Test
     fun `the value stays put after a save`() = runTest {
         val model = viewModel()
-        model.onWeightChanged(Weight.ofTenthsClamped(745))
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_450))
         model.onSave()
 
-        assertEquals(745, model.uiState.value.weight.tenthsKg)
+        assertEquals(7_450, model.uiState.value.weight.hundredthsKg)
     }
 
     @Test

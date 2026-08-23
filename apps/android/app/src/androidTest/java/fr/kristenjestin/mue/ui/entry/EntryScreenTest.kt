@@ -36,7 +36,7 @@ import org.junit.Test
 import java.time.LocalDate
 
 private val TODAY: LocalDate = LocalDate.of(2026, 8, 23)
-private const val START_TENTHS = 745
+private const val START_HUNDREDTHS = 7_405
 
 /**
  * Screen-level behaviour of PRD FR-ENTRY-001 to 007.
@@ -50,7 +50,7 @@ class EntryScreenTest {
     val composeRule = createComposeRule()
 
     private var state by mutableStateOf(
-        EntryUiState(weight = Weight.ofTenthsClamped(START_TENTHS), date = TODAY, today = TODAY)
+        EntryUiState(weight = Weight.ofHundredthsClamped(START_HUNDREDTHS), date = TODAY, today = TODAY)
     )
 
     /** How often the scale has handed a value back to the screen. */
@@ -71,8 +71,8 @@ class EntryScreenTest {
                 },
                 onStep = { steps ->
                     state = state.withExternalWeight(
-                        Weight.ofTenthsClamped(
-                            RulerPhysics.step(state.weight.tenthsKg, steps)
+                        Weight.ofHundredthsClamped(
+                            RulerPhysics.step(state.weight.hundredthsKg, steps)
                         )
                     )
                 },
@@ -121,10 +121,11 @@ class EntryScreenTest {
     }
 
     /** Where the ruler lands on the finger's travel alone, with no inertia on top of it. */
-    private fun tenthsAfterDragOf(dx: Float): Int {
-        val pixelsPerTenth = with(composeRule.density) { RulerPhysics.DP_PER_TENTH.dp.toPx() }
-        return RulerPhysics.snapToTenth(
-            START_TENTHS + RulerPhysics.dragToTenths(dx, pixelsPerTenth)
+    private fun landingAfterDragOf(dx: Float): Int {
+        val pixelsPerHundredth =
+            with(composeRule.density) { RulerPhysics.DP_PER_HUNDREDTH.dp.toPx() }
+        return RulerPhysics.snapToStep(
+            START_HUNDREDTHS + RulerPhysics.dragToHundredths(dx, pixelsPerHundredth)
         )
     }
 
@@ -142,15 +143,16 @@ class EntryScreenTest {
         start()
         scale().assertRangeInfoEquals(
             ProgressBarRangeInfo(
-                current = START_TENTHS.toFloat(),
+                current = START_HUNDREDTHS.toFloat(),
                 range = RulerPhysics.LOWER_STOP..RulerPhysics.UPPER_STOP,
-                steps = Weight.MAX_TENTHS - Weight.MIN_TENTHS - 1,
+                steps = (Weight.MAX_HUNDREDTHS - Weight.MIN_HUNDREDTHS) /
+                    Weight.STEP_HUNDREDTHS - 1,
             )
         )
         scale().assert(
             SemanticsMatcher.expectValue(
                 SemanticsProperties.StateDescription,
-                EntryFormat.spokenWeight(Weight.ofTenthsClamped(START_TENTHS)),
+                EntryFormat.spokenWeight(Weight.ofHundredthsClamped(START_HUNDREDTHS)),
             )
         )
     }
@@ -162,8 +164,8 @@ class EntryScreenTest {
         composeRule.waitForIdle()
 
         assertTrue(
-            "expected the weight to grow, got ${state.weight.tenthsKg}",
-            state.weight.tenthsKg > START_TENTHS,
+            "expected the weight to grow, got ${state.weight.hundredthsKg}",
+            state.weight.hundredthsKg > START_HUNDREDTHS,
         )
     }
 
@@ -174,36 +176,36 @@ class EntryScreenTest {
         composeRule.waitForIdle()
 
         assertTrue(
-            "expected the weight to fall, got ${state.weight.tenthsKg}",
-            state.weight.tenthsKg < START_TENTHS,
+            "expected the weight to fall, got ${state.weight.hundredthsKg}",
+            state.weight.hundredthsKg < START_HUNDREDTHS,
         )
     }
 
     @Test
     fun the_scale_stops_dead_at_the_upper_end_stop() {
-        state = state.copy(weight = Weight.ofTenthsClamped(Weight.MAX_TENTHS - 2))
+        state = state.copy(weight = Weight.ofHundredthsClamped(Weight.MAX_HUNDREDTHS - 10))
         start()
         repeat(3) { scale().dragBy(-300f) }
         composeRule.waitForIdle()
 
-        assertEquals(Weight.MAX_TENTHS, state.weight.tenthsKg)
+        assertEquals(Weight.MAX_HUNDREDTHS, state.weight.hundredthsKg)
     }
 
     @Test
     fun the_scale_stops_dead_at_the_lower_end_stop() {
-        state = state.copy(weight = Weight.ofTenthsClamped(Weight.MIN_TENTHS + 2))
+        state = state.copy(weight = Weight.ofHundredthsClamped(Weight.MIN_HUNDREDTHS + 10))
         start()
         repeat(3) { scale().dragBy(300f) }
         composeRule.waitForIdle()
 
-        assertEquals(Weight.MIN_TENTHS, state.weight.tenthsKg)
+        assertEquals(Weight.MIN_HUNDREDTHS, state.weight.hundredthsKg)
     }
 
     /**
      * PRD 16.2: the scale must follow the finger with no perceptible lag.
      *
      * The way it fails is not obvious from the outside, so it is pinned here. Publishing the
-     * position on every tenth put a state round trip and a rebuild of the whole screen between
+     * position on every step put a state round trip and a rebuild of the whole screen between
      * two frames of a drag — around sixty of each for one sweep. The scale reports once, when
      * it stops, and the readout follows the finger from the scale's own state instead.
      */
@@ -231,8 +233,8 @@ class EntryScreenTest {
         composeRule.waitForIdle()
 
         assertTrue(
-            "expected inertia beyond ${tenthsAfterDragOf(-200f)}, got ${state.weight.tenthsKg}",
-            state.weight.tenthsKg > tenthsAfterDragOf(-200f),
+            "expected inertia beyond ${landingAfterDragOf(-200f)}, got ${state.weight.hundredthsKg}",
+            state.weight.hundredthsKg > landingAfterDragOf(-200f),
         )
     }
 
@@ -247,7 +249,7 @@ class EntryScreenTest {
         scale().dragBy(-200f)
         composeRule.waitForIdle()
 
-        assertEquals(tenthsAfterDragOf(-200f), state.weight.tenthsKg)
+        assertEquals(landingAfterDragOf(-200f), state.weight.hundredthsKg)
         readout().assertIsDisplayed()
     }
 
@@ -302,31 +304,48 @@ class EntryScreenTest {
     }
 
     @Test
-    fun one_press_of_plus_moves_the_weight_one_tenth() {
+    fun one_press_of_plus_moves_the_weight_one_step() {
         start()
         composeRule.onNodeWithContentDescription(INCREASE).performClick()
         composeRule.waitForIdle()
 
-        assertEquals(START_TENTHS + 1, state.weight.tenthsKg)
+        assertEquals(START_HUNDREDTHS + Weight.STEP_HUNDREDTHS, state.weight.hundredthsKg)
     }
 
     @Test
-    fun one_press_of_minus_moves_the_weight_one_tenth() {
+    fun one_press_of_minus_moves_the_weight_one_step() {
         start()
         composeRule.onNodeWithContentDescription(DECREASE).performClick()
         composeRule.waitForIdle()
 
-        assertEquals(START_TENTHS - 1, state.weight.tenthsKg)
+        assertEquals(START_HUNDREDTHS - Weight.STEP_HUNDREDTHS, state.weight.hundredthsKg)
+    }
+
+    /**
+     * The readout carries the second decimal a 0.05 kg step needs (PRD FR-ENTRY-002).
+     *
+     * Asserted through the description rather than the glyphs: while the number rolls, each
+     * digit is its own node and no single node holds `74.05`.
+     */
+    @Test
+    fun the_readout_shows_two_decimals() {
+        start()
+        composeRule.onNodeWithContentDescription("74.05 kilograms").assertIsDisplayed()
+
+        composeRule.onNodeWithContentDescription(INCREASE).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("74.10 kilograms").assertIsDisplayed()
     }
 
     @Test
     fun the_controls_stop_at_the_end_stop() {
-        state = state.copy(weight = Weight.ofTenthsClamped(Weight.MIN_TENTHS))
+        state = state.copy(weight = Weight.ofHundredthsClamped(Weight.MIN_HUNDREDTHS))
         start()
         composeRule.onNodeWithContentDescription(DECREASE).performClick()
         composeRule.waitForIdle()
 
-        assertEquals(Weight.MIN_TENTHS, state.weight.tenthsKg)
+        assertEquals(Weight.MIN_HUNDREDTHS, state.weight.hundredthsKg)
     }
 
     // --- FR-ENTRY-004, manual entry --------------------------------------------------
@@ -344,7 +363,7 @@ class EntryScreenTest {
 
     @Test
     fun the_scale_leaves_the_screen_during_manual_entry() {
-        state = state.copy(manualEntry = true, manualInput = "74.5")
+        state = state.copy(manualEntry = true, manualInput = "74.05")
         start()
         composeRule.waitForIdle()
 
@@ -358,7 +377,7 @@ class EntryScreenTest {
         composeRule.onNode(hasSetTextAction()).performTextInput("81,3")
         composeRule.waitForIdle()
 
-        assertEquals(813, state.weight.tenthsKg)
+        assertEquals(8_130, state.weight.hundredthsKg)
     }
 
     @Test
@@ -368,7 +387,7 @@ class EntryScreenTest {
         composeRule.onNode(hasSetTextAction()).performTextInput("81.3")
         composeRule.waitForIdle()
 
-        assertEquals(813, state.weight.tenthsKg)
+        assertEquals(8_130, state.weight.hundredthsKg)
     }
 
     @Test
@@ -380,12 +399,12 @@ class EntryScreenTest {
 
         composeRule.onNodeWithText(MueValidation.WEIGHT_ERROR).assertIsDisplayed()
         composeRule.onNodeWithText("999").assertIsDisplayed()
-        assertEquals(START_TENTHS, state.weight.tenthsKg)
+        assertEquals(START_HUNDREDTHS, state.weight.hundredthsKg)
     }
 
     @Test
     fun touching_the_value_again_returns_to_the_scale() {
-        state = state.copy(manualEntry = true, manualInput = "74.5")
+        state = state.copy(manualEntry = true, manualInput = "74.05")
         start()
         readout().performClick()
         composeRule.waitForIdle()
@@ -405,7 +424,7 @@ class EntryScreenTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText(MueValidation.WEIGHT_ERROR).assertDoesNotExist()
-        assertEquals(999, state.weight.tenthsKg)
+        assertEquals(9_990, state.weight.hundredthsKg)
     }
 
     // --- FR-ENTRY-005, the date ------------------------------------------------------
@@ -476,8 +495,8 @@ class EntryScreenTest {
     }
 
     private companion object {
-        const val INCREASE = "Increase weight by 0.1 kilograms"
-        const val DECREASE = "Decrease weight by 0.1 kilograms"
+        const val INCREASE = "Increase weight by 0.05 kilograms"
+        const val DECREASE = "Decrease weight by 0.05 kilograms"
     }
 }
 

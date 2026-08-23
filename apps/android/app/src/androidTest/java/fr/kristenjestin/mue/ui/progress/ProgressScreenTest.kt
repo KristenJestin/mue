@@ -91,8 +91,28 @@ class ProgressScreenTest {
             "$CURRENT_WEIGHT_LABEL ${ProgressFormat.weight(kilograms(74.5))} kilograms",
         ).assertExists()
         compose.onNodeWithContentDescription(
-            "$AVERAGE_PACE_LABEL ${ProgressFormat.signed(-0.3)} kilograms per week",
+            "$AVERAGE_PACE_LABEL ${ProgressFormat.signedPace(-0.3)} kilograms per week",
         ).assertExists()
+    }
+
+    /**
+     * PRD FR-PROGRESS-003 and 004: a weight carries two decimals wherever it appears, while
+     * the pace stays a one-decimal derived value.
+     */
+    @Test
+    fun weightsShowTwoDecimalsAndThePaceStaysAtOne() {
+        setContent(state(halfSteps()))
+
+        compose.onNodeWithContentDescription(
+            "$CURRENT_WEIGHT_LABEL 74.05 kilograms",
+        ).assertExists()
+        compose.onNodeWithContentDescription(
+            "$AVERAGE_PACE_LABEL −0.3 kilograms per week",
+        ).assertExists()
+
+        compose.onNodeWithTag(ProgressTestTags.LIST).performScrollToNode(hasText("74.05 kg"))
+        compose.onNodeWithText("74.05 kg").assertIsDisplayed()
+        compose.onNodeWithText("−0.45 kg").assertExists()
     }
 
     @Test
@@ -176,9 +196,9 @@ class ProgressScreenTest {
             editorActions = ProgressEditorActions(onWeightChange = { typed = it }),
         )
 
-        compose.onNodeWithText("74.9").performTextReplacement("73.2")
+        compose.onNodeWithText("74.90").performTextReplacement("73.25")
 
-        assertEquals("73.2", typed)
+        assertEquals("73.25", typed)
     }
 
     @Test
@@ -292,6 +312,12 @@ private fun populated(): List<Measurement> = listOf(
     measurement(0, 74.5),
 )
 
+/** Ten days losing 0.45 kg: a change no single decimal can show, at a pace of `−0.3` a week. */
+private fun halfSteps(): List<Measurement> = listOf(
+    measurement(10, 74.5),
+    measurement(0, 74.05),
+)
+
 private fun state(
     points: List<Measurement>,
     hasAnyMeasurement: Boolean = points.isNotEmpty(),
@@ -318,7 +344,7 @@ private fun state(
 )
 
 private fun editor(
-    weightInput: String = "74.9",
+    weightInput: String = "74.90",
     weightError: String? = null,
     deleteConfirmationVisible: Boolean = false,
 ): EditorUiState = EditorUiState(

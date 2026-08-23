@@ -29,8 +29,8 @@ class MueValidationTest {
 
     @Test
     fun `weight accepts both bounds`() {
-        assertEquals(300, MueValidation.validateWeightKg(30.0).valueOrNull?.tenthsKg)
-        assertEquals(2500, MueValidation.validateWeightKg(250.0).valueOrNull?.tenthsKg)
+        assertEquals(3_000, MueValidation.validateWeightKg(30.0).valueOrNull?.hundredthsKg)
+        assertEquals(25_000, MueValidation.validateWeightKg(250.0).valueOrNull?.hundredthsKg)
     }
 
     @Test
@@ -45,23 +45,26 @@ class MueValidationTest {
 
     @Test
     fun `typed weight accepts a dot separator`() {
-        assertEquals(745, MueValidation.validateWeightInput("74.5").valueOrNull?.tenthsKg)
+        assertEquals(7_405, MueValidation.validateWeightInput("74.05").valueOrNull?.hundredthsKg)
     }
 
     @Test
     fun `typed weight accepts a comma separator whatever the phone language is`() {
-        assertEquals(745, MueValidation.validateWeightInput("74,5").valueOrNull?.tenthsKg)
+        assertEquals(7_405, MueValidation.validateWeightInput("74,05").valueOrNull?.hundredthsKg)
     }
 
     @Test
     fun `typed weight tolerates surrounding whitespace`() {
-        assertEquals(745, MueValidation.validateWeightInput("  74,5  ").valueOrNull?.tenthsKg)
+        assertEquals(7_405, MueValidation.validateWeightInput("  74,05  ").valueOrNull?.hundredthsKg)
     }
 
+    /** PRD FR-ENTRY-004: two decimals go in, the nearest 0.05 kg comes out. */
     @Test
-    fun `typed weight rounds to the nearest tenth`() {
-        assertEquals(745, MueValidation.validateWeightInput("74,45").valueOrNull?.tenthsKg)
-        assertEquals(744, MueValidation.validateWeightInput("74,44").valueOrNull?.tenthsKg)
+    fun `typed weight rounds to the nearest twentieth of a kilogram`() {
+        assertEquals(7_405, MueValidation.validateWeightInput("74,04").valueOrNull?.hundredthsKg)
+        assertEquals(7_405, MueValidation.validateWeightInput("74,06").valueOrNull?.hundredthsKg)
+        assertEquals(7_400, MueValidation.validateWeightInput("74,02").valueOrNull?.hundredthsKg)
+        assertEquals(7_410, MueValidation.validateWeightInput("74,08").valueOrNull?.hundredthsKg)
     }
 
     @Test
