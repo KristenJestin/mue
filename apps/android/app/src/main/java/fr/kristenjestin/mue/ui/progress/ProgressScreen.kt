@@ -150,19 +150,21 @@ internal fun ProgressContent(
                 MueScreenTitle(title = SCREEN_TITLE, eyebrow = SCREEN_EYEBROW)
             }
 
-            if (state.showEmptyState) {
-                item(key = "empty") {
-                    EmptyState(modifier = Modifier.padding(top = spacing.xxl))
-                }
-                return@LazyColumn
-            }
-
+            // PRD 15.1 hides the indicators until something is recorded, but the filters are
+            // part of the screen's shape and stay put, as in the prototype.
             item(key = "periods") {
                 PeriodRow(
                     selected = state.period,
                     onSelect = onSelectPeriod,
                     modifier = Modifier.padding(top = spacing.lg),
                 )
+            }
+
+            if (state.showEmptyState) {
+                item(key = "empty") {
+                    EmptyState(modifier = Modifier.padding(top = spacing.lg))
+                }
+                return@LazyColumn
             }
 
             item(key = "chart") {
@@ -442,18 +444,25 @@ private fun HistoryRow(
     }
 }
 
+/**
+ * PRD 15.1, in the chart's own footprint: the invitation stands where the curve will be, so
+ * the first measurement fills a shape the user has already seen rather than growing a new one.
+ */
 @Composable
 private fun EmptyState(modifier: Modifier = Modifier) {
-    MueSurfaceCard(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-    ) {
-        MueText(EMPTY_STATE_TITLE, MueTheme.typography.sectionTitle)
-        MueText(
-            text = EMPTY_STATE_BODY,
-            style = MueTheme.typography.body,
-            color = MueTheme.colors.textSecondary,
-        )
+    MueSurfaceCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.fillMaxWidth().heightIn(min = ChartHeight),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            MueText(EMPTY_STATE_TITLE, MueTheme.typography.sectionTitle)
+            MueText(
+                text = EMPTY_STATE_BODY,
+                style = MueTheme.typography.body,
+                color = MueTheme.colors.textSecondary,
+                modifier = Modifier.padding(top = MueTheme.spacing.sm),
+            )
+        }
     }
 }
 
