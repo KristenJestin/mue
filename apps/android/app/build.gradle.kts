@@ -54,6 +54,12 @@ android {
         }
     }
 
+    // `MigrationTestHelper` reads the exported schemas off the test APK, so the folder KSP
+    // writes them to has to ship as an androidTest asset.
+    sourceSets.getByName("androidTest") {
+        assets.srcDirs(files("$projectDir/schemas"))
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -114,4 +120,25 @@ dependencies {
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+}
+
+/*
+ * Realigns kotlinx-serialization on the version Room is built against.
+ *
+ * `androidx.room:room-migration` — what `MigrationTestHelper` parses the exported schema with —
+ * asks for 1.8.1, while `androidx.savedstate` brings the 1.7.3 BOM, which pins the whole family
+ * *strictly*. Two strict versions cannot be reconciled by ordering, so `force` is the only way
+ * out; left alone, the helper dies inside its own generated serializers with an
+ * `AbstractMethodError` on `GeneratedSerializer.typeParametersSerializers`.
+ *
+ * The force covers the app as well as the test APK on purpose: an instrumentation APK loads
+ * shared classes from the app's classloader first, so pinning the test side alone would change
+ * nothing. Mue itself serializes nothing — no `@Serializable` in the sources — so the bump only
+ * moves a library both AndroidX artifacts already expect to share.
+ */
+configurations.configureEach {
+    resolutionStrategy.force(
+        "org.jetbrains.kotlinx:kotlinx-serialization-core:${libs.versions.kotlinxSerialization.get()}",
+        "org.jetbrains.kotlinx:kotlinx-serialization-json:${libs.versions.kotlinxSerialization.get()}",
+    )
 }
