@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
@@ -29,6 +30,9 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 
 /** Plain holder, not snapshot state: reading it must not invalidate the composition. */
 private class PreviousText(var value: String)
+
+/** Gap between the number and its unit. Published so a caller can budget width for both. */
+val MueAnimatedNumberSuffixGap: Dp = 6.dp
 
 /**
  * Numeric readout whose digits roll vertically when the value changes, upwards when the
@@ -111,7 +115,10 @@ fun MueAnimatedNumber(
                 text = it,
                 style = suffixStyle,
                 color = suffixColor,
-                modifier = Modifier.padding(start = 6.dp, bottom = 8.dp),
+                // A unit is read as one word: `kg` breaking into `k` over `g` is never the
+                // right answer to a value one glyph too wide.
+                maxLines = 1,
+                modifier = Modifier.padding(start = MueAnimatedNumberSuffixGap, bottom = 8.dp),
             )
         }
     }
@@ -123,7 +130,7 @@ private fun String.digitsAsLong(): Long = filter { it.isDigit() }.toLongOrNull()
 @Composable
 private fun MueAnimatedNumberPreview() {
     MuePreviewHost {
-        MueAnimatedNumber(text = "74.5", suffix = "kg")
+        MueAnimatedNumber(text = "74.05", suffix = "kg")
         MueAnimatedNumber(
             text = "23.0",
             style = MueTheme.typography.metricLarge,

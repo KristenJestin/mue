@@ -87,6 +87,10 @@ private const val MediumTickAlpha = 1f
 /** How long the amber flare lingers on the marker after a save (PRD 13). */
 private const val SaveFlareMillis = 700
 
+/** Discrete positions TalkBack can stop on: one per 0.05 kg, ends excluded. */
+private val AdjustableSteps: Int =
+    (Weight.MAX_HUNDREDTHS - Weight.MIN_HUNDREDTHS) / Weight.STEP_HUNDREDTHS - 1
+
 /**
  * The touch scale: a fixed amber marker with the ruler sliding underneath it.
  *
@@ -111,7 +115,7 @@ fun WeightRuler(
     val colors = MueTheme.colors
     val density = LocalDensity.current
     val reduceMotion = LocalReduceMotion.current
-    val pixelsPerTenth = with(density) { RulerPhysics.DP_PER_TENTH.dp.toPx() }
+    val pixelsPerHundredth = with(density) { RulerPhysics.DP_PER_HUNDREDTH.dp.toPx() }
 
     val currentOnWeightChange by rememberUpdatedState(onWeightChange)
     val currentOnHapticTick by rememberUpdatedState(onHapticTick)
@@ -126,10 +130,10 @@ fun WeightRuler(
      * keyboard or from `−` / `+` leaves [RulerState.interacting] false and stays silent.
      */
     LaunchedEffect(ruler) {
-        var previous = ruler.displayedTenths
-        snapshotFlow { ruler.displayedTenths }.collect { tenths ->
-            val crossed = RulerPhysics.crossesHapticStep(previous, tenths)
-            previous = tenths
+        var previous = ruler.displayedHundredths
+        snapshotFlow { ruler.displayedHundredths }.collect { hundredths ->
+            val crossed = RulerPhysics.crossesHapticStep(previous, hundredths)
+            previous = hundredths
             if (crossed && ruler.interacting) currentOnHapticTick()
         }
     }
@@ -149,7 +153,7 @@ fun WeightRuler(
     }
 
     val gestureModifier = if (enabled) {
-        Modifier.pointerInput(pixelsPerTenth) {
+        Modifier.pointerInput(pixelsPerHundredth) {
             awaitEachGesture {
                 // One scope from touch down to lift, so no pointer event can fall between two
                 // of them — on the one control that has to track the finger without a
@@ -162,17 +166,19 @@ fun WeightRuler(
 
                 horizontalDrag(down.id) { change ->
                     tracker.addPosition(change.uptimeMillis, change.position)
-                    ruler.onDrag(change.positionChange().x, pixelsPerTenth)
+                    ruler.onDrag(change.positionChange().x, pixelsPerHundredth)
                     change.consume()
                 }
 
                 ruler.onDragEnd(
-                    velocityTenthsPerSecond = RulerPhysics.velocityToTenths(
+                    velocityHundredthsPerSecond = RulerPhysics.velocityToHundredths(
                         tracker.calculateVelocity().x,
-                        pixelsPerTenth,
+                        pixelsPerHundredth,
                     ),
                     allowFling = allowFling,
-                ) { tenths -> currentOnWeightChange(Weight.ofTenthsClamped(tenths)) }
+                ) { hundredths ->
+                    currentOnWeightChange(Weight.ofHundredthsClamped(hundredths))
+                }
             }
         }
     } else {
@@ -188,16 +194,16 @@ fun WeightRuler(
                 contentDescription = "Weight scale"
                 stateDescription = EntryFormat.spokenWeight(weight)
                 progressBarRangeInfo = ProgressBarRangeInfo(
-                    current = weight.tenthsKg.toFloat(),
+                    current = weight.hundredthsKg.toFloat(),
                     range = RulerPhysics.LOWER_STOP..RulerPhysics.UPPER_STOP,
-                    steps = Weight.MAX_TENTHS - Weight.MIN_TENTHS - 1,
+                    steps = AdjustableSteps,
                 )
                 setProgress { value ->
-                    val tenths = RulerPhysics.snapToTenth(value)
+                    val hundredths = RulerPhysics.snapToStep(value)
                     // The ruler is moved here rather than through the screen's state: an
                     // accessibility action is an order, and orders move the scale directly.
-                    ruler.jumpTo(tenths)
-                    currentOnWeightChange(Weight.ofTenthsClamped(tenths))
+                    ruler.jumpTo(hundredths)
+                    currentOnWeightChange(Weight.ofHundredthsClamped(hundredths))
                     true
                 }
                 if (!enabled) disabled()
@@ -218,7 +224,7 @@ private class RulerPalette(val quiet: Color, val major: Color, val accent: Color
  */
 private class RulerCanvasCache(
     val centreX: Float,
-    val pixelsPerTenth: Float,
+    val pixelsPerHundredth: Float,
     val tickCentre: Float,
     val labelTop: Float,
     val glowCentre: Offset,
@@ -242,16 +248,19 @@ private fun Modifier.rulerGraduations(
     val cache = buildCanvasCache(palette.accent, flare.value)
 
     onDrawBehind {
-        val position = ruler.positionTenths
+        val position = ruler.positionHundredths
         val centreX = cache.centreX
-        val pixelsPerTenth = cache.pixelsPerTenth
+        val pixelsPerHundredth = cache.pixelsPerHundredth
 
-        for (tenth in RulerPhysics.visibleTenths(position, centreX, pixelsPerTenth)) {
-            val x = RulerPhysics.tickX(tenth, position, pixelsPerTenth, centreX)
+        // Indexed by graduation, not by reachable value: the scale settles every 0.05 kg but
+        // still draws a line every 0.1 kg (PRD FR-ENTRY-002), so this loop is the length it
+        // has always been. Iterating the values instead would double it, every frame.
+        for (index in RulerPhysics.visibleTicks(position, centreX, pixelsPerHundredth)) {
+            val x = RulerPhysics.tickX(index, position, pixelsPerHundredth, centreX)
             val alpha = RulerPhysics.edgeAlpha(x - centreX, centreX)
             if (alpha <= 0.01f) continue
 
-            val tick = RulerPhysics.tickOf(tenth)
+            val tick = RulerPhysics.tickOf(index)
             val halfHeight = when (tick) {
                 RulerTick.Minor -> MinorTickHalfHeight
                 RulerTick.Medium -> MediumTickHalfHeight
@@ -278,7 +287,7 @@ private fun Modifier.rulerGraduations(
 
             if (tick == RulerTick.Major) {
                 val label = textMeasurer.measure(
-                    (tenth / RulerPhysics.TENTHS_PER_KILOGRAM).toString(),
+                    RulerPhysics.tickLabel(index).toString(),
                     labelStyle,
                 )
                 drawText(
@@ -303,7 +312,7 @@ private fun CacheDrawScope.buildCanvasCache(accent: Color, flare: Float): RulerC
     val glowCentre = Offset(centreX, (MarkerTop.toPx() + MarkerBottom.toPx()) / 2f)
     return RulerCanvasCache(
         centreX = centreX,
-        pixelsPerTenth = RulerPhysics.DP_PER_TENTH.dp.toPx(),
+        pixelsPerHundredth = RulerPhysics.DP_PER_HUNDREDTH.dp.toPx(),
         tickCentre = TickCentreY.toPx(),
         labelTop = LabelTop.toPx(),
         glowCentre = glowCentre,
@@ -338,12 +347,15 @@ private fun DrawScope.drawMarker(centreX: Float, accent: Color, cache: RulerCanv
  * The repeat lives in a plain coroutine rather than in a gesture library so it can accelerate,
  * and the click is published through semantics so TalkBack's double tap gives one clean step
  * with no long press involved.
+ *
+ * [onStep] is told whether it was reached by a deliberate press or by the auto-repeat of a
+ * held one. Only the caller knows what to make of that; the button itself treats them alike.
  */
 @Composable
 fun RulerStepButton(
     glyph: String,
     stepDescription: String,
-    onStep: () -> Unit,
+    onStep: (held: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
@@ -368,8 +380,8 @@ fun RulerStepButton(
                         awaitPointerEventScope {
                             awaitFirstDown().consume()
                             pressed = true
-                            currentOnStep()
-                            val repeat = launch { repeatStep { currentOnStep() } }
+                            currentOnStep(false)
+                            val repeat = launch { repeatStep { currentOnStep(true) } }
                             waitForUpOrCancellation()
                             repeat.cancel()
                             pressed = false
@@ -381,7 +393,7 @@ fun RulerStepButton(
                 role = Role.Button
                 contentDescription = stepDescription
                 onClick {
-                    currentOnStep()
+                    currentOnStep(false)
                     true
                 }
                 if (!enabled) disabled()

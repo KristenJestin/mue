@@ -43,7 +43,7 @@ class EntryViewModel(
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
 
     /** True once the value on screen belongs to the user; the history must no longer overwrite it. */
-    private var valueIsUserOwned: Boolean = savedState.contains(KEY_WEIGHT_TENTHS)
+    private var valueIsUserOwned: Boolean = savedState.contains(KEY_WEIGHT_HUNDREDTHS)
 
     init {
         if (!valueIsUserOwned) seedFromHistory()
@@ -63,20 +63,20 @@ class EntryViewModel(
     fun onWeightChanged(weight: Weight) {
         if (_uiState.value.weight == weight) return
         valueIsUserOwned = true
-        savedState[KEY_WEIGHT_TENTHS] = weight.tenthsKg
+        savedState[KEY_WEIGHT_HUNDREDTHS] = weight.hundredthsKg
         _uiState.update { it.copy(weight = weight) }
     }
 
-    /** One press of `−` or `+`, clamped at the matching end stop (PRD FR-ENTRY-003). */
+    /** [steps] presses of `−` or `+`, 0.05 kg each, clamped at the end stop (PRD FR-ENTRY-003). */
     fun onStep(steps: Int) {
         val current = _uiState.value.weight
-        setWeight(Weight.ofTenthsClamped(RulerPhysics.step(current.tenthsKg, steps)))
+        setWeight(Weight.ofHundredthsClamped(RulerPhysics.step(current.hundredthsKg, steps)))
     }
 
     /** Any source other than the scale itself; the scale is told to follow. */
     private fun setWeight(weight: Weight) {
         valueIsUserOwned = true
-        savedState[KEY_WEIGHT_TENTHS] = weight.tenthsKg
+        savedState[KEY_WEIGHT_HUNDREDTHS] = weight.hundredthsKg
         _uiState.update { it.copy(weight = weight, weightRevision = it.weightRevision + 1) }
     }
 
@@ -190,11 +190,11 @@ class EntryViewModel(
     // --- Wiring ---------------------------------------------------------------------
 
     private fun restoredState(): EntryUiState {
-        val restoredTenths: Int? = savedState[KEY_WEIGHT_TENTHS]
+        val restoredHundredths: Int? = savedState[KEY_WEIGHT_HUNDREDTHS]
         val restoredDate: String? = savedState[KEY_DATE]
         val currentDay = today()
         return EntryUiState(
-            weight = restoredTenths?.let(Weight::ofTenthsClamped) ?: Weight.DEFAULT,
+            weight = restoredHundredths?.let(Weight::ofHundredthsClamped) ?: Weight.DEFAULT,
             date = restoredDate?.let(LocalDate::parse) ?: currentDay,
             today = currentDay,
             manualEntry = savedState[KEY_MANUAL_ENTRY] ?: false,
@@ -235,7 +235,7 @@ class EntryViewModel(
         /** PRD 15.4 asks for a comprehensible message and a retry, not a silent failure. */
         const val SAVE_ERROR: String = "Could not save this measurement. Try again."
 
-        private const val KEY_WEIGHT_TENTHS = "entry.weightTenths"
+        private const val KEY_WEIGHT_HUNDREDTHS = "entry.weightHundredths"
         private const val KEY_DATE = "entry.date"
         private const val KEY_MANUAL_ENTRY = "entry.manualEntry"
         private const val KEY_MANUAL_INPUT = "entry.manualInput"

@@ -132,6 +132,14 @@ val MueTypeScale: MueTypography = MueTypography(
         letterSpacing = 0.2.em,
         textAlign = TextAlign.Center,
     ),
+    /**
+     * The hero readout's *ceiling*, not its guaranteed size.
+     *
+     * Since BR-003 gained a second decimal the widest reading is six glyphs, `250.00`, and on
+     * a phone that no longer clears the `−` and `+` controls at this size. Entry measures the
+     * widest reading against the room it actually has and scales this down when it must, so
+     * the value is as large as the screen allows rather than as large as this line says.
+     */
     weightDisplay = TextStyle(
         fontFamily = Sora,
         fontWeight = FontWeight.Medium,

@@ -32,10 +32,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -47,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
+import fr.kristenjestin.mue.ui.components.MueAnimatedNumberSuffixGap
 import fr.kristenjestin.mue.ui.components.MueFieldContainer
 import fr.kristenjestin.mue.ui.components.MueHaptics
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
@@ -57,6 +62,7 @@ import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.rememberMueHaptics
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
+import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
@@ -67,8 +73,12 @@ private const val TypeHint = "TYPE YOUR WEIGHT"
 private const val ManualEntryLabel = "Weight in kilograms"
 private const val SaveLabel = "Save measurement"
 private const val SaveSuccessLabel = "Saved ✓"
-private const val DecreaseLabel = "Decrease weight by 0.1 kilograms"
-private const val IncreaseLabel = "Increase weight by 0.1 kilograms"
+private const val DecreaseLabel = "Decrease weight by 0.05 kilograms"
+private const val IncreaseLabel = "Increase weight by 0.05 kilograms"
+private const val WeightUnit = "kg"
+
+/** One press of `−` or `+` moves the scale by a single step (PRD FR-ENTRY-003). */
+private const val OneStep = 1
 
 /** How far the ruler drops as it hands over to the keyboard (PRD 13, 180 ms). */
 private val ManualEntrySlide: Dp = 24.dp
@@ -138,7 +148,7 @@ internal fun EntryContent(
     LaunchedEffect(state.weightRevision) {
         // A gesture in flight owns the value: the history seed arriving mid-drag must not
         // snatch it back (PRD FR-ENTRY-001).
-        if (!ruler.interacting) ruler.jumpTo(state.weight.tenthsKg)
+        if (!ruler.interacting) ruler.jumpTo(state.weight.hundredthsKg)
     }
 
     LaunchedEffect(state.saveFlareCount) {
@@ -194,7 +204,7 @@ internal fun EntryContent(
             // Touching the value toggles, as in the prototype. It is also the way back out of a
             // value the keyboard refuses to accept, which `Done` deliberately will not do.
             onClick = if (state.manualEntry) onDismissManualEntry else onOpenManualEntry,
-            onStep = { steps -> stepWithHaptics(state.weight, steps, haptics, onStep) },
+            onStep = { steps, held -> stepWithHaptics(state.weight, steps, held, haptics, onStep) },
             stepsEnabled = !state.manualEntry,
             atLowerStop = state.isAtLowerStop,
             atUpperStop = state.isAtUpperStop,
@@ -267,7 +277,7 @@ internal fun EntryContent(
             onClick = {
                 // The scale reports where it stopped, so a save landed on mid-glide would
                 // otherwise record the value the finger left rather than the one on screen.
-                onWeightChange(Weight.ofTenthsClamped(ruler.displayedTenths))
+                onWeightChange(Weight.ofHundredthsClamped(ruler.displayedHundredths))
                 onSave()
             },
             modifier = Modifier.padding(top = spacing.md),
@@ -303,7 +313,7 @@ private fun HeroReadout(
     ruler: RulerState,
     manualEntry: Boolean,
     onClick: () -> Unit,
-    onStep: (Int) -> Unit,
+    onStep: (steps: Int, held: Boolean) -> Unit,
     stepsEnabled: Boolean,
     atLowerStop: Boolean,
     atUpperStop: Boolean,
@@ -321,17 +331,22 @@ private fun HeroReadout(
             RulerStepButton(
                 glyph = "−",
                 stepDescription = DecreaseLabel,
-                onStep = { onStep(-RulerPhysics.STEP_TENTHS) },
+                onStep = { held -> onStep(-OneStep, held) },
                 enabled = stepsEnabled && !atLowerStop,
                 modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
             )
             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                HeroValue(ruler = ruler, manualEntry = manualEntry, onClick = onClick)
+                HeroValue(
+                    ruler = ruler,
+                    style = rememberHeroValueStyle(),
+                    manualEntry = manualEntry,
+                    onClick = onClick,
+                )
             }
             RulerStepButton(
                 glyph = "+",
                 stepDescription = IncreaseLabel,
-                onStep = { onStep(RulerPhysics.STEP_TENTHS) },
+                onStep = { held -> onStep(OneStep, held) },
                 enabled = stepsEnabled && !atUpperStop,
                 modifier = Modifier.graphicsLayer { alpha = controlsAlpha },
             )
@@ -353,11 +368,17 @@ private fun HeroReadout(
  * one reading becomes another, and a drag has no readings, only a blur (PRD FR-ENTRY-002).
  */
 @Composable
-private fun HeroValue(ruler: RulerState, manualEntry: Boolean, onClick: () -> Unit) {
-    val weight = Weight.ofTenthsClamped(ruler.displayedTenths)
+private fun HeroValue(
+    ruler: RulerState,
+    style: TextStyle,
+    manualEntry: Boolean,
+    onClick: () -> Unit,
+) {
+    val weight = Weight.ofHundredthsClamped(ruler.displayedHundredths)
     MueAnimatedNumber(
         text = EntryFormat.weight(weight),
-        suffix = "kg",
+        style = style,
+        suffix = WeightUnit,
         contentDescription = EntryFormat.spokenWeight(weight),
         horizontalArrangement = Arrangement.Center,
         rolling = !ruler.interacting,
@@ -368,9 +389,80 @@ private fun HeroValue(ruler: RulerState, manualEntry: Boolean, onClick: () -> Un
                 role = Role.Button,
                 onClick = onClick,
             )
-            .padding(horizontal = MueTheme.spacing.md, vertical = MueTheme.spacing.xs),
+            .padding(horizontal = MueTheme.spacing.sm, vertical = MueTheme.spacing.xs),
     )
 }
+
+/**
+ * The readout's type style, shrunk from the design system's `weightDisplay` only as far as
+ * the phone's width demands.
+ *
+ * Two decimals made the widest reading of BR-003 six glyphs, and with tabular figures every
+ * reading is then as wide as `250.00`. At the design system's own size that no longer clears
+ * the `−` and `+` controls: the unit wrapped, and shaving padding could not buy back a whole
+ * glyph. So the widest reading is measured against the room the row actually has, and the
+ * style is scaled to fit — the ceiling stays the token, the floor is whatever the screen is.
+ *
+ * It is sized on the *widest* reading rather than the current one on purpose. Sizing on the
+ * value on screen would resize the number as digits came and went, under the finger, during
+ * the one gesture that must stay steady (PRD 16.2).
+ */
+@Composable
+private fun rememberHeroValueStyle(): TextStyle {
+    val base = MueTheme.typography.weightDisplay
+    val unitStyle = MueTheme.typography.body
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val spacing = MueTheme.spacing
+    val containerWidth = LocalWindowInfo.current.containerSize.width
+
+    return remember(base, unitStyle, measurer, density, spacing, containerWidth) {
+        // Everything the row spends before the number gets any: the screen gutter, the two
+        // step controls, the readout's own padding and the gap before the unit.
+        val occupied = with(density) {
+            (spacing.screenHorizontal * 2 + MueMinTouchTarget * 2 +
+                spacing.sm * 2 + MueAnimatedNumberSuffixGap).roundToPx()
+        }
+        val unit = measurer.measure(WeightUnit, unitStyle).size.width
+        val room = containerWidth - occupied - unit
+        if (room <= 0) return@remember base
+
+        val widest = EntryFormat.weight(WidestWeight)
+        var style = base
+        // Measured again after each shrink rather than trusted once: font sizes round to whole
+        // pixels, so width does not follow the ratio exactly, and one pixel over is all it took
+        // to push `kg` off the row.
+        repeat(HeroFitAttempts) {
+            val width = measurer.rolledWidthOf(widest, style)
+            if (width <= room) return@remember style
+            val scale = room.toFloat() / width
+            style = style.copy(
+                fontSize = style.fontSize * scale,
+                lineHeight = style.lineHeight * scale,
+            )
+        }
+        style
+    }
+}
+
+/**
+ * Width of [text] laid out the way the readout lays it out while it rolls: one node per glyph.
+ *
+ * A rolling digit is its own composable, so the row is the sum of six independently rounded
+ * glyph boxes and comes out wider than the same string measured as a single run. Budgeting
+ * from the single run is what left the unit with no room.
+ */
+private fun TextMeasurer.rolledWidthOf(text: String, style: TextStyle): Int {
+    var width = 0
+    for (character in text) width += measure(character.toString(), style).size.width
+    return width
+}
+
+/** `250.00`: with tabular figures, no reading is wider (PRD BR-003). */
+private val WidestWeight: Weight = Weight.ofHundredthsClamped(Weight.MAX_HUNDREDTHS)
+
+/** Shrink passes allowed before the readout is accepted as it stands; two always suffice. */
+private const val HeroFitAttempts = 4
 
 /**
  * The keyboard alternative of PRD FR-ENTRY-004.
@@ -459,15 +551,25 @@ private fun ManualWeightField(
     }
 }
 
+/**
+ * Every deliberate press of `−` or `+` gets its own tick; a held repeat keeps the ruler's
+ * half-kilogram cadence.
+ *
+ * The cadence of PRD FR-ENTRY-002 measures distance travelled, which is exactly what a hold
+ * is. A single press is not travel but a discrete act, and it has to confirm itself: at
+ * 0.05 kg a press it would otherwise stay silent eight times in ten, which reads as a control
+ * that did not register. Ticking on each repeat instead would buzz rather than tick — the
+ * repeat accelerates to one step every 36 ms — and put a vibrator call on every one of them.
+ */
 private fun stepWithHaptics(
     weight: Weight,
     steps: Int,
+    held: Boolean,
     haptics: MueHaptics,
     onStep: (Int) -> Unit,
 ) {
-    if (RulerPhysics.crossesHapticStep(weight.tenthsKg, RulerPhysics.step(weight.tenthsKg, steps))) {
-        haptics.tick()
-    }
+    val landing = RulerPhysics.step(weight.hundredthsKg, steps)
+    if (!held || RulerPhysics.crossesHapticStep(weight.hundredthsKg, landing)) haptics.tick()
     onStep(steps)
 }
 
@@ -487,7 +589,7 @@ private fun Modifier.fullBleed(gutter: Dp): Modifier = layout { measurable, cons
 // --- Previews -----------------------------------------------------------------------
 
 private fun previewState(
-    weight: Double = 74.5,
+    weight: Double = 74.05,
     greeting: String? = "Hello Kris,",
     manualEntry: Boolean = false,
     manualInput: String = "",
@@ -496,7 +598,7 @@ private fun previewState(
 ): EntryUiState {
     val today = LocalDate.of(2026, 8, 23)
     return EntryUiState(
-        weight = Weight.ofTenthsClamped((weight * 10).toInt()),
+        weight = requireNotNull(Weight.ofKilogramsOrNull(weight)),
         date = today,
         today = today,
         greeting = greeting,
@@ -538,7 +640,7 @@ private fun EntryNoGreetingPreview() = EntryPreview(previewState(greeting = null
 @Preview(name = "Entry · manual entry", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
 @Composable
 private fun EntryManualPreview() = EntryPreview(
-    previewState(manualEntry = true, manualInput = "74.5")
+    previewState(manualEntry = true, manualInput = "74.05")
 )
 
 @Preview(name = "Entry · rejected value", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)

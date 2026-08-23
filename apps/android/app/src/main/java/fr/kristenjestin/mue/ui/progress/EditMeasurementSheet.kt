@@ -230,7 +230,7 @@ private fun EditMeasurementPanelPreview() {
                 editor = EditorUiState(
                     originalDate = LocalDate.of(2026, 8, 18),
                     date = LocalDate.of(2026, 8, 18),
-                    weightInput = "74.9",
+                    weightInput = "74.90",
                     weightError = null,
                     datePickerVisible = false,
                     deleteConfirmationVisible = false,

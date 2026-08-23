@@ -17,8 +17,9 @@ object MueValidation {
     const val BIRTH_DATE_ERROR: String = "Enter a valid date of birth"
 
     /**
-     * Rounds to the nearest tenth, then rejects anything outside 30.0–250.0 kg
-     * (PRD FR-ENTRY-004, BR-003).
+     * Rounds to the nearest 0.05 kg, then rejects anything outside 30.0–250.0 kg
+     * (PRD FR-ENTRY-004, BR-003). The bounds keep their one-decimal wording in
+     * [WEIGHT_ERROR]: they are unchanged, and `30.00` would only look like a new rule.
      */
     fun validateWeightKg(kilograms: Double): Validated<Weight> =
         Weight.ofKilogramsOrNull(kilograms)

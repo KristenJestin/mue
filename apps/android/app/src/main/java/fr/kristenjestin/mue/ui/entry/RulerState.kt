@@ -22,30 +22,31 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Where the scale currently is, in tenths of a kilogram, and how it gets there.
+ * Where the scale currently is, in hundredths of a kilogram, and how it gets there.
  *
  * A drag delivers a pointer event every few milliseconds. Routing each of them through the
  * ViewModel would rebuild the whole Entry tree between the finger and the pixels, which is
  * precisely the perceptible lag PRD 16.2 forbids — so the live position stops here. Two
- * snapshot values leave this object and each has exactly one reader: [positionTenths] is read
- * from the ruler's *draw* scope, so movement costs a redraw and never a recomposition, and
- * [displayedTenths] is read by the hero readout alone, which is the only other thing on the
- * screen that has to follow the finger. The ViewModel is told once, when the scale stops.
+ * snapshot values leave this object and each has exactly one reader: [positionHundredths] is
+ * read from the ruler's *draw* scope, so movement costs a redraw and never a recomposition,
+ * and [displayedHundredths] is read by the hero readout alone, which is the only other thing
+ * on the screen that has to follow the finger. The ViewModel is told once, when the scale
+ * stops.
  *
  * The physics itself lives in [RulerPhysics]; this class only sequences it.
  */
 @Stable
 class RulerState internal constructor(
-    initialTenths: Int,
+    initialHundredths: Int,
     private val scope: CoroutineScope,
 ) {
 
     /** Continuous position under the marker. Read from the draw phase only. */
-    var positionTenths by mutableFloatStateOf(initialTenths.toFloat())
+    var positionHundredths by mutableFloatStateOf(initialHundredths.toFloat())
         private set
 
-    /** The nearest valid tenth: what the readout shows while the ruler is still moving. */
-    var displayedTenths by mutableIntStateOf(initialTenths)
+    /** The nearest valid 0.05 kg: what the readout shows while the ruler is still moving. */
+    var displayedHundredths by mutableIntStateOf(initialHundredths)
         private set
 
     /** True from touch-down until the scale has come to rest, inertia and magnetism included. */
@@ -61,6 +62,7 @@ class RulerState internal constructor(
     private val settleSpec: SpringSpec<Float> = spring(
         dampingRatio = RulerPhysics.SETTLE_DAMPING_RATIO,
         stiffness = RulerPhysics.SETTLE_STIFFNESS,
+        visibilityThreshold = RulerPhysics.SETTLE_VISIBILITY_THRESHOLD,
     )
 
     private var motion: Job? = null
@@ -81,34 +83,34 @@ class RulerState internal constructor(
         interacting = true
     }
 
-    fun onDrag(dragPx: Float, pixelsPerTenth: Float) {
-        moveTo(positionTenths + RulerPhysics.dragToTenths(dragPx, pixelsPerTenth))
+    fun onDrag(dragPx: Float, pixelsPerHundredth: Float) {
+        moveTo(positionHundredths + RulerPhysics.dragToHundredths(dragPx, pixelsPerHundredth))
     }
 
     /**
-     * Runs the inertia and the magnetism, then hands the landing tenth to [onRest].
+     * Runs the inertia and the magnetism, then hands the landing value to [onRest].
      *
      * [onRest] is the *only* moment the rest of the app hears about a drag. Publishing every
      * frame instead would put a ViewModel round trip and a recomposition of the screen on the
      * hot path of the one gesture that has to track the finger exactly.
      */
-    fun onDragEnd(velocityTenthsPerSecond: Float, allowFling: Boolean, onRest: (Int) -> Unit) {
+    fun onDragEnd(velocityHundredthsPerSecond: Float, allowFling: Boolean, onRest: (Int) -> Unit) {
         val gesture = generation
         motion = scope.launch {
             try {
-                settle(velocityTenthsPerSecond, allowFling)
+                settle(velocityHundredthsPerSecond, allowFling)
             } finally {
                 if (gesture == generation) interacting = false
             }
-            onRest(displayedTenths)
+            onRest(displayedHundredths)
         }
     }
 
     /** An order from outside the scale: the history seed, `−` / `+`, the keyboard, TalkBack. */
-    fun jumpTo(tenths: Int) {
+    fun jumpTo(hundredths: Int) {
         stopMotion()
         interacting = false
-        moveTo(tenths.toFloat())
+        moveTo(hundredths.toFloat())
     }
 
     private fun stopMotion() {
@@ -117,29 +119,29 @@ class RulerState internal constructor(
         motion = null
     }
 
-    private fun moveTo(tenths: Float) {
-        val clamped = RulerPhysics.clampPosition(tenths)
-        positionTenths = clamped
-        displayedTenths = RulerPhysics.snapToTenth(clamped)
+    private fun moveTo(hundredths: Float) {
+        val clamped = RulerPhysics.clampPosition(hundredths)
+        positionHundredths = clamped
+        displayedHundredths = RulerPhysics.snapToStep(clamped)
     }
 
     /**
-     * The short glide of PRD FR-ENTRY-002 followed by the pull onto the nearest tenth.
+     * The short glide of PRD FR-ENTRY-002 followed by the pull onto the nearest 0.05 kg.
      *
      * Clamping inside the decay is what makes 30.0 and 250.0 dead stops: the moment the
      * projected value leaves the range the animation is cancelled where it stands, which is
-     * already an exact tenth, so no rebound and no second animation follow.
+     * already an exact step, so no rebound and no second animation follow.
      */
-    private suspend fun settle(velocityTenthsPerSecond: Float, allowFling: Boolean) {
-        if (allowFling && RulerPhysics.isFlingWorthwhile(velocityTenthsPerSecond)) {
-            AnimationState(positionTenths, velocityTenthsPerSecond).animateDecay(decay) {
+    private suspend fun settle(velocityHundredthsPerSecond: Float, allowFling: Boolean) {
+        if (allowFling && RulerPhysics.isFlingWorthwhile(velocityHundredthsPerSecond)) {
+            AnimationState(positionHundredths, velocityHundredthsPerSecond).animateDecay(decay) {
                 moveTo(value)
-                if (value != positionTenths) cancelAnimation()
+                if (value != positionHundredths) cancelAnimation()
             }
         }
-        val target = displayedTenths.toFloat()
-        if (positionTenths != target) {
-            AnimationState(positionTenths).animateTo(target, settleSpec) { moveTo(value) }
+        val target = displayedHundredths.toFloat()
+        if (positionHundredths != target) {
+            AnimationState(positionHundredths).animateTo(target, settleSpec) { moveTo(value) }
         }
     }
 }
@@ -153,5 +155,5 @@ class RulerState internal constructor(
 @Composable
 fun rememberRulerState(initial: Weight): RulerState {
     val scope = rememberCoroutineScope()
-    return remember(scope) { RulerState(initial.tenthsKg, scope) }
+    return remember(scope) { RulerState(initial.hundredthsKg, scope) }
 }

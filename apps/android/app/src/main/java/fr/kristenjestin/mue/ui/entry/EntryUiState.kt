@@ -8,7 +8,7 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 /**
- * Everything the Entry screen draws. The weight lives here as a [Weight] — tenths of a
+ * Everything the Entry screen draws. The weight lives here as a [Weight] — hundredths of a
  * kilogram — and only becomes text at the very edge of the UI (PRD 11.1).
  */
 @Immutable
@@ -35,8 +35,8 @@ data class EntryUiState(
     /** Bumped on every successful save so the centre marker can flare once (PRD 13). */
     val saveFlareCount: Int = 0,
 ) {
-    val isAtLowerStop: Boolean get() = weight.tenthsKg <= Weight.MIN_TENTHS
-    val isAtUpperStop: Boolean get() = weight.tenthsKg >= Weight.MAX_TENTHS
+    val isAtLowerStop: Boolean get() = weight.hundredthsKg <= Weight.MIN_HUNDREDTHS
+    val isAtUpperStop: Boolean get() = weight.hundredthsKg >= Weight.MAX_HUNDREDTHS
     val isToday: Boolean get() = date == today
 }
 
@@ -44,13 +44,13 @@ data class EntryUiState(
  * Display formatting for the Entry screen.
  *
  * PRD BR-010: what the user reads follows the phone's language, so a French phone shows
- * `74,5`. The CSV never comes through here — it has its own, locale-proof writer.
+ * `74,05`. The CSV never comes through here — it has its own, locale-proof writer.
  */
 object EntryFormat {
 
-    /** One decimal, phone's decimal separator. */
+    /** Two decimals (PRD FR-ENTRY-002), phone's decimal separator. */
     fun weight(weight: Weight, locale: Locale = Locale.getDefault()): String =
-        String.format(locale, "%.1f", weight.kilograms)
+        String.format(locale, "%.2f", weight.kilograms)
 
     /** What TalkBack reads for the scale and the hero readout. */
     fun spokenWeight(weight: Weight, locale: Locale = Locale.getDefault()): String =

@@ -15,8 +15,9 @@ import java.time.LocalDate
  * ISO text also makes lexicographic order equal chronological order, so every query
  * sorts on the key itself.
  *
- * The weight is an integer count of tenths of a kilogram: no float ever touches the
- * database, so no rounding can drift.
+ * The weight is an integer count of hundredths of a kilogram: no float ever touches the
+ * database, so no rounding can drift. The column carries its unit in its name, so a row read
+ * by any tool is unambiguous — and the change of unit in version 2 could not be silent.
  */
 @Entity(tableName = MeasurementEntity.TABLE_NAME)
 data class MeasurementEntity(
@@ -24,20 +25,21 @@ data class MeasurementEntity(
     @ColumnInfo(name = "date")
     val date: String,
 
-    @ColumnInfo(name = "weight_dg")
-    val weightDg: Int,
+    @ColumnInfo(name = MeasurementEntity.WEIGHT_COLUMN)
+    val weightCg: Int,
 ) {
     companion object {
         const val TABLE_NAME = "measurements"
+        const val WEIGHT_COLUMN = "weight_cg"
     }
 }
 
 fun MeasurementEntity.toDomain(): Measurement = Measurement(
     date = LocalDate.parse(date),
-    weight = Weight.ofTenthsClamped(weightDg),
+    weight = Weight.ofHundredthsClamped(weightCg),
 )
 
 fun Measurement.toEntity(): MeasurementEntity = MeasurementEntity(
     date = date.toString(),
-    weightDg = weight.tenthsKg,
+    weightCg = weight.hundredthsKg,
 )

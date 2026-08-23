@@ -49,7 +49,7 @@ object StatisticsCalculator {
         val days = ChronoUnit.DAYS.between(first.date, last.date)
         if (days <= 0L) return ProgressStatistics(last, first, null, null)
 
-        val changeKg = (last.weight - first.weight) / 10.0
+        val changeKg = (last.weight - first.weight) / HUNDREDTHS_PER_KILOGRAM
         return ProgressStatistics(
             current = last,
             first = first,
@@ -59,4 +59,5 @@ object StatisticsCalculator {
     }
 
     private const val DAYS_PER_WEEK = 7.0
+    private const val HUNDREDTHS_PER_KILOGRAM = 100.0
 }

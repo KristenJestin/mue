@@ -8,7 +8,7 @@ import java.time.LocalDate
  * Builds the export file's bytes (PRD 9.5).
  *
  * Nothing here consults the default [java.util.Locale]: numbers are assembled digit
- * by digit from the stored tenths and dates come from `LocalDate.toString()`, which
+ * by digit from the stored hundredths and dates come from `LocalDate.toString()`, which
  * is ISO by definition. That is what makes the file byte-identical on a French
  * phone, as PRD FR-CSV-003 requires.
  */
@@ -39,9 +39,13 @@ object CsvExport {
     fun fileName(exportDate: LocalDate): String =
         "$FILE_NAME_PREFIX$exportDate$FILE_EXTENSION"
 
-    /** One decimal, always a dot, built from the integer tenths so no formatter is involved. */
+    /**
+     * Two decimals, always a dot, built from the integer hundredths so no formatter — and
+     * therefore no locale — is involved (PRD FR-CSV-003).
+     */
     fun formatWeight(weight: Weight): String {
-        val tenths = weight.tenthsKg
-        return "${tenths / 10}.${tenths % 10}"
+        val hundredths = weight.hundredthsKg
+        val fraction = hundredths % 100
+        return "${hundredths / 100}.${if (fraction < 10) "0" else ""}$fraction"
     }
 }

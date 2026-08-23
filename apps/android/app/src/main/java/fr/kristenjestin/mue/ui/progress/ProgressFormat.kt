@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.pow
 import kotlin.math.roundToLong
 
 /**
@@ -23,27 +24,35 @@ object ProgressFormat {
 
     private const val MINUS = '−'
 
-    /** One decimal, no unit: `74.5` in English, `74,5` in French. */
-    fun weight(weight: Weight?, locale: Locale = Locale.getDefault()): String =
-        weight?.let { decimal(it.kilograms, locale) } ?: UNAVAILABLE
+    /** A weight carries two decimals; a value derived from weights carries one. */
+    private const val WEIGHT_DECIMALS = 2
+    private const val DERIVED_DECIMALS = 1
 
+    /** Two decimals, no unit: `74.05` in English, `74,05` in French (PRD FR-PROGRESS-003). */
+    fun weight(weight: Weight?, locale: Locale = Locale.getDefault()): String =
+        weight?.let { decimal(it.kilograms, WEIGHT_DECIMALS, locale) } ?: UNAVAILABLE
+
+    /** One decimal, as PRD FR-BMI-001 requires: the BMI is derived, not a weight. */
     fun bmi(value: Double?, locale: Locale = Locale.getDefault()): String =
-        value?.let { decimal(it, locale) } ?: UNAVAILABLE
+        value?.let { decimal(it, DERIVED_DECIMALS, locale) } ?: UNAVAILABLE
 
     /**
-     * Change and pace always carry their sign (PRD FR-PROGRESS-003). The sign is taken
-     * from the *rounded* value so a change of −0.04 kg never renders as a negative zero.
+     * The change over the period: a difference between two weights, so two decimals and an
+     * always-visible sign (PRD FR-PROGRESS-003), e.g. `−0.35`.
      */
-    fun signed(value: Double?, locale: Locale = Locale.getDefault()): String {
-        if (value == null || !value.isFinite()) return UNAVAILABLE
-        val rounded = (value * 10.0).roundToLong() / 10.0
-        val sign = if (rounded < 0.0) MINUS else '+'
-        return sign + decimal(abs(rounded), locale)
-    }
+    fun signedWeight(value: Double?, locale: Locale = Locale.getDefault()): String =
+        signed(value, WEIGHT_DECIMALS, locale)
 
-    /** The chart-card badge of the prototype, e.g. `−1.1 kg`. */
+    /**
+     * The weekly pace: a derived value, so one decimal and an always-visible sign
+     * (PRD FR-PROGRESS-003), e.g. `−0.3`.
+     */
+    fun signedPace(value: Double?, locale: Locale = Locale.getDefault()): String =
+        signed(value, DERIVED_DECIMALS, locale)
+
+    /** The chart-card badge of the prototype, e.g. `−1.15 kg`. */
     fun signedKilograms(value: Double?, locale: Locale = Locale.getDefault()): String =
-        if (value == null) UNAVAILABLE else "${signed(value, locale)} kg"
+        if (value == null) UNAVAILABLE else "${signedWeight(value, locale)} kg"
 
     /** Full localised date, e.g. `Aug 18, 2026` or `18 août 2026`. */
     fun date(date: LocalDate, locale: Locale = Locale.getDefault()): String =
@@ -58,10 +67,21 @@ object ProgressFormat {
 
     const val TODAY: String = "Today"
 
-    private fun decimal(value: Double, locale: Locale): String =
+    /** The sign is taken from the *rounded* value so a change of −0.001 kg never reads `−0.00`. */
+    private fun signed(value: Double?, decimals: Int, locale: Locale): String {
+        if (value == null || !value.isFinite()) return UNAVAILABLE
+        val scale = TEN.pow(decimals)
+        val rounded = (value * scale).roundToLong() / scale
+        val sign = if (rounded < 0.0) MINUS else '+'
+        return sign + decimal(abs(rounded), decimals, locale)
+    }
+
+    private fun decimal(value: Double, decimals: Int, locale: Locale): String =
         NumberFormat.getNumberInstance(locale).apply {
-            minimumFractionDigits = 1
-            maximumFractionDigits = 1
+            minimumFractionDigits = decimals
+            maximumFractionDigits = decimals
             isGroupingUsed = false
         }.format(value)
+
+    private const val TEN = 10.0
 }

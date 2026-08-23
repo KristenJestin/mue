@@ -62,7 +62,7 @@ private fun MueTypeScalePreview() {
         MueText("MUE", type.wordmark)
         MueText("Hello Kris,", type.eyebrow, color = colors.textSecondary)
         MueText("Where are you today?", type.screenTitle)
-        MueText("74.5", type.weightDisplay)
+        MueText("74.05", type.weightDisplay)
         MueText("SLIDE TO ADJUST", type.hint, color = colors.accent)
         MueText("23.0", type.metricDisplay)
         MueText("74.5", type.metricLarge)

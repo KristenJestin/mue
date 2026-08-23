@@ -403,7 +403,7 @@ private fun IndicatorRow(state: ProgressUiState, modifier: Modifier = Modifier) 
         ) {
             MueText(AVERAGE_PACE_LABEL, type.label, color = colors.onAccentSecondary)
             MueAnimatedNumber(
-                text = ProgressFormat.signed(state.statistics.weeklyPaceKg),
+                text = ProgressFormat.signedPace(state.statistics.weeklyPaceKg),
                 style = type.metricMedium,
                 color = colors.onAccent,
                 durationMillis = MueMotion.PeriodChangeMillis,
@@ -473,7 +473,7 @@ private fun currentWeightDescription(statistics: ProgressStatistics): String =
 
 private fun paceDescription(statistics: ProgressStatistics): String =
     statistics.weeklyPaceKg
-        ?.let { "$AVERAGE_PACE_LABEL ${ProgressFormat.signed(it)} kilograms per week" }
+        ?.let { "$AVERAGE_PACE_LABEL ${ProgressFormat.signedPace(it)} kilograms per week" }
         ?: "$AVERAGE_PACE_LABEL unavailable"
 
 private fun bmiDescription(bmi: Bmi): String = when (bmi) {
@@ -507,7 +507,7 @@ private val PreviewPoints = listOf(
     previewMeasurement(15, 75.2),
     previewMeasurement(11, 74.8),
     previewMeasurement(5, 74.9),
-    previewMeasurement(0, 74.5),
+    previewMeasurement(0, 74.05),
 )
 
 private fun previewState(
@@ -549,7 +549,7 @@ private fun ProgressPopulatedPreview() {
 @Composable
 private fun ProgressSinglePointPreview() {
     ProgressPreviewHost(
-        previewState(listOf(previewMeasurement(0, 74.5)), bmi = Bmi.ValueOnly(23.0)),
+        previewState(listOf(previewMeasurement(0, 74.05)), bmi = Bmi.ValueOnly(23.0)),
     )
 }
 
@@ -574,7 +574,7 @@ private fun ProgressSheetOpenPreview() {
             editor = EditorUiState(
                 originalDate = PreviewToday.minusDays(5),
                 date = PreviewToday.minusDays(5),
-                weightInput = "74.9",
+                weightInput = "74.90",
                 weightError = null,
                 datePickerVisible = false,
                 deleteConfirmationVisible = false,
