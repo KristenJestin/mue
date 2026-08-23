@@ -8,11 +8,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -53,7 +55,7 @@ class MueNavigationHostTest {
         setHost()
 
         composeRule.onNodeWithText("Entry body").assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Entry").assertIsSelected()
+        composeRule.onNodeWithText("Entry").assertIsSelected()
     }
 
     @Test
@@ -61,9 +63,24 @@ class MueNavigationHostTest {
         setHost()
 
         MueDestination.entries.forEach { destination ->
-            composeRule.onNodeWithContentDescription(destination.label).performClick()
+            composeRule.onNodeWithText(destination.label).performClick()
             composeRule.onNodeWithText("${destination.label} body").assertIsDisplayed()
-            composeRule.onNodeWithContentDescription(destination.label).assertIsSelected()
+            composeRule.onNodeWithText(destination.label).assertIsSelected()
+        }
+    }
+
+    /**
+     * A contentDescription repeating the visible label would sit next to it under the same
+     * merging parent, and TalkBack would announce the tab twice.
+     */
+    @Test
+    fun aTabIsAnnouncedByItsLabelAlone() {
+        setHost()
+
+        MueDestination.entries.forEach { destination ->
+            composeRule.onNodeWithText(destination.label).assert(
+                SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription)
+            )
         }
     }
 
@@ -72,9 +89,9 @@ class MueNavigationHostTest {
         setHost()
 
         MueDestination.entries.forEach { destination ->
-            composeRule.onNodeWithContentDescription(destination.label).performClick()
+            composeRule.onNodeWithText(destination.label).performClick()
             MueDestination.entries.forEach { tab ->
-                composeRule.onNodeWithContentDescription(tab.label).assertIsDisplayed()
+                composeRule.onNodeWithText(tab.label).assertIsDisplayed()
             }
         }
     }
@@ -84,7 +101,7 @@ class MueNavigationHostTest {
         setHost()
         val atLaunch = MueDestination.entries.map { bounds(it) }
 
-        composeRule.onNodeWithContentDescription("Profile").performClick()
+        composeRule.onNodeWithText("Profile").performClick()
         composeRule.waitForIdle()
 
         assertEquals(atLaunch, MueDestination.entries.map { bounds(it) })
@@ -97,14 +114,14 @@ class MueNavigationHostTest {
         composeRule.onNodeWithText("Entry taps 0").performClick()
         composeRule.onNodeWithText("Entry taps 1").performClick()
 
-        composeRule.onNodeWithContentDescription("Progress").performClick()
+        composeRule.onNodeWithText("Progress").performClick()
         composeRule.onNodeWithText("Progress taps 0").assertIsDisplayed()
         composeRule.onNodeWithText("Progress taps 0").performClick()
 
-        composeRule.onNodeWithContentDescription("Entry").performClick()
+        composeRule.onNodeWithText("Entry").performClick()
         composeRule.onNodeWithText("Entry taps 2").assertIsDisplayed()
 
-        composeRule.onNodeWithContentDescription("Progress").performClick()
+        composeRule.onNodeWithText("Progress").performClick()
         composeRule.onNodeWithText("Progress taps 1").assertIsDisplayed()
     }
 
@@ -112,7 +129,7 @@ class MueNavigationHostTest {
     fun onlyTheSelectedTabIsShown() {
         setHost()
 
-        composeRule.onNodeWithContentDescription("Profile").performClick()
+        composeRule.onNodeWithText("Profile").performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Profile body").assertIsDisplayed()
@@ -126,7 +143,7 @@ class MueNavigationHostTest {
         val barAtRest = MueDestination.entries.map { bounds(it) }
         val entryAtRest = bodyLeft(MueDestination.ENTRY)
 
-        composeRule.onNodeWithContentDescription("Progress").performClick()
+        composeRule.onNodeWithText("Progress").performClick()
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.mainClock.advanceTimeBy(MueMotion.TabChangeMillis / 2L)
 
@@ -145,7 +162,7 @@ class MueNavigationHostTest {
         setHost(reduceMotion = true)
         val entryAtRest = bodyLeft(MueDestination.ENTRY)
 
-        composeRule.onNodeWithContentDescription("Progress").performClick()
+        composeRule.onNodeWithText("Progress").performClick()
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.mainClock.advanceTimeBy(MueMotion.ReducedMillis / 2L)
 
@@ -154,7 +171,7 @@ class MueNavigationHostTest {
     }
 
     private fun bounds(destination: MueDestination) =
-        composeRule.onNodeWithContentDescription(destination.label).getUnclippedBoundsInRoot()
+        composeRule.onNodeWithText(destination.label).getUnclippedBoundsInRoot()
 
     private fun bodyLeft(destination: MueDestination) =
         composeRule.onNodeWithText("${destination.label} body").getUnclippedBoundsInRoot().left

@@ -2,7 +2,6 @@ package fr.kristenjestin.mue.ui.navigation
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -27,7 +26,7 @@ class MueAppTest {
         composeRule.setContent { MueTheme { MueApp() } }
 
         TITLES.forEach { (destination, title) ->
-            composeRule.onNodeWithContentDescription(destination.label).performClick()
+            composeRule.onNodeWithText(destination.label).performClick()
             composeRule.onNodeWithText(title).assertIsDisplayed()
         }
     }
@@ -36,7 +35,7 @@ class MueAppTest {
     fun theScreenTitleFollowsTheSelectedTab() {
         composeRule.setContent { MueTheme { MueApp() } }
 
-        composeRule.onNodeWithContentDescription("Profile").performClick()
+        composeRule.onNodeWithText("Profile").performClick()
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText(TITLES.getValue(MueDestination.ENTRY)).assertDoesNotExist()

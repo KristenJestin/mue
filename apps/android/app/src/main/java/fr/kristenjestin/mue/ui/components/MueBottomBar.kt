@@ -23,15 +23,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
+/**
+ * A tab carries only its visible label.
+ *
+ * It deliberately has no `contentDescription`: the label is the name, and repeating it as a
+ * description would make TalkBack announce the tab twice under the merging parent.
+ */
 @Immutable
-data class MueTab(val label: String, val contentDescription: String = label)
+data class MueTab(val label: String)
 
 private val BarMinHeight = 60.dp
 private val IndicatorSize = 7.dp
@@ -76,6 +80,8 @@ fun MueBottomBar(
                 label = "tabTint",
             )
 
+            // `selectable` already merges the row into one node carrying the label and the
+            // selected state, which is everything TalkBack needs to announce.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -85,10 +91,7 @@ fun MueBottomBar(
                         onClick = { onTabSelected(index) },
                     )
                     .heightIn(min = BarMinHeight)
-                    .padding(vertical = 10.dp)
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = tab.contentDescription
-                    },
+                    .padding(vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
