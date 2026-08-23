@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.ui.components
 
+import android.view.WindowManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -13,12 +14,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -38,6 +44,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -113,6 +121,25 @@ fun MueBottomSheet(
             usePlatformDefaultWidth = false,
         ),
     ) {
+        /*
+         * A dialog gets its own window, and that window defaults to `adjust=pan`: Android
+         * shoves the whole panel up by just enough to reveal the caret and leaves the actions
+         * below it under the keyboard. Panning also fights the inset padding below, which then
+         * lifts an already-lifted panel.
+         *
+         * Opting the window out of decor fitting turns both off and leaves the IME as a plain
+         * inset, so the panel is positioned by the same rule as the tab bar. `ADJUST_RESIZE`
+         * covers API 26 to 29, where there is no IME inset to report and the window has to
+         * resize instead.
+         */
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        LaunchedEffect(dialogWindow) {
+            dialogWindow?.let { window ->
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            }
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -156,7 +183,10 @@ fun MueBottomSheet(
                             }
                         },
                     )
-                    .navigationBarsPadding()
+                    // A panel holding a text field has to clear the keyboard it raises. Same
+                    // union as the tab bar: the IME inset already covers the navigation bar,
+                    // so chaining the two would lift the panel a navigation bar too far.
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                     .padding(contentPadding),
                 verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
             ) {

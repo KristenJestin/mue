@@ -7,11 +7,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -68,7 +72,20 @@ fun MueBottomBar(
                     strokeWidth = stroke,
                 )
             }
-            .navigationBarsPadding()
+            /*
+             * The window is edge to edge, so the IME never resizes it: without this the bar,
+             * and the screen above it, stay under the keyboard.
+             *
+             * The two insets are unioned rather than chained as `navigationBarsPadding()
+             * .imePadding()`. The IME inset already spans the navigation bar, so chaining
+             * would add the bar's height a second time and the whole tab bar would jump by
+             * that much the moment the keyboard appeared. A union is the taller of the two:
+             * the navigation bar alone at rest, exactly the keyboard once it is up.
+             *
+             * Growing here also shrinks the weighted content above, which is what lifts each
+             * screen's own bottom actions clear of the keyboard.
+             */
+            .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
             .selectableGroup(),
         verticalAlignment = Alignment.CenterVertically,
     ) {

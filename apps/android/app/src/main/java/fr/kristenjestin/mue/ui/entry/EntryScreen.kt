@@ -46,6 +46,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
@@ -167,20 +168,34 @@ internal fun EntryContent(
          */
         Spacer(modifier = Modifier.weight(HeroLeadWeight))
 
+        /*
+         * The room reserved for the scale leaves with the scale.
+         *
+         * The keyboard claims about four tenths of the screen, so what is left has to hold the
+         * readout, the field, the date row and the save action. The ruler's slot and the air
+         * around it are the only part of this layout that exists for a control the keyboard has
+         * just replaced, so they collapse on the same 180 ms curve the ruler fades on. The
+         * weighted spacers redistribute whatever that frees, which is why the block reads no
+         * tighter when there is height to spare.
+         */
+        val heroTopPadding = lerp(spacing.xxl, spacing.xs, manualProgress)
+        val slotTopPadding = lerp(spacing.xl, spacing.sm, manualProgress)
+        val slotMinHeight = lerp(WeightRulerHeight, 0.dp, manualProgress)
+
         HeroReadout(
             weight = state.weight,
             manualEntry = state.manualEntry,
             // Touching the value toggles, as in the prototype. It is also the way back out of a
             // value the keyboard refuses to accept, which `Done` deliberately will not do.
             onClick = if (state.manualEntry) onDismissManualEntry else onOpenManualEntry,
-            modifier = Modifier.padding(top = spacing.xxl),
+            modifier = Modifier.padding(top = heroTopPadding),
         )
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = spacing.xl)
-                .heightIn(min = WeightRulerHeight),
+                .padding(top = slotTopPadding)
+                .heightIn(min = slotMinHeight),
         ) {
             if (manualProgress < 1f) {
                 WeightScale(
