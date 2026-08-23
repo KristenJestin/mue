@@ -53,12 +53,22 @@ class EntryScreenTest {
         EntryUiState(weight = Weight.ofTenthsClamped(START_TENTHS), date = TODAY, today = TODAY)
     )
 
+    /** How often the scale has handed a value back to the screen. */
+    private var published = 0
+
+    /** How often the screen has been rebuilt from that value. */
+    private var rebuilds = 0
+
     @Composable
     private fun Harness(reduceMotion: Boolean) {
+        rebuilds++
         MueTheme(reduceMotion = reduceMotion) {
             EntryContent(
                 state = state,
-                onWeightChange = { state = state.copy(weight = it) },
+                onWeightChange = {
+                    published++
+                    state = state.copy(weight = it)
+                },
                 onStep = { steps ->
                     state = state.withExternalWeight(
                         Weight.ofTenthsClamped(
@@ -187,6 +197,30 @@ class EntryScreenTest {
         composeRule.waitForIdle()
 
         assertEquals(Weight.MIN_TENTHS, state.weight.tenthsKg)
+    }
+
+    /**
+     * PRD 16.2: the scale must follow the finger with no perceptible lag.
+     *
+     * The way it fails is not obvious from the outside, so it is pinned here. Publishing the
+     * position on every tenth put a state round trip and a rebuild of the whole screen between
+     * two frames of a drag — around sixty of each for one sweep. The scale reports once, when
+     * it stops, and the readout follows the finger from the scale's own state instead.
+     */
+    @Test
+    fun a_drag_reports_its_value_once_and_rebuilds_the_screen_once() {
+        start()
+        val before = rebuilds
+        published = 0
+
+        scale().dragBy(-200f)
+        composeRule.waitForIdle()
+
+        assertEquals("the scale reported mid-drag", 1, published)
+        assertTrue(
+            "the screen was rebuilt ${rebuilds - before} times for one drag",
+            rebuilds - before <= 2,
+        )
     }
 
     /** A flick with animations on glides on past the finger — the inertia of FR-ENTRY-002. */
