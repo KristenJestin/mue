@@ -78,9 +78,11 @@ class MueHaptics(vibrator: Vibrator?, val enabled: Boolean) {
         if (effect == null) return
         // A vendor can refuse a vibration outright; a missing tick must never take the app down.
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 Detent.play(motor, effect)
             } else {
+                // Android exposes no way to classify a vibration before 13, so this is the
+                // system's own guess. On the versions that guess, it does not suppress.
                 motor.vibrate(effect)
             }
         }
@@ -97,7 +99,7 @@ class MueHaptics(vibrator: Vibrator?, val enabled: Boolean) {
      * plays. The system's other controls — vibrate off, battery saver, its own intensity for
      * this category — still apply, and should.
      */
-    @RequiresApi(Build.VERSION_CODES.R)
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private object Detent {
         private val attributes: VibrationAttributes =
             VibrationAttributes.createForUsage(VibrationAttributes.USAGE_PHYSICAL_EMULATION)
