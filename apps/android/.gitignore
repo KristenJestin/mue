@@ -25,3 +25,6 @@ local.properties
 
 # Local tooling
 .kotlin/
+
+# Agent worktrees
+.claude/
