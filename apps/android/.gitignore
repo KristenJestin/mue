@@ -28,3 +28,6 @@ local.properties
 
 # Agent worktrees
 .claude/
+
+# Screenshots captured while checking the app on a device
+/.screenshots/
