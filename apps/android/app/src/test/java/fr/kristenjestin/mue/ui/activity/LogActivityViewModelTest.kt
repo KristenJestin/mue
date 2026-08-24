@@ -452,20 +452,105 @@ class LogActivityViewModelTest {
         )
     }
 
+    /**
+     * PRD FR-ACTIVITY-008 asks for zero, one or several: the sheet says `Select one or more`,
+     * so a row is a switch and the panel stays open around it.
+     */
     @Test
-    fun `the same equipment is never added twice`() = logTest { model, _ ->
+    fun `an equipment row adds on the first tap and takes it back off on the second`() =
+        logTest { model, _ ->
+            model.onPresetSelected(ActivityPreset.OTHER)
+            model.onOpenEquipmentPicker()
+
+            model.onCatalogEntrySelected(EquipmentType.YOGA_MAT.id)
+            assertEquals(listOf("Yoga mat"), model.uiState.value.equipment.map { it.label })
+            assertTrue(model.pickerRow(EquipmentType.YOGA_MAT).selected)
+
+            model.onCatalogEntrySelected(EquipmentType.YOGA_MAT.id)
+            assertTrue(model.uiState.value.equipment.isEmpty())
+            assertFalse(model.pickerRow(EquipmentType.YOGA_MAT).selected)
+        }
+
+    @Test
+    fun `the equipment sheet stays open while several items are picked`() = logTest { model, _ ->
         model.onPresetSelected(ActivityPreset.OTHER)
         model.onOpenEquipmentPicker()
         model.onCatalogEntrySelected(EquipmentType.YOGA_MAT.id)
+        model.onCatalogEntrySelected(EquipmentType.KETTLEBELL.id)
+        model.onCatalogEntrySelected(EquipmentType.RESISTANCE_BANDS.id)
 
+        assertNotNull(model.uiState.value.picker)
+        assertEquals(
+            listOf("Yoga mat", "Kettlebell", "Resistance bands"),
+            model.uiState.value.equipment.map { it.label },
+        )
+
+        model.onCatalogEntrySelected(EquipmentType.KETTLEBELL.id)
+
+        assertNotNull(model.uiState.value.picker)
+        assertEquals(
+            listOf("Yoga mat", "Resistance bands"),
+            model.uiState.value.equipment.map { it.label },
+        )
+    }
+
+    /** The movement is a single choice, so its own sheet still leaves on the pick. */
+    @Test
+    fun `the movement sheet still closes on the row that answers it`() = logTest { model, _ ->
+        model.onPresetSelected(ActivityPreset.OTHER)
+        model.onOpenMovementPicker()
+        model.onCatalogEntrySelected(Movement.YOGA.id)
+
+        assertNull(model.uiState.value.picker)
+        assertEquals(Movement.YOGA, model.uiState.value.movement)
+    }
+
+    @Test
+    fun `only a dismissal closes the equipment sheet`() = logTest { model, _ ->
+        model.onPresetSelected(ActivityPreset.OTHER)
         model.onOpenEquipmentPicker()
         model.onCatalogEntrySelected(EquipmentType.YOGA_MAT.id)
+        assertNotNull(model.uiState.value.picker)
 
+        model.onDismissPicker()
+
+        assertNull(model.uiState.value.picker)
         assertEquals(listOf("Yoga mat"), model.uiState.value.equipment.map { it.label })
-        assertEquals(
-            LogActivityMessages.ALREADY_ADDED,
-            assertNotNull(model.uiState.value.picker).notice,
-        )
+    }
+
+    /**
+     * `Create` is not a row and does not toggle: asking to create a name that is already on the
+     * session is a mistake to point out, never an instruction to take the item back off.
+     */
+    @Test
+    fun `creating a name the session already carries is refused rather than undone`() =
+        logTest { model, _ ->
+            model.onPresetSelected(ActivityPreset.OTHER)
+            model.onOpenEquipmentPicker()
+            model.onPickerQueryChange("Garden rower")
+            model.onCreateFromSearch()
+
+            model.onPickerQueryChange("garden rower")
+            model.onCreateFromSearch()
+
+            assertEquals(listOf("Garden rower"), model.uiState.value.equipment.map { it.label })
+            assertEquals(
+                LogActivityMessages.ALREADY_ADDED,
+                assertNotNull(model.uiState.value.picker).notice,
+            )
+        }
+
+    /** A created item clears the search rather than the panel: the next pick starts fresh. */
+    @Test
+    fun `creating an equipment leaves the sheet open on an empty search`() = logTest { model, _ ->
+        model.onPresetSelected(ActivityPreset.OTHER)
+        model.onOpenEquipmentPicker()
+        model.onPickerQueryChange("Garden rower")
+        model.onCreateFromSearch()
+
+        val picker = assertNotNull(model.uiState.value.picker)
+        assertEquals("", picker.query)
+        assertEquals(listOf("Garden rower"), model.uiState.value.equipment.map { it.label })
     }
 
     @Test
@@ -918,6 +1003,10 @@ class LogActivityViewModelTest {
         uiState.value.metrics.single { it.kind == kind }
 
     private fun LogActivityViewModel.input(kind: MetricKind): String = metric(kind).input
+
+    /** The catalogue row the sheet is drawing for [type], selected state and all. */
+    private fun LogActivityViewModel.pickerRow(type: EquipmentType): CatalogEntry =
+        assertNotNull(uiState.value.picker).results.single { it.id == type.id }
 
     /**
      * Every flow the screens read. All three are `WhileSubscribed`, so nothing behind them runs

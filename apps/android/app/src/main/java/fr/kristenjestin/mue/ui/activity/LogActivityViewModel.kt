@@ -319,7 +319,14 @@ class LogActivityViewModel(
         flags.copy(picker = flags.picker?.let { picker -> picker.copy(query = query, notice = null) })
     }
 
-    /** Tapping a catalogue row. A known movement is stored by its stable id, never as a name. */
+    /**
+     * Tapping a catalogue row. A known movement is stored by its stable id, never as a name.
+     *
+     * The two catalogues answer different questions, so they close differently. A movement is
+     * one choice and the sheet leaves with it. Equipment is `Select one or more`
+     * (FR-ACTIVITY-008), so a row toggles and the sheet stays put until it is dismissed —
+     * closing on each pick made adding a second item cost a second trip through the sheet.
+     */
     fun onCatalogEntrySelected(id: String) {
         val target = transient.value.picker?.target ?: return
         when (target) {
@@ -330,7 +337,7 @@ class LogActivityViewModel(
                 }
             }
 
-            CatalogTarget.EQUIPMENT -> addEquipment(EquipmentDraft(typeId = id))
+            CatalogTarget.EQUIPMENT -> toggleEquipment(EquipmentDraft(typeId = id))
         }
     }
 
@@ -360,7 +367,7 @@ class LogActivityViewModel(
 
             CatalogTarget.EQUIPMENT -> when (val validated = ActivityValidation.validateCustomEquipmentName(name)) {
                 is Validated.Valid ->
-                    addEquipment(EquipmentDraft(EquipmentType.OTHER.id, validated.value))
+                    createEquipment(EquipmentDraft(EquipmentType.OTHER.id, validated.value))
 
                 is Validated.Invalid -> notice(validated.message)
             }
@@ -390,14 +397,41 @@ class LogActivityViewModel(
         flags.copy(picker = flags.picker?.copy(notice = message))
     }
 
-    /** The first occurrence wins, folded with [Locale.ROOT] (PRD FR-ACTIVITY-008). */
-    private fun addEquipment(equipment: EquipmentDraft) {
+    /**
+     * A catalogue row is a switch: tapping an unselected one adds the equipment, tapping a
+     * selected one takes it back off. Either way the sheet stays open, so a session that used
+     * three machines is three taps rather than three journeys.
+     *
+     * Names are compared folded with [Locale.ROOT] (PRD FR-ACTIVITY-008), so a `Treadmill`
+     * added by the catalogue and a `treadmill` typed by hand are the same one item.
+     */
+    private fun toggleEquipment(equipment: EquipmentDraft) {
+        val folded = labelOf(equipment).folded()
+        updateDraft { draft ->
+            draft.withPresetDraft { preset ->
+                preset.copy(
+                    equipment = if (preset.equipment.any { labelOf(it).folded() == folded }) {
+                        preset.equipment.filterNot { labelOf(it).folded() == folded }
+                    } else {
+                        preset.equipment + equipment
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * The `Create` footer is not a row and does not toggle: asking to create a name the session
+     * already carries is a mistake to point out, not an instruction to remove it. On success the
+     * search is cleared, which is both the acknowledgement and the state the next pick needs.
+     */
+    private fun createEquipment(equipment: EquipmentDraft) {
         val existing = _draft.value.presetDraft().equipment
         if (existing.any { labelOf(it).folded() == labelOf(equipment).folded() }) {
             notice(LogActivityMessages.ALREADY_ADDED)
             return
         }
-        transient.update { it.copy(picker = null) }
+        onPickerQueryChange("")
         updateDraft { draft ->
             draft.withPresetDraft { it.copy(equipment = it.equipment + equipment) }
         }
