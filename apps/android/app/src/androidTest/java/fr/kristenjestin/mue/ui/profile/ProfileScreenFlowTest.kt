@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.model.DateWindow
 import fr.kristenjestin.mue.domain.model.Measurement
 import fr.kristenjestin.mue.domain.model.UserPreferences
@@ -24,6 +25,7 @@ import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
 import fr.kristenjestin.mue.ui.awaitText
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.components.formatBmiValue
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +38,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.io.IOException
 import java.time.LocalDate
+import java.util.Locale
 
 private val TODAY: LocalDate = LocalDate.of(2026, 8, 23)
 
@@ -93,7 +96,7 @@ class ProfileScreenFlowTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT).assertExists()
         // No birth date, so the value stands alone with no band named (PRD 15.2).
-        composeRule.onNodeWithText("BMI 23.0").assertExists()
+        composeRule.onNodeWithText(readout(23.0, category = null)).assertExists()
 
         typeHeight("")
         composeRule.waitForIdle()
@@ -106,7 +109,7 @@ class ProfileScreenFlowTest {
         measurements.set(listOf(Measurement(TODAY, weight(74.5))))
         start()
 
-        composeRule.onNodeWithText("BMI 23.0 · Healthy weight").assertExists()
+        composeRule.onNodeWithText(readout(23.0, BmiCategory.HEALTHY_WEIGHT)).assertExists()
     }
 
     @Test
@@ -199,6 +202,11 @@ class ProfileScreenFlowTest {
             .onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag(ProfileTestTags.HEIGHT_FIELD)))
             .performTextReplacement(value)
     }
+
+    /** The readout as it reads on screen; the number follows the device's language (BR-010). */
+    private fun readout(value: Double, category: BmiCategory?): String =
+        "BMI " + formatBmiValue(value, Locale.getDefault()) +
+            (category?.let { " · ${it.label}" } ?: "")
 
     private fun weight(kilograms: Double): Weight =
         requireNotNull(Weight.ofKilogramsOrNull(kilograms))

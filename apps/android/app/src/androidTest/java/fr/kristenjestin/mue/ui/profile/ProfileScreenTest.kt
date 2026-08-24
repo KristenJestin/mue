@@ -61,7 +61,7 @@ class ProfileScreenTest {
 
         composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT)
             .assertContentDescriptionEquals(bmiDescription(23.0, BmiCategory.HEALTHY_WEIGHT))
-        composeRule.onNodeWithText("BMI 23.0 · Healthy weight").assertExists()
+        composeRule.onNodeWithText(readout(23.0, BmiCategory.HEALTHY_WEIGHT)).assertExists()
         composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
     }
 
@@ -88,7 +88,7 @@ class ProfileScreenTest {
 
         composeRule.onNodeWithTag(ProfileTestTags.BMI_READOUT)
             .assertContentDescriptionEquals(bmiDescription(23.0, category = null))
-        composeRule.onNodeWithText("BMI 23.0").assertExists()
+        composeRule.onNodeWithText(readout(23.0, category = null)).assertExists()
         composeRule.onNodeWithText(BmiCalculator.DISCLAIMER).assertExists()
         composeRule.onNodeWithText(BmiCategory.HEALTHY_WEIGHT.label).assertDoesNotExist()
     }
@@ -259,11 +259,20 @@ class ProfileScreenTest {
         }
     }
 
-    /** What TalkBack reads, which is the full name rather than the compact `BMI 23.0`. */
-    private fun bmiDescription(value: Double, category: BmiCategory?): String {
-        val formatted = formatBmiValue(value, Locale.getDefault())
-        return "Body mass index $formatted" + (category?.let { ", ${it.label}" } ?: "")
-    }
+    /*
+     * The readout's two voices. Both go through `formatBmiValue` rather than being spelled
+     * out, because the number follows the language of the device running the test (BR-010).
+     */
+
+    /** What is on screen: `BMI 23.0 · Healthy weight`. */
+    private fun readout(value: Double, category: BmiCategory?): String =
+        "BMI " + formatBmiValue(value, Locale.getDefault()) +
+            (category?.let { " · ${it.label}" } ?: "")
+
+    /** What TalkBack reads, which names the index in full. */
+    private fun bmiDescription(value: Double, category: BmiCategory?): String =
+        "Body mass index " + formatBmiValue(value, Locale.getDefault()) +
+            (category?.let { ", ${it.label}" } ?: "")
 
     private fun setContent(
         state: ProfileUiState,
