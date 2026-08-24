@@ -26,6 +26,7 @@ import fr.kristenjestin.mue.ui.components.MueBmiCardTags
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.components.formatBmiValue
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.timer.TimerMessages
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -222,6 +223,40 @@ class ProfileScreenTest {
         composeRule.onNodeWithTag(ProfileTestTags.EXPORT_BUTTON).performScrollTo().assertIsEnabled()
     }
 
+    /**
+     * FR-TIMER-012: the profile is where the way back lives once the one prompt is spent.
+     *
+     * The condition is decided by the caller — notifications off *and* Mue will not ask again —
+     * so what is pinned here is that the row exists then, carries the requirement's own label,
+     * and reaches its handler.
+     */
+    @Test
+    fun aRefusedNotificationOffersTheWayBackToSettings() {
+        var opened = 0
+        setContent(
+            ProfileUiState(),
+            showNotificationSettings = true,
+            onOpenNotificationSettings = { opened++ },
+        )
+
+        composeRule.onNodeWithText(TimerMessages.OPEN_NOTIFICATION_SETTINGS)
+            .performScrollTo()
+            .assertExists()
+        composeRule.onNodeWithTag(ProfileTestTags.NOTIFICATION_SETTINGS)
+            .performScrollTo()
+            .performClick()
+
+        assertEquals(1, opened)
+    }
+
+    /** And it is absent whenever there is nothing for it to fix — which is the usual case. */
+    @Test
+    fun grantedNotificationsLeaveTheProfileAsItWas() {
+        setContent(ProfileUiState())
+
+        composeRule.onNodeWithTag(ProfileTestTags.NOTIFICATION_SETTINGS).assertDoesNotExist()
+    }
+
     @Test
     fun thePrivacyCardIsAlwaysVisible() {
         setContent(ProfileUiState())
@@ -285,6 +320,8 @@ class ProfileScreenTest {
         onSaveConfirmationFinished: () -> Unit = {},
         onHapticsEnabledChange: (Boolean) -> Unit = {},
         onExport: () -> Unit = {},
+        showNotificationSettings: Boolean = false,
+        onOpenNotificationSettings: () -> Unit = {},
     ) {
         composeRule.setContent {
             MueTheme {
@@ -298,6 +335,8 @@ class ProfileScreenTest {
                     onHapticsEnabledChange = onHapticsEnabledChange,
                     onExport = onExport,
                     today = today,
+                    showNotificationSettings = showNotificationSettings,
+                    onOpenNotificationSettings = onOpenNotificationSettings,
                 )
             }
         }

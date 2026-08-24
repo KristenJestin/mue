@@ -129,6 +129,18 @@ object TimerMessages {
     /** FR-TIMER-012: the way back once a refusal is recorded and is never asked again. */
     const val OPEN_NOTIFICATION_SETTINGS: String = "Open notification settings"
 
+    /**
+     * Why that link is on the profile at all.
+     *
+     * FR-TIMER-012 names the link and never words the row around it. This says the two things
+     * the reader needs: nothing is broken — the timer works either way — and Settings is now
+     * the only route, because Mue does not ask a second time.
+     */
+    const val NOTIFICATION_SETTINGS_TITLE: String = "Timer notification"
+    const val NOTIFICATION_SETTINGS_BODY: String =
+        "Notifications are off, so the timer has no pause and finish controls outside Mue. It " +
+            "still keeps its time. Mue will not ask again — turn them on in Android settings."
+
     // endregion
 
     // region Discarding (FR-TIMER-009)

@@ -13,4 +13,7 @@ internal object ProfileTestTags {
     const val SAVE_BUTTON: String = "profile:saveButton"
     const val HAPTICS_TOGGLE: String = "profile:hapticsToggle"
     const val EXPORT_BUTTON: String = "profile:exportButton"
+
+    /** FR-TIMER-012's way back, which exists only while notifications are off. */
+    const val NOTIFICATION_SETTINGS: String = "profile:notificationSettings"
 }

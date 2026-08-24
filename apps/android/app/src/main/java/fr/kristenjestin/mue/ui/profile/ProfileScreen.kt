@@ -37,6 +37,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.timer.TimerNotificationPermission
+import fr.kristenjestin.mue.timer.rememberTimerNotificationPermission
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
 import fr.kristenjestin.mue.ui.components.MuePickerField
@@ -49,6 +51,7 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.timer.TimerMessages
 import java.time.LocalDate
 
 private const val SCREEN_EYEBROW = "Your reference points"
@@ -91,6 +94,19 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    /*
+     * FR-TIMER-012's way back. The timer asks for `POST_NOTIFICATIONS` once, in the context of
+     * the first `Start timer`, and never again — so once that one chance is spent this link is
+     * the only route left, and the profile is where the requirement puts it.
+     *
+     * `!isGranted && !canRequest` is exactly "notifications are off and Mue will not ask": it
+     * hides the row before the first timer, when the prompt is still to come, and it is also
+     * right below Android 13, where `canRequest` is always false and the only way to switch
+     * notifications off is Settings in the first place. Re-read on every resume, since that is
+     * where the user goes to change it.
+     */
+    val notifications = rememberTimerNotificationPermission()
+
     ProfileScreen(
         state = state,
         onDisplayNameChange = viewModel::onDisplayNameChange,
@@ -101,6 +117,10 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
         onHapticsEnabledChange = viewModel::onHapticsEnabledChange,
         onExport = viewModel::exportWeightData,
         modifier = modifier,
+        showNotificationSettings = !notifications.isGranted && !notifications.canRequest,
+        onOpenNotificationSettings = {
+            context.startActivity(TimerNotificationPermission.settingsIntent(context))
+        },
     )
 }
 
@@ -116,6 +136,8 @@ internal fun ProfileScreen(
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
+    showNotificationSettings: Boolean = false,
+    onOpenNotificationSettings: () -> Unit = {},
 ) {
     val spacing = MueTheme.spacing
     val focusManager = LocalFocusManager.current
@@ -185,6 +207,13 @@ internal fun ProfileScreen(
                     onCheckedChange = onHapticsEnabledChange,
                     modifier = Modifier.testTag(ProfileTestTags.HAPTICS_TOGGLE),
                 )
+
+                if (showNotificationSettings) {
+                    NotificationSettingsCard(
+                        onOpen = onOpenNotificationSettings,
+                        modifier = Modifier.padding(top = spacing.md),
+                    )
+                }
             }
 
             ProfileSection(title = "Your data") {
@@ -234,6 +263,39 @@ internal fun ProfileScreen(
                 onBirthDateChange(date)
                 datePickerVisible = false
             },
+        )
+    }
+}
+
+/**
+ * FR-TIMER-012's `Open notification settings`, shown only while there is something to open it
+ * for.
+ *
+ * It is a statement before it is a link: the first line the reader needs is that nothing is
+ * broken — a refused notification costs the background controls and never the measured time —
+ * and the second is that Settings is the only route left, since Mue does not ask twice.
+ */
+@Composable
+private fun NotificationSettingsCard(onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    val spacing = MueTheme.spacing
+    MueSurfaceCard(
+        modifier = modifier,
+        shape = MueTheme.shapes.field,
+        contentPadding = PaddingValues(spacing.lg),
+    ) {
+        MueText(TimerMessages.NOTIFICATION_SETTINGS_TITLE, MueTheme.typography.sectionTitle)
+        MueText(
+            text = TimerMessages.NOTIFICATION_SETTINGS_BODY,
+            style = MueTheme.typography.caption,
+            color = MueTheme.colors.textSecondary,
+            modifier = Modifier.padding(top = spacing.xs),
+        )
+        MueSecondaryButton(
+            label = TimerMessages.OPEN_NOTIFICATION_SETTINGS,
+            onClick = onOpen,
+            modifier = Modifier
+                .padding(top = spacing.md)
+                .testTag(ProfileTestTags.NOTIFICATION_SETTINGS),
         )
     }
 }
