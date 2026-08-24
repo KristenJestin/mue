@@ -17,20 +17,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -43,13 +38,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.kristenjestin.mue.MueApplication
 import fr.kristenjestin.mue.domain.logic.ActivityValidation
 import fr.kristenjestin.mue.domain.logic.errorMessage
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ExerciseDefinition
-import fr.kristenjestin.mue.domain.model.ExerciseDefinitionId
 import fr.kristenjestin.mue.domain.model.LastPerformance
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.SetMeasure
@@ -110,14 +102,16 @@ private val ExerciseAvatarSize: Dp = 40.dp
  * (PRD FR-ACTIVITY-009).
  *
  * It edits the draft the log form already holds, so [onBack] returns to that form with
- * everything typed here still in place (PRD 9.1).
+ * everything typed here still in place (PRD 9.1). [state] has no default on purpose: the one
+ * implementation that writes is `rememberSharedStrengthSessionState`, and a screen that silently
+ * kept a draft of its own would look identical and save nothing.
  */
 @Composable
 fun StrengthSessionScreen(
+    state: StrengthSessionState,
     onBack: () -> Unit,
     onSaved: () -> Unit,
     modifier: Modifier = Modifier,
-    state: StrengthSessionState = rememberStrengthSessionState(),
 ) {
     StrengthSessionScreen(
         draft = state.draft,
@@ -641,7 +635,7 @@ private fun ExerciseCard(
                 },
                 deleteIcon = { MueIcon(MueIcons.TRASH, tint = colors.textQuiet, size = 14.dp) },
                 emphasised = setIndex == exercise.sets.lastIndex,
-                highlighted = duplicatedSet == setIndex,
+                justDuplicated = duplicatedSet == setIndex,
                 deleteContentDescription = "Remove set ${setIndex + 1} of ${exercise.name}",
                 modifier = Modifier.testTag(ActivityTestTags.set(index, setIndex)),
             )
@@ -830,78 +824,6 @@ private fun Modifier.disabledUnless(enabled: Boolean): Modifier =
 
 private fun longDate(date: LocalDate, locale: Locale): String =
     DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(locale).format(date)
-
-// endregion
-
-// region The fallback host
-
-/**
- * A draft of this screen's own, used only until the log form's ViewModel is wired in.
- *
- * PRD 9.1 requires one draft shared by both screens, and that draft belongs to
- * `LogActivityViewModel`; integration replaces this default with an adapter over it, which is
- * the single line `state = viewModel.strengthSessionState`. Until then the editor is still a
- * working, rotatable, process-death-proof screen — the catalogue and the last performances are
- * read for real — but the write itself is the ViewModel's, through
- * `StrengthDraftEditor.persistableExercises`.
- */
-@Composable
-internal fun rememberStrengthSessionState(): StrengthSessionState {
-    val context = LocalContext.current
-    val container = remember(context) {
-        (context.applicationContext as MueApplication).container
-    }
-    val draft = rememberSaveable(stateSaver = ActivityDraftSaver) {
-        mutableStateOf(ActivityDraft(detailed = true))
-    }
-    val catalogue = remember(container) {
-        container.exerciseCatalogRepository.observeCatalogue()
-    }.collectAsStateWithLifecycle(emptyList())
-    val performances = remember { mutableStateOf(emptyMap<String, LastPerformance>()) }
-    val saved = remember { mutableStateOf(false) }
-
-    val definitionIds = draft.value.exercises.map { it.definitionId }.distinct()
-    LaunchedEffect(container, definitionIds) {
-        performances.value = definitionIds.associateWith { id ->
-            container.activityRepository.findLastPerformance(
-                exercise = ExerciseDefinitionId(id),
-                excludingSession = null,
-            )
-        }.filterValues { it != null }.mapValues { (_, value) -> requireNotNull(value) }
-    }
-
-    return remember(container) {
-        DraftBackedStrengthSessionState(draft, catalogue, performances, saved)
-    }
-}
-
-@Stable
-private class DraftBackedStrengthSessionState(
-    private val draftState: MutableState<ActivityDraft>,
-    private val catalogueState: State<List<ExerciseDefinition>>,
-    private val performanceState: State<Map<String, LastPerformance>>,
-    private val savedState: MutableState<Boolean>,
-) : StrengthSessionState {
-
-    override val draft: ActivityDraft get() = draftState.value
-    override val catalogue: List<ExerciseDefinition> get() = catalogueState.value
-    override val lastPerformances: Map<String, LastPerformance> get() = performanceState.value
-    override val saved: Boolean get() = savedState.value
-
-    override fun edit(edit: StrengthEdit) {
-        draftState.value = StrengthDraftEditor.apply(draftState.value, edit)
-    }
-
-    override fun save() {
-        savedState.value = true
-    }
-}
-
-/** One JSON string under one key: PRD 16.4, and the shape `ActivityDraft` was built for. */
-private val ActivityDraftSaver: Saver<ActivityDraft, String> = Saver(
-    save = { it.toJson() },
-    restore = { ActivityDraft.fromJson(it) },
-)
 
 // endregion
 

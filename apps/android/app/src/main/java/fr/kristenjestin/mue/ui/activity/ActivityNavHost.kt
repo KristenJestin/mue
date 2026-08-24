@@ -116,9 +116,13 @@ private fun ActivityDestination(
             modifier = modifier,
         )
 
+        // The adapter over `LogActivityViewModel` is what makes this editor and the log form two
+        // views of one draft (PRD 9.1); without it the editor would keep a draft of its own and
+        // never write.
         ActivityRoute.Strength -> StrengthSessionScreen(
             onBack = { stack.pop() },
             onSaved = { stack.pop(count = 2) },
+            state = rememberSharedStrengthSessionState(),
             modifier = modifier,
         )
     }
