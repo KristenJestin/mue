@@ -46,12 +46,35 @@ class MetricKindTest {
     }
 
     @Test
-    fun `a converted quantity carries one decimal and a stored one carries none`() {
-        assertEquals(1, MetricKind.DISTANCE.displayDecimals)
-        assertEquals(1, MetricKind.AVERAGE_SPEED.displayDecimals)
+    fun `each kind carries the decimal count its own precision needs`() {
+        assertEquals(2, MetricKind.DISTANCE.displayDecimals)
+        assertEquals(2, MetricKind.REPORTED_SPEED.displayDecimals)
+        assertEquals(2, MetricKind.AVERAGE_SPEED.displayDecimals)
         assertEquals(1, MetricKind.INCLINE.displayDecimals)
         assertEquals(0, MetricKind.ESTIMATED_ENERGY.displayDecimals)
         assertEquals(0, MetricKind.AVERAGE_PACE.displayDecimals)
+        assertEquals(0, MetricKind.STEPS.displayDecimals)
+        assertEquals(0, MetricKind.AVERAGE_HEART_RATE.displayDecimals)
+        assertEquals(0, MetricKind.ELEVATION_GAIN.displayDecimals)
+        assertEquals(0, MetricKind.POWER.displayDecimals)
+        assertEquals(0, MetricKind.CADENCE.displayDecimals)
+    }
+
+    /**
+     * The rule the counts above have to obey: rendering a kind must never claim a precision
+     * finer than the unit it is stored in, or the field would offer digits the database
+     * cannot keep.
+     */
+    @Test
+    fun `no kind shows more decimals than its stored unit can hold`() {
+        MetricKind.entries.forEach { kind ->
+            val expressible = generateSequence(1) { it * 10 }
+                .first { it >= kind.canonicalPerDisplayUnit }
+            assertTrue(
+                Math.pow(10.0, kind.displayDecimals.toDouble()).toInt() <= expressible,
+                "${kind.id} shows ${kind.displayDecimals} decimals of a ${kind.unit.id}",
+            )
+        }
     }
 
     @Test

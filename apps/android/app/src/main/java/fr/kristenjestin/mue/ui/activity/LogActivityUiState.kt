@@ -8,6 +8,7 @@ import fr.kristenjestin.mue.domain.model.Load
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.MetricSource
 import fr.kristenjestin.mue.domain.model.Movement
+import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -269,16 +270,35 @@ object LogActivityFormat {
     fun joinClock(first: String, second: String): String =
         if (first.isBlank() && second.isBlank()) "" else "$first:$second"
 
-    /** A stored measurement, back in the display unit and the phone's language (PRD 12). */
+    /**
+     * A stored measurement, back in the display unit and the phone's language (PRD 12).
+     *
+     * The field renders every decimal the kind can hold and no more, so re-opening a session
+     * and saving it again writes back the value that was there: `2950 m` reads `2.95`, and
+     * `2.95` parses to `2950 m`. Trailing zeros are dropped — a round `3 km` reads `3`, not
+     * `3.00`, exactly as a round load reads `60` — because they carry nothing either way.
+     */
     fun metricInput(
         kind: MetricKind,
         canonical: Int,
         locale: Locale = Locale.getDefault(),
-    ): String = when {
-        kind == MetricKind.AVERAGE_PACE -> clock(canonical, locale)
-        kind.displayDecimals == 0 -> String.format(locale, "%d", canonical)
-        else -> String.format(locale, "%.${kind.displayDecimals}f", kind.toDisplayValue(canonical))
+    ): String = if (kind == MetricKind.AVERAGE_PACE) {
+        clock(canonical, locale)
+    } else {
+        number(kind.toDisplayValue(canonical), kind.displayDecimals, locale)
     }
+
+    /**
+     * Grouping is off on purpose: a `12,345` handed back to `ActivityValidation.parseDecimal`
+     * — which treats a comma as the decimal mark, whatever the phone's language — would come
+     * back as a different number entirely.
+     */
+    private fun number(value: Double, decimals: Int, locale: Locale): String =
+        NumberFormat.getNumberInstance(locale).apply {
+            isGroupingUsed = false
+            minimumFractionDigits = 0
+            maximumFractionDigits = decimals
+        }.format(value)
 
     /** `m:ss`, which is how both a pace and a set duration are typed and read back. */
     fun clock(seconds: Int, locale: Locale = Locale.getDefault()): String =

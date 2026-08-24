@@ -285,7 +285,11 @@ class LogActivityViewModel(
 
     /** Keeps exactly what was typed; both `.` and `,` reach the draft untouched (PRD 12). */
     fun onMetricChange(kind: MetricKind, raw: String) {
-        val cleaned = if (kind == MetricKind.AVERAGE_PACE) raw else decimal(raw)
+        val cleaned = if (kind == MetricKind.AVERAGE_PACE) {
+            raw
+        } else {
+            decimal(raw, kind.displayDecimals)
+        }
         transient.update {
             it.copy(metricErrors = it.metricErrors - kind.id, formError = null, saveError = null)
         }
@@ -800,10 +804,23 @@ class LogActivityViewModel(
         /**
          * Both separators reach the draft (PRD 12); everything else is refused at the keystroke
          * so no field can hold text a save would later have to explain.
+         *
+         * The fraction is cut at [maxDecimals], the precision the field renders back, so the
+         * box can never hold a value it would have to round on the way out — which is what
+         * keeps re-opening a session and saving it again a no-op. The clock boxes cap their
+         * digits the same way.
          */
-        fun decimal(raw: String): String = raw
-            .filter { it.isDigit() || it == '.' || it == ',' }
-            .take(MAX_NUMBER_LENGTH)
+        fun decimal(raw: String, maxDecimals: Int): String {
+            val filtered = raw
+                .filter { it.isDigit() || it == '.' || it == ',' }
+                .take(MAX_NUMBER_LENGTH)
+            val separator = filtered.indexOfFirst { it == '.' || it == ',' }
+            return when {
+                separator < 0 -> filtered
+                maxDecimals == 0 -> filtered.take(separator)
+                else -> filtered.take(separator + 1 + maxDecimals)
+            }
+        }
 
         /** `"I".lowercase()` is `"ı"` on a Turkish phone, so every fold names its locale. */
         fun String.folded(): String = trim().lowercase(Locale.ROOT)

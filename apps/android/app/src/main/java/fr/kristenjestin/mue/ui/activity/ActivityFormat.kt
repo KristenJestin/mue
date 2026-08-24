@@ -48,6 +48,9 @@ object ActivityFormat {
 
     private const val RANGE_DASH = '–'
 
+    /** PRD 12: a distance always shows at least one decimal, `5.0 km` included. */
+    private const val MIN_DISTANCE_DECIMALS = 1
+
     /**
      * `45 min` under an hour, `2h 15m` above it — both spellings come from the PRD itself
      * (FR-ACTIVITY-001 and section 18), and a single rule produces the two.
@@ -62,11 +65,17 @@ object ActivityFormat {
         }
     }
 
-    /** PRD 12: metres are stored, kilometres with one decimal are shown. */
+    /**
+     * PRD 12: metres are stored, kilometres with a decimal are shown.
+     *
+     * One decimal is a floor rather than a rule, so `5000 m` still reads `5.0 km` while a
+     * `2950 m` walk reads `2.95 km` — the card and the editable field agree on the value, and
+     * a glance never rounds away a hundredth the form would show.
+     */
     fun distance(metres: Int?, locale: Locale = Locale.getDefault()): String {
         if (metres == null) return UNAVAILABLE
         val kind = MetricKind.DISTANCE
-        val value = decimal(kind.toDisplayValue(metres), kind.displayDecimals, locale)
+        val value = decimal(kind.toDisplayValue(metres), MIN_DISTANCE_DECIMALS, kind.displayDecimals, locale)
         return "$value ${kind.displayUnit}"
     }
 
@@ -240,9 +249,9 @@ object ActivityFormat {
     private fun integer(value: Int, locale: Locale): String =
         NumberFormat.getIntegerInstance(locale).format(value)
 
-    private fun decimal(value: Double, decimals: Int, locale: Locale): String =
+    private fun decimal(value: Double, minDecimals: Int, maxDecimals: Int, locale: Locale): String =
         NumberFormat.getNumberInstance(locale).apply {
-            minimumFractionDigits = decimals
-            maximumFractionDigits = decimals
+            minimumFractionDigits = minDecimals
+            maximumFractionDigits = maxDecimals
         }.format(value)
 }

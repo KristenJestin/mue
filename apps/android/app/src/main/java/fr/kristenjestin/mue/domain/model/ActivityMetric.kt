@@ -37,6 +37,12 @@ enum class MetricUnit(val id: String) {
  * [canonicalPerDisplayUnit] is the whole of the unit conversion PRD 12 asks for: a distance
  * is typed in kilometres and stored in metres, an incline in percent and stored in tenths.
  * Kinds that are already shown in their stored unit simply carry `1`.
+ *
+ * [displayDecimals] is stated per kind rather than derived from that scale. Deriving it gave
+ * every converted quantity one decimal, which suits a speed and destroys a distance: `2950 m`
+ * came back as `3`, and saving that `3` wrote `3000 m`. The loss happened on re-editing, not
+ * on entry, so nothing warned anyone. Each kind now carries the count that renders it without
+ * dropping anything it can hold.
  */
 enum class MetricKind(
     val id: String,
@@ -44,15 +50,20 @@ enum class MetricKind(
     val label: String,
     val displayUnit: String,
     val canonicalPerDisplayUnit: Int,
+    val displayDecimals: Int,
     val editableInV1: Boolean,
 ) {
-    DISTANCE("distance", MetricUnit.METRE, "Distance", "km", 1_000, editableInV1 = true),
+    /** Two decimals: ten-metre precision, finer than any treadmill or watch reports. */
+    DISTANCE("distance", MetricUnit.METRE, "Distance", "km", 1_000, 2, editableInV1 = true),
+
+    /** Two decimals is exactly the stored hundredth of a km/h, so nothing typed is ever lost. */
     REPORTED_SPEED(
         "reported_speed",
         MetricUnit.CENTI_KM_PER_HOUR,
         "Reported speed",
         "km/h",
         100,
+        2,
         editableInV1 = true,
     ),
     AVERAGE_SPEED(
@@ -61,43 +72,53 @@ enum class MetricKind(
         "Average speed",
         "km/h",
         100,
+        2,
         editableInV1 = true,
     ),
 
-    /** Typed and shown as `m:ss /km` (PRD FR-ACTIVITY-007), which is why its scale is one. */
+    /**
+     * Typed and shown as `m:ss /km` (PRD FR-ACTIVITY-007), which is why its scale is one and
+     * its decimal count is none: the fraction of a minute is the `ss` box, not a decimal.
+     */
     AVERAGE_PACE(
         "average_pace",
         MetricUnit.SECOND_PER_KILOMETRE,
         "Average pace",
         "/km",
         1,
+        0,
         editableInV1 = true,
     ),
+
+    /** Whole kilocalories: an estimation to the tenth would claim a precision nobody has. */
     ESTIMATED_ENERGY(
         "estimated_energy",
         MetricUnit.KCAL,
         "Estimated energy",
         "kcal",
         1,
+        0,
         editableInV1 = true,
     ),
-    INCLINE("incline", MetricUnit.DECI_PERCENT, "Incline", "%", 10, editableInV1 = true),
-    STEPS("steps", MetricUnit.COUNT, "Steps", "", 1, editableInV1 = false),
+
+    /** One decimal is exactly the stored tenth of a percent, and the step a treadmill offers. */
+    INCLINE("incline", MetricUnit.DECI_PERCENT, "Incline", "%", 10, 1, editableInV1 = true),
+
+    /* The five kinds below are whole counts of their own unit, so none of them has a fraction. */
+    STEPS("steps", MetricUnit.COUNT, "Steps", "", 1, 0, editableInV1 = false),
     AVERAGE_HEART_RATE(
         "average_heart_rate",
         MetricUnit.BPM,
         "Average heart rate",
         "bpm",
         1,
+        0,
         editableInV1 = false,
     ),
-    ELEVATION_GAIN("elevation_gain", MetricUnit.METRE, "Elevation gain", "m", 1, editableInV1 = false),
-    POWER("power", MetricUnit.WATT, "Power", "W", 1, editableInV1 = false),
-    CADENCE("cadence", MetricUnit.RPM, "Cadence", "rpm", 1, editableInV1 = false),
+    ELEVATION_GAIN("elevation_gain", MetricUnit.METRE, "Elevation gain", "m", 1, 0, editableInV1 = false),
+    POWER("power", MetricUnit.WATT, "Power", "W", 1, 0, editableInV1 = false),
+    CADENCE("cadence", MetricUnit.RPM, "Cadence", "rpm", 1, 0, editableInV1 = false),
     ;
-
-    /** A converted quantity shows one decimal; a quantity shown in its stored unit shows none. */
-    val displayDecimals: Int get() = if (canonicalPerDisplayUnit == 1) 0 else 1
 
     /** Null when the value does not survive the trip into an `Int`, or when it is negative. */
     fun toCanonicalOrNull(displayValue: Double): Int? {

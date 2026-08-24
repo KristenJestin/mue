@@ -65,17 +65,27 @@ class ActivityFormatTest {
 
     // region quantities
 
-    /** PRD 12: metres are stored, kilometres with one decimal are shown. */
+    /** PRD 12: metres are stored, kilometres with a decimal are shown. */
     @Test
-    fun `a distance shows one decimal in the phone's language`() {
+    fun `a distance shows its decimals in the phone's language`() {
         assertEquals("4.2 km", ActivityFormat.distance(4_200, EN))
         assertEquals("4,2 km", ActivityFormat.distance(4_200, FR))
-        assertEquals("0.4 km", ActivityFormat.distance(420, EN))
     }
 
     @Test
     fun `a round distance still shows its decimal`() {
         assertEquals("5.0 km", ActivityFormat.distance(5_000, EN))
+    }
+
+    /**
+     * A card reads the same value as the form it was typed in: the hundredth of a kilometre
+     * the session stores is shown rather than rounded to the tenth.
+     */
+    @Test
+    fun `a distance carrying a hundredth shows it rather than rounding up`() {
+        assertEquals("2.95 km", ActivityFormat.distance(2_950, EN))
+        assertEquals("2,95 km", ActivityFormat.distance(2_950, FR))
+        assertEquals("0.42 km", ActivityFormat.distance(420, EN))
     }
 
     /** PRD 11.3: the prefix says it is an estimation, and it is never replaced by a zero. */
