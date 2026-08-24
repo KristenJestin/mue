@@ -120,10 +120,10 @@ fun MueBmiCard(bmi: Bmi, modifier: Modifier = Modifier) {
             )
         }
 
-        if (available != null && category != null) {
+        if (bmi is Bmi.Classified) {
             BmiReferenceBar(
-                value = available.value,
-                category = category,
+                value = bmi.value,
+                category = bmi.category,
                 modifier = Modifier.padding(top = spacing.xl),
             )
         }

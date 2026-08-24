@@ -479,6 +479,16 @@ class EntryScreenTest {
         composeRule.onNodeWithText("Where are you today?").assertIsDisplayed()
     }
 
+    /** PRD 14 drops the halo and the ruler echo, never the confirmation itself. */
+    @Test
+    fun saving_still_confirms_with_animations_reduced() {
+        start(reduceMotion = true)
+        composeRule.onNodeWithText("Save measurement").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.awaitText(MueSaveConfirmationLabel)
+    }
+
     // --- FR-ENTRY-007, the greeting --------------------------------------------------
 
     @Test

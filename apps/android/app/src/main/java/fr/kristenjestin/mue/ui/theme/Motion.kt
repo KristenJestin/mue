@@ -70,9 +70,6 @@ object MueMotion {
     /** When the fill drops to soft amber — the instant the label comes back as `Saved`. */
     const val SaveQuietOnsetMillis: Int = 140
 
-    /** When the quiet ends and the original label starts fading back in. */
-    const val SaveQuietEndMillis: Int = 830
-
     /** The halo radiating off the button, and the screen echo that travels with it. */
     const val SaveHaloMillis: Int = 950
 

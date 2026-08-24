@@ -108,7 +108,8 @@ fun MuePrimaryButton(
         // the word swaps through a single short cross-fade (PRD 14).
         val fade = if (reduceMotion) MueMotion.ReducedMillis / 2 else MueMotion.SaveLabelFadeMillis
         val quietOnset = if (reduceMotion) fade else MueMotion.SaveQuietOnsetMillis
-        val quietHold = successDurationMillis - quietOnset - fade * 2
+        // The word starts leaving one fade before the end — the prototype's 830 ms mark.
+        val quietHold = successDurationMillis - fade - quietOnset - fade
 
         contracted = true
         launch {
