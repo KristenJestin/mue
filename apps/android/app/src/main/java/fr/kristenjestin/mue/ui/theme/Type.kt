@@ -44,6 +44,14 @@ data class MueTypography(
     /** Muted line above a screen title, e.g. `Hello Kris,`. */
     val eyebrow: TextStyle,
     val screenTitle: TextStyle,
+    /**
+     * The heading of a bottom sheet, e.g. `Choose an exercise`.
+     *
+     * Smaller than [screenTitle] because a sheet header also carries a 48 dp close target: at
+     * 29 sp the longest of these titles needs 287 dp of the 286 dp left beside it and wraps.
+     * It is also the prototypes' own size for a sheet, `text-xl`.
+     */
+    val sheetTitle: TextStyle,
     val sectionTitle: TextStyle,
     /** Small grey caption sitting above a value inside a field or a card. */
     val label: TextStyle,
@@ -86,6 +94,13 @@ val MueTypeScale: MueTypography = MueTypography(
         fontSize = 29.sp,
         lineHeight = 36.sp,
         letterSpacing = (-0.045).em,
+    ),
+    sheetTitle = TextStyle(
+        fontFamily = Sora,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = (-0.04).em,
     ),
     sectionTitle = TextStyle(
         fontFamily = Sora,

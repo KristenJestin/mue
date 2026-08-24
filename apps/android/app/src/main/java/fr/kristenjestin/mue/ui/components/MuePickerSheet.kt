@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -31,6 +32,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import java.util.Locale
 
 private val AvatarSize = 40.dp
 private val IndicatorSize = 28.dp
@@ -84,7 +86,7 @@ fun MuePickerSheet(
                     }
                     MueText(
                         text = title,
-                        style = MueTheme.typography.screenTitle,
+                        style = MueTheme.typography.sheetTitle,
                         color = MueTheme.colors.textPrimary,
                         modifier = Modifier
                             .padding(top = MueTheme.spacing.xxs)
@@ -136,7 +138,15 @@ fun MuePickerSheet(
     }
 }
 
-/** `Recent & common` / `Results`, with the count of what is under it. */
+/**
+ * `Recent & common` / `Results`, with the count of what is under it.
+ *
+ * The prototype shouts this line with CSS, which leaves the accessible name alone. Kotlin's
+ * `uppercase()` does not: it reaches the semantics too, and a screen reader spells an all-caps
+ * word out letter by letter. So the drawn text is raised and the spoken one is [title] as given
+ * (PRD_ACTIVITIES 15). `Locale.ROOT` because these are English strings and a Turkish phone
+ * would otherwise raise `i` to `İ`.
+ */
 @Composable
 fun MuePickerSectionHeader(
     title: String,
@@ -149,10 +159,11 @@ fun MuePickerSectionHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MueText(
-            text = title.uppercase(),
+            text = title.uppercase(Locale.ROOT),
             style = MueTheme.typography.hint,
             color = MueTheme.colors.textTertiary,
             maxLines = 1,
+            modifier = Modifier.clearAndSetSemantics { contentDescription = title },
         )
         trailing?.let {
             MueText(it, MueTheme.typography.micro, color = MueTheme.colors.textQuiet, maxLines = 1)
@@ -224,10 +235,12 @@ fun MuePickerRow(
                 if (leading != null) {
                     leading()
                 } else {
+                    // Decorative: the row already says the name, and a lone `B` before it is noise.
                     MueText(
-                        text = name.take(1).uppercase(),
+                        text = name.take(1).uppercase(Locale.ROOT),
                         style = MueTheme.typography.bodyStrong,
                         color = colors.onAccentSoft,
+                        modifier = Modifier.clearAndSetSemantics { },
                     )
                 }
             }
