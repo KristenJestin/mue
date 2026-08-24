@@ -46,7 +46,14 @@ class ActivityEnumTest {
     @Test
     fun `the remaining enums keep their ids`() {
         assertEquals(listOf("indoor", "outdoor", "unknown"), ActivityEnvironment.entries.map { it.id })
-        assertEquals(listOf("manual", "health_connect"), ActivitySource.entries.map { it.id })
+        assertEquals(
+            listOf("manual", "health_connect", "timer"),
+            ActivitySource.entries.map { it.id },
+        )
+        assertEquals(
+            listOf("running", "paused", "pending_review"),
+            TimedDraftStatus.entries.map { it.id },
+        )
         assertEquals(
             listOf("manual", "equipment", "wearable", "calculated"),
             MetricSource.entries.map { it.id },
@@ -68,6 +75,7 @@ class ActivityEnumTest {
         TrackingMode.entries.forEach { assertEquals(it, TrackingMode.fromId(it.id)) }
         ActivityEnvironment.entries.forEach { assertEquals(it, ActivityEnvironment.fromId(it.id)) }
         ActivitySource.entries.forEach { assertEquals(it, ActivitySource.fromId(it.id)) }
+        TimedDraftStatus.entries.forEach { assertEquals(it, TimedDraftStatus.fromId(it.id)) }
         MetricSource.entries.forEach { assertEquals(it, MetricSource.fromId(it.id)) }
         MetricUnit.entries.forEach { assertEquals(it, MetricUnit.fromId(it.id)) }
         SetType.entries.forEach { assertEquals(it, SetType.fromId(it.id)) }
@@ -80,10 +88,18 @@ class ActivityEnumTest {
         assertEquals(EquipmentType.OTHER, EquipmentType.fromId("sled"))
         assertEquals(ActivityEnvironment.UNKNOWN, ActivityEnvironment.fromId("underwater"))
         assertEquals(ActivitySource.MANUAL, ActivitySource.fromId("garmin"))
+        assertEquals(TimedDraftStatus.PAUSED, TimedDraftStatus.fromId("finished"))
         assertEquals(MetricSource.MANUAL, MetricSource.fromId("guessed"))
         assertEquals(SetType.WORKING, SetType.fromId("cluster"))
         assertEquals(TrackingMode.WEIGHT_AND_REPS, TrackingMode.fromId("weight_and_distance"))
         assertEquals(MetricUnit.COUNT, MetricUnit.fromId("furlong"))
+    }
+
+    @Test
+    fun `only a running or a paused draft is the one live timer of PRD FR-TIMER-001`() {
+        assertTrue(TimedDraftStatus.RUNNING.isLive)
+        assertTrue(TimedDraftStatus.PAUSED.isLive)
+        assertFalse(TimedDraftStatus.PENDING_REVIEW.isLive)
     }
 
     @Test
