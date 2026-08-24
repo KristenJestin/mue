@@ -20,12 +20,16 @@ enum class ActivityEnvironment(val id: String, val displayName: String) {
 }
 
 /**
- * How a session entered Mue (PRD 8.2). The V1 only ever writes [MANUAL]; the other constant
- * exists so a future import needs no migration.
+ * How a session entered Mue (PRD 8.2, amended by PRD 17).
+ *
+ * [TIMER] is written by FR-TIMER-007 and is what tells a chronometered session from a typed one,
+ * which is also what the `Start again` shortcut of the timer's PRD 6.1 looks for.
+ * [HEALTH_CONNECT] is still written by nothing and exists so a future import needs no migration.
  */
 enum class ActivitySource(val id: String) {
     MANUAL("manual"),
     HEALTH_CONNECT("health_connect"),
+    TIMER("timer"),
     ;
 
     companion object {

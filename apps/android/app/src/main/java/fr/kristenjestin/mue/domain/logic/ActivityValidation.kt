@@ -27,6 +27,7 @@ import java.time.temporal.ChronoUnit
 object ActivityValidation {
 
     const val DURATION_ERROR: String = "Duration must be between 1 min and 99 h 59 min"
+    const val TIMED_DURATION_ERROR: String = "Duration must be between 1 sec and 99 h 59 min"
     const val DATE_ERROR: String = "An activity cannot be in the future"
     const val EFFORT_ERROR: String = "Perceived effort must be between 1 and 10"
     const val NUMBER_ERROR: String = "Enter a positive number"
@@ -56,7 +57,7 @@ object ActivityValidation {
 
     fun parseInteger(raw: String): Int? = raw.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()
 
-    /** PRD FR-ACTIVITY-005: from 1 minute to 99 h 59 min, and required on every session. */
+    /** PRD FR-ACTIVITY-005: from 1 minute to 99 h 59 min, the bounds of a session typed by hand. */
     fun validateDuration(hours: Int, minutes: Int): Validated<ActivityDuration> =
         ActivityDuration.ofSessionOrNull(hours, minutes)
             ?.let { Validated.Valid(it) }
@@ -72,6 +73,39 @@ object ActivityValidation {
             return Validated.Invalid(DURATION_ERROR)
         }
         return validateDuration(typedHours, typedMinutes)
+    }
+
+    /**
+     * PRD FR-TIMER-006: from 1 second to 99 h 59 min, the bounds a session that was measured
+     * rather than typed is held to.
+     *
+     * It sits beside [validateDuration] instead of replacing it. The one-minute floor above is
+     * the floor of the manual form, which cannot express seconds; the timer can, so a session of
+     * forty seconds is real and is saved rather than losing its measured time.
+     */
+    fun validateTimedDuration(hours: Int, minutes: Int, seconds: Int): Validated<ActivityDuration> =
+        ActivityDuration.ofTimedSessionOrNull(hours, minutes, seconds)
+            ?.let { Validated.Valid(it) }
+            ?: Validated.Invalid(TIMED_DURATION_ERROR)
+
+    /** A blank part counts as zero, and neither box may overflow into the one above it. */
+    fun validateTimedDuration(
+        hours: String,
+        minutes: String,
+        seconds: String,
+    ): Validated<ActivityDuration> {
+        val typedHours = hours.trim().ifEmpty { "0" }.toIntOrNull()
+            ?: return Validated.Invalid(TIMED_DURATION_ERROR)
+        val typedMinutes = minutes.trim().ifEmpty { "0" }.toIntOrNull()
+            ?: return Validated.Invalid(TIMED_DURATION_ERROR)
+        val typedSeconds = seconds.trim().ifEmpty { "0" }.toIntOrNull()
+            ?: return Validated.Invalid(TIMED_DURATION_ERROR)
+        if (typedMinutes >= ActivityDuration.SECONDS_PER_MINUTE ||
+            typedSeconds >= ActivityDuration.SECONDS_PER_MINUTE
+        ) {
+            return Validated.Invalid(TIMED_DURATION_ERROR)
+        }
+        return validateTimedDuration(typedHours, typedMinutes, typedSeconds)
     }
 
     /** PRD FR-ACTIVITY-005: today is allowed, tomorrow is not. */

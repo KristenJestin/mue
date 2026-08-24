@@ -65,6 +65,39 @@ class ActivityDurationTest {
     }
 
     @Test
+    fun `a timed session goes down to one second while the manual floor stays at a minute`() {
+        assertEquals(1, ActivityDuration.TIMED_MIN_SECONDS)
+        assertEquals(60, ActivityDuration.SESSION_MIN_SECONDS)
+        assertEquals(40, ActivityDuration.ofTimedSessionOrNull(0, 0, 40)?.seconds)
+        assertNull(ActivityDuration.ofSessionOrNull(0, 0))
+        assertNull(ActivityDuration.ofTimedSessionOrNull(0, 0, 0))
+        assertTrue(secondsOf(1).isTimedSessionLength)
+        assertFalse(secondsOf(1).isSessionLength)
+    }
+
+    @Test
+    fun `both modes of entry stop at the same ceiling`() {
+        assertEquals(359_940, ActivityDuration.ofTimedSessionOrNull(99, 59, 0)?.seconds)
+        assertNull(ActivityDuration.ofTimedSessionOrNull(99, 59, 1))
+        assertNull(ActivityDuration.ofHoursMinutesAndSecondsOrNull(0, 0, -1))
+        assertEquals(3_661, ActivityDuration.ofHoursMinutesAndSecondsOrNull(1, 1, 1)?.seconds)
+        assertNull(ActivityDuration.ofHoursMinutesAndSecondsOrNull(Int.MAX_VALUE, 0, 0))
+    }
+
+    @Test
+    fun `a running total is judged in Long and never wraps into the valid range`() {
+        assertEquals(0, ActivityDuration.ofElapsedOrNull(0L)?.seconds)
+        assertEquals(359_940, ActivityDuration.ofElapsedOrNull(359_940L)?.seconds)
+        assertNull(ActivityDuration.ofElapsedOrNull(359_941L))
+        assertNull(ActivityDuration.ofElapsedOrNull(-1L))
+
+        // Narrowed first, this one would read as a plausible 1_000 s inside the valid range.
+        val wraps = 4_294_967_296L + 1_000L
+        assertEquals(1_000, wraps.toInt())
+        assertNull(ActivityDuration.ofElapsedOrNull(wraps))
+    }
+
+    @Test
     fun `durations add up and sum from nothing`() {
         assertEquals(secondsOf(3_600), minutesOf(45) + minutesOf(15))
         assertEquals(ActivityDuration.ZERO, ActivityDuration.sum(emptyList()))

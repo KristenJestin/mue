@@ -59,6 +59,59 @@ class ActivityDurationValidationTest {
     }
 }
 
+class TimedDurationValidationTest {
+
+    @Test
+    fun `a session measured by the timer may be shorter than the manual floor`() {
+        assertEquals(
+            40,
+            ActivityValidation.validateTimedDuration("0", "0", "40").valueOrNull?.seconds,
+        )
+        assertEquals(1, ActivityValidation.validateTimedDuration(0, 0, 1).valueOrNull?.seconds)
+        assertEquals(
+            ActivityValidation.DURATION_ERROR,
+            ActivityValidation.validateDuration("0", "0").errorMessage,
+        )
+    }
+
+    @Test
+    fun `the ceiling and the zero of PRD FR-TIMER-006 are refused with the timed message`() {
+        assertEquals(
+            359_940,
+            ActivityValidation.validateTimedDuration("99", "59", "0").valueOrNull?.seconds,
+        )
+        assertEquals(
+            ActivityValidation.TIMED_DURATION_ERROR,
+            ActivityValidation.validateTimedDuration("99", "59", "1").errorMessage,
+        )
+        assertEquals(
+            ActivityValidation.TIMED_DURATION_ERROR,
+            ActivityValidation.validateTimedDuration("0", "0", "0").errorMessage,
+        )
+        assertEquals(
+            ActivityValidation.TIMED_DURATION_ERROR,
+            ActivityValidation.validateTimedDuration("", "", "").errorMessage,
+        )
+    }
+
+    @Test
+    fun `a minutes or a seconds box never overflows into the box above it`() {
+        assertFalse(ActivityValidation.validateTimedDuration("0", "60", "0").isValid)
+        assertFalse(ActivityValidation.validateTimedDuration("0", "0", "60").isValid)
+        assertEquals(
+            2_538,
+            ActivityValidation.validateTimedDuration("", "42", "18").valueOrNull?.seconds,
+        )
+    }
+
+    @Test
+    fun `anything that is not a whole number of hours, minutes or seconds is refused`() {
+        assertFalse(ActivityValidation.validateTimedDuration("1.5", "0", "0").isValid)
+        assertFalse(ActivityValidation.validateTimedDuration("0", "0", "-5").isValid)
+        assertFalse(ActivityValidation.validateTimedDuration("0", "half", "0").isValid)
+    }
+}
+
 class ActivityFieldValidationTest {
 
     private val today: LocalDate = LocalDate.of(2026, 8, 24)
