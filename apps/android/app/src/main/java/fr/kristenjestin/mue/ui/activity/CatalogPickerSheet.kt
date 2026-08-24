@@ -7,6 +7,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.components.MueDashedAction
 import fr.kristenjestin.mue.ui.components.MueIcon
@@ -18,6 +22,12 @@ import fr.kristenjestin.mue.ui.components.MuePickerSectionHeader
 import fr.kristenjestin.mue.ui.components.MuePickerSheet
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.MueTheme
+
+/** The Lucide sparkle beside `Create “…”`, sized to the caption it sits next to. */
+private val FooterIconSize: Dp = 16.dp
+
+/** The tick inside the filled indicator of a chosen row. */
+private val SelectedIndicatorIconSize: Dp = 14.dp
 
 /**
  * The searchable catalogue of PRD FR-ACTIVITY-008, for the main activity and for equipment
@@ -54,14 +64,6 @@ internal fun CatalogPickerSheet(
         searchLabel = shown.searchLabel,
         searchIcon = { MueIcon(ActivityIcons.SEARCH, tint = MueTheme.colors.textTertiary) },
         footer = {
-            shown.notice?.let { message ->
-                MueText(
-                    text = message,
-                    style = MueTheme.typography.caption,
-                    color = MueTheme.colors.error,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
             MueDashedAction(
                 label = if (shown.canCreate) {
                     LogActivityMessages.create(shown.trimmedQuery)
@@ -70,11 +72,24 @@ internal fun CatalogPickerSheet(
                 },
                 onClick = onCreate,
                 enabled = shown.canCreate,
-                icon = { MueIcon(ActivityIcons.SPARKLES, size = 16.dp) },
+                icon = { MueIcon(ActivityIcons.SPARKLES, size = FooterIconSize) },
                 modifier = Modifier.fillMaxWidth(),
             )
         },
     ) {
+        // Directly under the search rather than beside `Create`: a refused duplicate is answered
+        // from the list, and fourteen rows of catalogue would push the answer off the screen.
+        shown.notice?.let { message ->
+            MueText(
+                text = message,
+                style = MueTheme.typography.caption,
+                color = MueTheme.colors.error,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+
         MuePickerSectionHeader(
             title = if (shown.query.isBlank()) {
                 LogActivityMessages.COMMON_CHOICES
@@ -99,7 +114,7 @@ internal fun CatalogPickerSheet(
                             MueIcon(
                                 iconName = MueIcons.CHECK,
                                 tint = MueTheme.colors.onAccent,
-                                size = 14.dp,
+                                size = SelectedIndicatorIconSize,
                             )
                         },
                     )

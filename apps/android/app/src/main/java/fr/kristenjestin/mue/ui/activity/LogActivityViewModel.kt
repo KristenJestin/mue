@@ -1,10 +1,13 @@
 package fr.kristenjestin.mue.ui.activity
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -12,7 +15,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import fr.kristenjestin.mue.MueApplication
 import fr.kristenjestin.mue.domain.logic.ActivityValidation
-import fr.kristenjestin.mue.domain.logic.StrengthRules
 import fr.kristenjestin.mue.domain.logic.Validated
 import fr.kristenjestin.mue.domain.logic.isValid
 import fr.kristenjestin.mue.domain.logic.valueOrNull
@@ -26,18 +28,14 @@ import fr.kristenjestin.mue.domain.model.ActivitySession
 import fr.kristenjestin.mue.domain.model.ActivitySessionDetail
 import fr.kristenjestin.mue.domain.model.ActivitySource
 import fr.kristenjestin.mue.domain.model.EquipmentType
+import fr.kristenjestin.mue.domain.model.ExerciseDefinition
 import fr.kristenjestin.mue.domain.model.ExerciseDefinitionId
+import fr.kristenjestin.mue.domain.model.LastPerformance
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.domain.model.PerceivedEffort
 import fr.kristenjestin.mue.domain.model.SessionEquipment
-import fr.kristenjestin.mue.domain.model.StrengthExercise
 import fr.kristenjestin.mue.domain.model.StrengthExerciseDetail
-import fr.kristenjestin.mue.domain.model.StrengthExerciseId
-import fr.kristenjestin.mue.domain.model.StrengthSet
-import fr.kristenjestin.mue.domain.model.StrengthSetId
-import fr.kristenjestin.mue.domain.model.SetType
-import fr.kristenjestin.mue.domain.model.TrackingMode
 import fr.kristenjestin.mue.domain.repository.ActivityRepository
 import fr.kristenjestin.mue.domain.repository.ExerciseCatalogRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
@@ -46,67 +44,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 import java.util.Locale
-
-/**
- * Every transformation the detailed strength editor applies to the shared draft (PRD 9.1).
- *
- * The seam of the build contract's section 5: `Log activity` and `Strength session` edit the
- * *same* [ActivityDraft], so the editor is a set of pure `ActivityDraft -> ActivityDraft`
- * functions — `StrengthDraftEditor` — and this ViewModel is the only thing that owns state.
- * Nothing here parses: a set keeps the raw text it was typed with until the save path reads it.
- *
- * The duration, the effort and the estimated energy shown at the top of the strength screen are
- * *not* edits: they are the session's own fields, and the editor binds them straight to
- * [LogActivityViewModel.onHoursChange], [LogActivityViewModel.onEffortChange] and
- * [LogActivityViewModel.onMetricChange], so typing in either screen moves the same value.
- */
-@Immutable
-sealed interface StrengthEdit {
-
-    /** PRD FR-ACTIVITY-009: adding an exercise seeds one empty set, never a plausible one. */
-    data class AddExercise(
-        val definitionId: String,
-        val name: String,
-        val trackingModeId: String,
-        val equipmentId: String? = null,
-        val isCustom: Boolean = false,
-    ) : StrengthEdit
-
-    data class RemoveExercise(val exerciseIndex: Int) : StrengthEdit
-
-    /** [by] is `-1` for `Move up` and `+1` for `Move down` (contract decision 4). */
-    data class MoveExercise(val exerciseIndex: Int, val by: Int) : StrengthEdit
-
-    data class SetExerciseNotes(val exerciseIndex: Int, val notes: String) : StrengthEdit
-
-    data class AddSet(val exerciseIndex: Int) : StrengthEdit
-
-    data class DuplicateLastSet(val exerciseIndex: Int) : StrengthEdit
-
-    data class RemoveSet(val exerciseIndex: Int, val setIndex: Int) : StrengthEdit
-
-    data class SetReps(val exerciseIndex: Int, val setIndex: Int, val input: String) : StrengthEdit
-
-    data class SetLoad(val exerciseIndex: Int, val setIndex: Int, val input: String) : StrengthEdit
-
-    data class SetDuration(
-        val exerciseIndex: Int,
-        val setIndex: Int,
-        val input: String,
-    ) : StrengthEdit
-
-    data class SetEffort(
-        val exerciseIndex: Int,
-        val setIndex: Int,
-        val value: Int?,
-    ) : StrengthEdit
-}
 
 /**
  * The one owner of the activity being written (PRD FR-ACTIVITY-004 to 011).
@@ -143,6 +88,34 @@ class LogActivityViewModel(
      */
     private val transient = MutableStateFlow(Transient())
 
+    /** PRD FR-ACTIVITY-009: what `Add exercise` lists, most recently used first. */
+    val catalogue: StateFlow<List<ExerciseDefinition>> = catalog.observeCatalogue()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
+
+    /**
+     * PRD 11.4, keyed by `ExerciseDefinitionId.value`.
+     *
+     * Only the set of drafted exercises matters, so the queries run again when one is added or
+     * removed and not on every keystroke. The session being edited is excluded, or a re-opened
+     * session would quote itself back as its own last performance.
+     */
+    val lastPerformances: StateFlow<Map<String, LastPerformance>> = _draft
+        .map { draft ->
+            draft.exercises.map(ExerciseDraft::definitionId).distinct() to draft.editingSessionId
+        }
+        .distinctUntilChanged()
+        .map { (definitionIds, sessionId) ->
+            definitionIds.mapNotNull { id ->
+                runCatching {
+                    activities.findLastPerformance(
+                        exercise = ExerciseDefinitionId(id),
+                        excludingSession = sessionId?.let(::ActivityId),
+                    )
+                }.getOrNull()?.let { id to it }
+            }.toMap()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
+
     val uiState: StateFlow<LogActivityUiState> = combine(
         _draft,
         transient,
@@ -162,8 +135,8 @@ class LogActivityViewModel(
      *
      * Returning from the strength editor recomposes the form from scratch, so a naive reset
      * here would wipe the very draft the two screens share. The marker is what tells a genuine
-     * new visit from a return: it is cleared once a save or a delete has been confirmed, which
-     * is what makes the next `Log activity` open on a blank form.
+     * new visit from a return: it is dropped once a save or a delete has landed, which is what
+     * makes the next `Log activity` open on a blank form.
      */
     fun start(sessionId: ActivityId?) {
         val marker = sessionId?.value.orEmpty()
@@ -453,12 +426,7 @@ class LogActivityViewModel(
      * The seam of contract section 5: the strength editor is a pure function of the draft, so
      * every one of its actions arrives here as a value and leaves as a new draft.
      */
-    fun onStrengthEdit(edit: StrengthEdit) {
-        // TODO(strength chunk): the body is `updateDraft { StrengthDraftEditor.apply(it, edit) }`.
-        // `StrengthDraftEditor` is owned by the strength editor chunk and had not landed when
-        // this file was written; [StrengthEdit] and this signature are frozen so that chunk can
-        // be written against them, and nothing else in this ViewModel changes when it does.
-    }
+    fun onStrengthEdit(edit: StrengthEdit) = updateDraft { StrengthDraftEditor.apply(it, edit) }
 
     // --- Saving -----------------------------------------------------------------------
 
@@ -475,6 +443,10 @@ class LogActivityViewModel(
             val result = runCatching {
                 activities.save(detailOf(draft, prepared))
             }
+            // Dropped on the write rather than on the confirmation that follows it: the
+            // detailed editor saves through the same path but leaves by its own callback, and
+            // nothing can re-enter the form between the two moments anyway.
+            if (result.isSuccess) savedState.remove<String>(KEY_STARTED_FOR)
             transient.update { flags ->
                 if (result.isSuccess) {
                     flags.copy(isSaving = false, justSaved = true)
@@ -560,7 +532,7 @@ class LogActivityViewModel(
         }
 
         val detailed = draft.detailed && preset.offersStrengthDetail
-        val setsMissing = detailed && !draft.hasAnyValidSet()
+        val setsMissing = detailed && !StrengthDraftEditor.hasAnyValidSet(draft)
 
         val summary = listOfNotNull(
             (validatedDate as? Validated.Invalid)?.message,
@@ -661,35 +633,34 @@ class LogActivityViewModel(
             equipment = prepared.equipment,
             // PRD 9.1: a quick log writes no exercise at all, however many the draft still holds.
             exercises = if (prepared.detailed) {
-                StrengthRules.persistableExercises(resolveExercises(draft))
+                resolveDefinitions(StrengthDraftEditor.persistableExercises(draft))
             } else {
                 emptyList()
             },
         )
 
     /**
-     * PRD 9.2: a name already in the catalogue reuses its definition rather than adding a
-     * second one, which is why the id is resolved here rather than trusted from the draft.
+     * PRD 9.2: an exercise the draft carries may name a definition that is not in the catalogue
+     * yet — the picker mints one for a custom name without writing it — and
+     * `strength_exercises.exercise_definition_id` is a restricted foreign key, so the row has to
+     * exist before a session points at it. A name already in the catalogue reuses its definition
+     * rather than adding a second one, which is why the id is resolved here rather than trusted
+     * from the draft.
+     *
+     * It runs *after* [StrengthDraftEditor.persistableExercises] so an exercise that invariant
+     * drops never leaves a definition behind for a set nobody kept.
      */
-    private suspend fun resolveExercises(draft: ActivityDraft): List<StrengthExerciseDetail> =
-        draft.exercises.mapIndexed { index, exercise ->
-            val mode = TrackingMode.fromId(exercise.trackingModeId)
-            val definition = catalog.findById(ExerciseDefinitionId(exercise.definitionId))
-                ?: catalog.findOrCreate(
-                    name = exercise.name,
-                    trackingMode = mode,
-                    equipment = exercise.equipmentId?.let { EquipmentType.fromId(it) },
-                )
-            StrengthExerciseDetail(
-                exercise = StrengthExercise(
-                    id = StrengthExerciseId.random(),
-                    position = index,
-                    notes = exercise.notes.trim().takeIf { it.isNotEmpty() },
-                ),
-                definition = definition,
-                sets = exercise.sets.mapIndexed { position, set -> strengthSetOf(position, set) },
+    private suspend fun resolveDefinitions(
+        exercises: List<StrengthExerciseDetail>,
+    ): List<StrengthExerciseDetail> = exercises.map { detail ->
+        val definition = catalog.findById(detail.definition.id)
+            ?: catalog.findOrCreate(
+                name = detail.definition.name,
+                trackingMode = detail.definition.trackingMode,
+                equipment = detail.definition.equipment,
             )
-        }
+        detail.copy(definition = definition)
+    }
 
     // --- State ------------------------------------------------------------------------
 
@@ -836,26 +807,6 @@ class LogActivityViewModel(
         fun String.toLocalDateOrNull(): LocalDate? =
             runCatching { LocalDate.parse(this) }.getOrNull()
 
-        /** One drafted set, parsed. An unreadable field is an absent one, never a zero. */
-        fun strengthSetOf(position: Int, set: SetDraft): StrengthSet = StrengthSet(
-            id = StrengthSetId.random(),
-            position = position,
-            setType = SetType.fromId(set.setTypeId),
-            repetitions = ActivityValidation.validateRepetitions(set.reps).valueOrNull,
-            load = ActivityValidation.validateLoad(set.loadKg).valueOrNull,
-            duration = ActivityValidation.validateSetDuration(set.durationSeconds).valueOrNull,
-            perceivedEffort = set.perceivedEffort?.let { PerceivedEffort.ofOrNull(it) },
-        )
-
-        /**
-         * PRD FR-ACTIVITY-009: a detailed session needs one complete set. Read off the draft's
-         * own tracking mode so the check costs no database round trip.
-         */
-        fun ActivityDraft.hasAnyValidSet(): Boolean = exercises.any { exercise ->
-            val mode = TrackingMode.fromId(exercise.trackingModeId)
-            exercise.sets.withIndex().any { (index, set) -> mode.isValid(strengthSetOf(index, set)) }
-        }
-
         /**
          * The key both screens ask for. `Log activity` and `Strength session` share one
          * instance because they share one draft (contract section 5); the store is the hosting
@@ -921,3 +872,48 @@ class LogActivityViewModel(
 @Composable
 fun logActivityViewModel(): LogActivityViewModel =
     viewModel(key = LogActivityViewModel.KEY, factory = LogActivityViewModel.Factory)
+
+/**
+ * The strength editor, backed by the form's own draft (contract section 5).
+ *
+ * `StrengthSessionScreen` defaults to a host that keeps a draft of its own and writes nothing;
+ * passing this instead is what makes `Quick log` and `Detailed log` two views of one session
+ * (PRD 9.1). Every mutation the editor asks for arrives as a [StrengthEdit] and leaves through
+ * `StrengthDraftEditor`, so this adapter holds no state and decides nothing.
+ */
+@Composable
+fun rememberSharedStrengthSessionState(
+    viewModel: LogActivityViewModel = logActivityViewModel(),
+): StrengthSessionState {
+    val draft = viewModel.draft.collectAsStateWithLifecycle()
+    val catalogue = viewModel.catalogue.collectAsStateWithLifecycle()
+    val performances = viewModel.lastPerformances.collectAsStateWithLifecycle()
+    val state = viewModel.uiState.collectAsStateWithLifecycle()
+    return remember(viewModel) {
+        SharedStrengthSessionState(viewModel, draft, catalogue, performances, state)
+    }
+}
+
+@Stable
+private class SharedStrengthSessionState(
+    private val viewModel: LogActivityViewModel,
+    private val draftState: State<ActivityDraft>,
+    private val catalogueState: State<List<ExerciseDefinition>>,
+    private val performanceState: State<Map<String, LastPerformance>>,
+    private val uiState: State<LogActivityUiState>,
+) : StrengthSessionState {
+
+    override val draft: ActivityDraft get() = draftState.value
+
+    override val catalogue: List<ExerciseDefinition> get() = catalogueState.value
+
+    override val lastPerformances: Map<String, LastPerformance>
+        get() = performanceState.value
+
+    /** Contract decision 8: the discharge plays first, and the editor leaves after it. */
+    override val saved: Boolean get() = uiState.value.justSaved
+
+    override fun edit(edit: StrengthEdit) = viewModel.onStrengthEdit(edit)
+
+    override fun save() = viewModel.save()
+}

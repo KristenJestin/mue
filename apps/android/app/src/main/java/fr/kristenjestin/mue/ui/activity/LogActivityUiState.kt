@@ -72,6 +72,9 @@ data class LogActivityUiState(
     /** PRD 8.5: only the builder asks which activity this was. */
     val showsBuilder: Boolean get() = preset == ActivityPreset.OTHER
 
+    /** PRD 9.1 and FR-ACTIVITY-008: the builder *and* the quick strength log collect equipment. */
+    val showsEquipment: Boolean get() = preset.choosesEquipment
+
     val showsStrengthDetail: Boolean get() = preset.offersStrengthDetail
 
     /** The free name wins, exactly as it does on a stored session (PRD FR-ACTIVITY-008). */
@@ -215,6 +218,9 @@ object LogActivityMessages {
     const val COMMON_CHOICES: String = "Common choices"
     const val RESULTS: String = "Results"
     const val CREATE_HINT: String = "Search before creating a custom item"
+
+    /** `Estimated energy · optional` — how the strength editor names the same field. */
+    fun optional(label: String): String = "$label · optional"
 
     fun resultCount(count: Int): String = if (count == 1) "1 result" else "$count results"
 

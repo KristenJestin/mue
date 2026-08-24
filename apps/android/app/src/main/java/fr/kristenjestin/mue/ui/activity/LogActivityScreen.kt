@@ -356,8 +356,9 @@ private fun CommonFields(state: LogActivityUiState, actions: LogActivityActions)
             }
 
             TwoPartNumberField(
+                // No trailing icon: `Start time · optional` needs the whole half-width row, and
+                // the label is what names the field. PRD 14.1's table asks for no clock here.
                 label = LogActivityMessages.START_TIME_LABEL,
-                icon = MueIcons.CLOCK,
                 first = ClockPart(
                     value = state.startHours,
                     onValueChange = actions.onStartHoursChange,

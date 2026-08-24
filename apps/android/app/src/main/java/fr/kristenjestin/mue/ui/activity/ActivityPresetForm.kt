@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.model.ActivityEnvironment
@@ -53,9 +54,10 @@ private val ClockBoxWidth: Dp = 44.dp
 
 /**
  * The pace is the one two-part field that shares a row with a neighbour, so its boxes give up
- * what the `/km` suffix needs. Measured on a 390 dp screen: anything wider ellipsises the unit.
+ * what the `/km` suffix needs — but not below two digits: `40` in a 30 dp box scrolls out of it
+ * and lands on the colon. Measured at the 26 sp of `fieldValue` on a 390 dp screen.
  */
-private val PaceBoxWidth: Dp = 30.dp
+private val PaceBoxWidth: Dp = 34.dp
 
 /** A small box still has to be reachable; the container around it is 64 dp tall (PRD 15). */
 private val ClockBoxHeight: Dp = 36.dp
@@ -81,6 +83,8 @@ internal fun ActivityPresetForm(
     ) {
         if (state.showsBuilder) ActivityBuilder(state, actions)
         if (state.showsStrengthDetail) StrengthDetailChoice(state, actions)
+        // PRD 9.1: the quick strength log offers equipment too, not only the builder.
+        if (state.showsEquipment) EquipmentCard(state, actions)
         MetricFields(state, actions)
     }
 }
@@ -90,23 +94,30 @@ internal fun ActivityPresetForm(
 @Composable
 private fun MetricFields(state: LogActivityUiState, actions: LogActivityActions) {
     if (state.metrics.isEmpty()) return
+
+    // A single optional box does not need a section around it, and it takes the whole width
+    // rather than half of a grid that has nothing to put beside it (as in the prototype). With
+    // no section there is no `OPTIONAL` badge either, so the field says so itself — which is
+    // also how the strength editor labels the very same measurement.
+    state.metrics.singleOrNull()?.let { metric ->
+        MetricField(metric, actions, Modifier.fillMaxWidth(), optional = true)
+        return
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-        // A single optional box does not need a section around it; four of them do.
-        if (state.metrics.size > 1) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = MueTheme.spacing.sm),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MueText(
-                    text = LogActivityMessages.detailsTitle(state.preset),
-                    style = MueTheme.typography.sectionTitle,
-                    maxLines = 1,
-                )
-                MueValueChip(LogActivityMessages.OPTIONAL_BADGE)
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = MueTheme.spacing.sm),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MueText(
+                text = LogActivityMessages.detailsTitle(state.preset),
+                style = MueTheme.typography.sectionTitle,
+                maxLines = 1,
+            )
+            MueValueChip(LogActivityMessages.OPTIONAL_BADGE)
         }
 
         state.metrics.chunked(COLUMNS).forEach { row ->
@@ -128,7 +139,13 @@ private fun MetricField(
     metric: MetricFieldState,
     actions: LogActivityActions,
     modifier: Modifier = Modifier,
+    optional: Boolean = false,
 ) {
+    val label = if (optional) {
+        LogActivityMessages.optional(metric.kind.label)
+    } else {
+        metric.kind.label
+    }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
@@ -137,7 +154,7 @@ private fun MetricField(
             // PRD FR-ACTIVITY-007: `7:10 /km` is one stored value typed in two boxes, because
             // no numeric keyboard offers a colon.
             TwoPartNumberField(
-                label = metric.kind.label,
+                label = label,
                 icon = ActivityIcons.forMetric(metric.kind),
                 first = ClockPart(
                     value = metric.paceMinutes,
@@ -158,7 +175,7 @@ private fun MetricField(
             )
         } else {
             MueTextField(
-                label = metric.kind.label,
+                label = label,
                 value = metric.input,
                 onValueChange = { actions.onMetricChange(metric.kind, it) },
                 modifier = Modifier.testTag(ActivityTestTags.metricField(metric.kind.id)),
@@ -172,23 +189,18 @@ private fun MetricField(
                         KeyboardType.Decimal
                     },
                 ),
-                trailing = {
-                    MueIcon(
-                        iconName = ActivityIcons.forMetric(metric.kind),
-                        tint = MueTheme.colors.accent,
-                        size = MetricIconSize,
-                    )
-                },
+                trailing = { FieldIcon(ActivityIcons.forMetric(metric.kind)) },
             )
         }
 
-        // PRD 11.3: an estimation keeps the provenance of the machine that produced it.
+        // PRD 11.3: an estimation keeps the provenance of the machine that produced it. Inset
+        // like the field's own content, so it reads as a note on that box and not on the row.
         if (metric.source == MetricSource.EQUIPMENT) {
             MueText(
                 text = LogActivityMessages.FROM_EQUIPMENT,
                 style = MueTheme.typography.micro,
                 color = MueTheme.colors.textQuiet,
-                modifier = Modifier.padding(start = MueTheme.spacing.xs),
+                modifier = Modifier.padding(start = MueTheme.spacing.lg),
                 maxLines = 1,
             )
         }
@@ -269,35 +281,46 @@ private fun ActivityBuilder(state: LogActivityUiState, actions: LogActivityActio
             )
         }
 
-        MueSurfaceCard(shape = MueTheme.shapes.field) {
-            LabelWithIcon(LogActivityMessages.EQUIPMENT_LABEL, ActivityIcons.WRENCH)
-            if (state.equipment.isNotEmpty()) {
-                MueChipRow(modifier = Modifier.padding(top = MueTheme.spacing.md)) {
-                    state.equipment.forEach { chip ->
-                        MueRemovableChip(
-                            label = chip.label,
-                            onRemove = { actions.onEquipmentRemoved(chip.index) },
-                            modifier = Modifier.testTag(
-                                ActivityTestTags.equipmentChip(chip.index),
-                            ),
-                        )
-                    }
+    }
+}
+
+/**
+ * The removable equipment tags of PRD FR-ACTIVITY-008, and of PRD 9.1's quick strength log.
+ *
+ * It is a card of its own rather than part of the builder because two presets offer it: the
+ * builder asks *what* the activity was, `Strength training` already knows and only asks what
+ * was used. `ActivityPreset.choosesEquipment` is the single place that decides.
+ */
+@Composable
+private fun EquipmentCard(state: LogActivityUiState, actions: LogActivityActions) {
+    MueSurfaceCard(shape = MueTheme.shapes.field) {
+        LabelWithIcon(LogActivityMessages.EQUIPMENT_LABEL, ActivityIcons.WRENCH)
+        if (state.equipment.isNotEmpty()) {
+            MueChipRow(modifier = Modifier.padding(top = MueTheme.spacing.md)) {
+                state.equipment.forEach { chip ->
+                    MueRemovableChip(
+                        label = chip.label,
+                        onRemove = { actions.onEquipmentRemoved(chip.index) },
+                        modifier = Modifier.testTag(
+                            ActivityTestTags.equipmentChip(chip.index),
+                        ),
+                    )
                 }
             }
-            MueDashedAction(
-                label = if (state.equipment.isEmpty()) {
-                    LogActivityMessages.CHOOSE_EQUIPMENT
-                } else {
-                    LogActivityMessages.ADD_ANOTHER_EQUIPMENT
-                },
-                onClick = actions.onOpenEquipmentPicker,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = MueTheme.spacing.md)
-                    .testTag(ActivityTestTags.EQUIPMENT_PICKER),
-                icon = { MueIcon(ActivityIcons.PLUS, size = MetricIconSize) },
-            )
         }
+        MueDashedAction(
+            label = if (state.equipment.isEmpty()) {
+                LogActivityMessages.CHOOSE_EQUIPMENT
+            } else {
+                LogActivityMessages.ADD_ANOTHER_EQUIPMENT
+            },
+            onClick = actions.onOpenEquipmentPicker,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = MueTheme.spacing.md)
+                .testTag(ActivityTestTags.EQUIPMENT_PICKER),
+            icon = { MueIcon(ActivityIcons.PLUS, size = MetricIconSize) },
+        )
     }
 }
 
@@ -390,15 +413,7 @@ internal fun TwoPartNumberField(
             label = label,
             focused = focused,
             isError = errorMessage != null,
-            trailing = icon?.let {
-                {
-                    MueIcon(
-                        iconName = it,
-                        tint = MueTheme.colors.accent,
-                        size = MetricIconSize,
-                    )
-                }
-            },
+            trailing = icon?.let { { FieldIcon(it) } },
         ) {
             Row(
                 verticalAlignment = Alignment.Bottom,
@@ -423,9 +438,15 @@ internal fun TwoPartNumberField(
     }
 }
 
+/**
+ * The number in a clock box is aligned to the end of its box, so it sits against the `h`, the
+ * `:` or the `/km` that names it rather than a box-width away from it. Two digits and one digit
+ * then read as the same field, which a start-aligned box does not.
+ */
 @Composable
 private fun NumberBox(part: ClockPart, width: Dp, onFocusChange: (Boolean) -> Unit) {
     val colors = MueTheme.colors
+    val style = MueTheme.typography.fieldValue.copy(textAlign = TextAlign.End)
     BasicTextField(
         value = part.value,
         onValueChange = part.onValueChange,
@@ -436,15 +457,15 @@ private fun NumberBox(part: ClockPart, width: Dp, onFocusChange: (Boolean) -> Un
             .testTag(part.testTag)
             .semantics { contentDescription = part.contentDescription },
         singleLine = true,
-        textStyle = MueTheme.typography.fieldValue.copy(color = colors.textPrimary),
+        textStyle = style.copy(color = colors.textPrimary),
         cursorBrush = SolidColor(colors.accent),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         decorationBox = { inner ->
-            Box(contentAlignment = Alignment.CenterStart) {
+            Box(contentAlignment = Alignment.CenterEnd) {
                 if (part.value.isEmpty()) {
                     MueText(
                         text = EMPTY_NUMBER_HINT,
-                        style = MueTheme.typography.fieldValue,
+                        style = style,
                         color = colors.textTertiary,
                         maxLines = 1,
                     )
@@ -461,8 +482,25 @@ private fun Suffix(text: String) {
         text = text,
         style = MueTheme.typography.caption,
         color = MueTheme.colors.textTertiary,
-        modifier = Modifier.padding(bottom = 2.dp),
+        modifier = Modifier.padding(bottom = MueTheme.spacing.xxs),
         maxLines = 1,
+    )
+}
+
+/**
+ * The accent icon a field carries on its right.
+ *
+ * [MueFieldContainer] gives the value column all the space left over, so a trailing element
+ * lands flush against whatever ends that column — here the unit — and the gap has to come from
+ * the icon itself.
+ */
+@Composable
+private fun FieldIcon(iconName: String) {
+    MueIcon(
+        iconName = iconName,
+        tint = MueTheme.colors.accent,
+        size = MetricIconSize,
+        modifier = Modifier.padding(start = MueTheme.spacing.sm),
     )
 }
 
