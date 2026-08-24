@@ -9,6 +9,20 @@
     -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!--
+      The Activity Timer's ongoing notification (PRD_ACTIVITY_TIMER 6.5 and 17). Asked for at
+      runtime on Android 13 and above, in the context of the first `Start timer`, and refused
+      without consequence: the timer runs, pauses and finishes from inside Mue either way.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Install-time only, with no runtime prompt. Android clears every notification at boot, so
+      a timer restored from Room would come back invisible outside the app; this is what lets
+      it be reposted. It does nothing at all when no timer is running or paused.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".MueApplication"
         android:allowBackup="false"
@@ -38,6 +52,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          `Pause`, `Resume` and `Discard` from the ongoing notification. Not exported: the only
+          sender is this process, through its own PendingIntents, and nothing outside Mue has
+          any business stopping a user's timer.
+        -->
+        <receiver
+            android:name=".timer.TimerActionReceiver"
+            android:directBootAware="false"
+            android:exported="false" />
+
+        <!--
+          Reposts the notification of a timer that survived a reboot.
+
+          `exported="true"` is mandatory and not a relaxation: a receiver that is not exported
+          never receives a broadcast sent by the system, and it fails silently. BOOT_COMPLETED
+          is a protected broadcast, so only the system can send it.
+
+          `directBootAware="false"`, with no LOCKED_BOOT_COMPLETED filter: the database is
+          credential-encrypted and cannot be read before the first unlock, which is exactly
+          when the plain BOOT_COMPLETED broadcast arrives.
+        -->
+        <receiver
+            android:name=".timer.BootCompletedReceiver"
+            android:directBootAware="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Shares the generated CSV without exposing the app's private storage. -->
         <provider
