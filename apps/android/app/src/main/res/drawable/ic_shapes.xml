@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lucide `shapes` (ISC). Stroked 24x24 grid, never filled; tinted by the caller. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M8.3 10 a.7 .7 0 0 1 -.626 -1.079 L11.4 3 a.7 .7 0 0 1 1.198 -.043 L16.3 8.9 a.7 .7 0 0 1 -.572 1.1 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M4 14 h5 a1 1 0 0 1 1 1 v5 a1 1 0 0 1 -1 1 h-5 a1 1 0 0 1 -1 -1 v-5 a1 1 0 0 1 1 -1 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M14 17.5 a3.5 3.5 0 1 0 7 0 a3.5 3.5 0 1 0 -7 0 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+</vector>

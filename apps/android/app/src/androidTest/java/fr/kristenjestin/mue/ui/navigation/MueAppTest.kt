@@ -1,6 +1,7 @@
 package fr.kristenjestin.mue.ui.navigation
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -8,7 +9,12 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Rule
 import org.junit.Test
 
-/** Titles of the three screens; the tab is only proven if its own screen answers. */
+/**
+ * Titles of the screens that open a tab; the tab is only proven if its own screen answers.
+ *
+ * `Activity` has none yet: its dashboard is still a stub, so the fourth tab is proven by the
+ * selection it takes and by the screens it hides. The title joins this map with the screen.
+ */
 private val TITLES = mapOf(
     MueDestination.ENTRY to "Where are you today?",
     MueDestination.PROGRESS to "Slowly, surely.",
@@ -25,9 +31,10 @@ class MueAppTest {
     fun everyTabShowsItsScreen() {
         composeRule.setContent { MueTheme { MueApp() } }
 
-        TITLES.forEach { (destination, title) ->
+        MueDestination.entries.forEach { destination ->
             composeRule.onNodeWithText(destination.label).performClick()
-            composeRule.onNodeWithText(title).assertIsDisplayed()
+            composeRule.onNodeWithText(destination.label).assertIsSelected()
+            TITLES[destination]?.let { composeRule.onNodeWithText(it).assertIsDisplayed() }
         }
     }
 
@@ -40,5 +47,19 @@ class MueAppTest {
 
         composeRule.onNodeWithText(TITLES.getValue(MueDestination.ENTRY)).assertDoesNotExist()
         composeRule.onNodeWithText(TITLES.getValue(MueDestination.PROFILE)).assertIsDisplayed()
+    }
+
+    /** The Activity tab replaces the other screens even while its own is empty. */
+    @Test
+    fun theActivityTabTakesTheScreenOverFromItsNeighbours() {
+        composeRule.setContent { MueTheme { MueApp() } }
+
+        composeRule.onNodeWithText("Activity").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Activity").assertIsSelected()
+        TITLES.values.forEach { title ->
+            composeRule.onNodeWithText(title).assertDoesNotExist()
+        }
     }
 }
