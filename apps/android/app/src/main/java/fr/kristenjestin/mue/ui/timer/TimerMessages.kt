@@ -96,6 +96,17 @@ object TimerMessages {
     /** FR-TIMER-010, word for word. The figure behind it is never corrected silently. */
     const val CHECK_ACTIVITY_TIME: String = "Check activity time"
 
+    /**
+     * What a failed `Pause`, `Resume`, `Finish` or `Discard` says.
+     *
+     * The PRD writes no message for it — it does not admit the case — so this follows the
+     * Activities module's own rule for the same situation (PRD_ACTIVITIES 13.4): no success
+     * confirmation anywhere, a clear sentence when a write fails, and the action still there to
+     * try again. The second clause is the important one: a transition has no half state, so
+     * the measured time is exactly where it was.
+     */
+    const val TRANSITION_FAILED: String = "Couldn’t update the timer. Your time is still here."
+
     // endregion
 
     // region Notification (PRD 6.5, 10 and FR-TIMER-012)

@@ -22,6 +22,23 @@ enum class TimerNotice(val message: String) {
 
     /** FR-TIMER-010: the duration could not be trusted, so the timer stopped where it was. */
     CHECK_ACTIVITY_TIME(TimerMessages.CHECK_ACTIVITY_TIME),
+
+    /**
+     * A transition was attempted and the write failed (PRD 12; PRD_ACTIVITIES 13.4 is the
+     * precedent). Nothing was half done and nothing was lost — the draft stands exactly as the
+     * database has it — so the message says so and the button is still there to press again.
+     */
+    TRANSITION_FAILED(TimerMessages.TRANSITION_FAILED),
+    ;
+
+    /**
+     * Whether the notice reports something that went wrong.
+     *
+     * FR-TIMER-002's answer is a fact about the app and not a fault: a second `Start timer` did
+     * exactly what it was asked to and opened the timer that already exists. The other two are
+     * failures, and read in the error hue.
+     */
+    val isProblem: Boolean get() = this != ALREADY_IN_PROGRESS
 }
 
 /**

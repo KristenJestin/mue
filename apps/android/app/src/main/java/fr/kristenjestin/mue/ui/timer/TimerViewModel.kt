@@ -155,6 +155,31 @@ class TimerViewModel(
     /** PRD 6.4: the notice is transient, and any surface may retire it once it has been read. */
     fun dismissNotice() = clearNotice()
 
+    /**
+     * Asks the caller to show the timer that already exists — PRD 6.4's `Open` on the chassis
+     * banner, and contract decision 5's `Start activity` pressed while one is already running.
+     *
+     * [announceAlreadyLive] is what tells the two apart. Tapping the banner is not an attempt to
+     * start anything and says nothing; `Start activity` **is** that attempt, and FR-TIMER-002
+     * has it open the running timer carrying `An activity is already in progress.` — before a
+     * request has been built, so it never reaches [start] to be refused there.
+     */
+    fun openTimer(announceAlreadyLive: Boolean = false) {
+        val id = uiState.value.timer?.id ?: return
+        transient.update {
+            it.copy(
+                timerToOpen = id,
+                notice = if (announceAlreadyLive) TimerNotice.ALREADY_IN_PROGRESS else it.notice,
+            )
+        }
+    }
+
+    /**
+     * FR-TIMER-005 from the ongoing notification: `MainActivity` has already stopped the timer
+     * by the time Mue is on screen, so the review form is asked for rather than derived.
+     */
+    fun openReview(id: TimedDraftId) = transient.update { it.copy(reviewToOpen = id) }
+
     /** Consumes [TimerUiState.timerToOpen] once the caller has opened the timer. */
     fun onTimerOpened() = transient.update { it.copy(timerToOpen = null) }
 
@@ -236,16 +261,24 @@ class TimerViewModel(
      * once, at the press, so what is stored is when the user acted rather than when the write
      * got its turn — and both clocks come from that one reading, never from two.
      *
-     * A failed write leaves the draft exactly as the database has it, which the next emission
-     * shows: there is no message here because a transition has no half state to explain, and the
-     * button is simply still there to press again.
+     * A failed write leaves the draft exactly as the database has it — a transition has no half
+     * state — but silence would leave the user watching a button that appeared to do nothing.
+     * PRD_ACTIVITIES 13.4 is the rule the module already follows for this: no confirmation on
+     * success, a clear sentence on failure, and the same action still there to try again.
      */
     private fun mutate(at: TimerInstant, block: suspend (TimerInstant) -> Unit) {
         if (transient.value.isMutating) return
         transient.update { it.copy(isMutating = true, notice = null) }
         viewModelScope.launch {
-            runCatching { block(at) }
-            transient.update { it.copy(isMutating = false) }
+            val failed = runCatching { block(at) }.isFailure
+            transient.update { flags ->
+                flags.copy(
+                    isMutating = false,
+                    // A notice the block itself raised — FR-TIMER-002's, FR-TIMER-010's — is
+                    // only reached when the write succeeded, so it is never overwritten.
+                    notice = if (failed) TimerNotice.TRANSITION_FAILED else flags.notice,
+                )
+            }
         }
     }
 
