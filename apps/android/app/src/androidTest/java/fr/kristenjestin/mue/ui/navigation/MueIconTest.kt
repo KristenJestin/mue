@@ -20,6 +20,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val RasterSize = 48
+private const val Painted = '#'
+private const val Blank = '.'
 
 /**
  * The imported Lucide vectors (PRD_ACTIVITIES 14.1).
@@ -124,20 +126,70 @@ class MueIconTest {
         assertTrue("movements share a glyph: $shared", shared.isEmpty())
     }
 
-    private fun paintedPixels(context: Context, @DrawableRes resource: Int): Int {
+    /**
+     * The two halves of `MueIcons` cannot drift apart.
+     *
+     * A name reachable from `resource` but absent from `names` is walked by none of the tests
+     * above, so it ships unverified; two names resolving to one drawable is a copy-paste that
+     * would put the wrong glyph on screen. The compiler sees neither.
+     */
+    @Test
+    fun theIconTableAndTheIconListAgree() {
+        val listedTwice = MueIcons.names.groupBy { it }.filterValues { it.size > 1 }.keys
+        assertTrue("names listed twice: $listedTwice", listedTwice.isEmpty())
+
+        val sharedResource = MueIcons.names
+            .groupBy(MueIcons::resource)
+            .filterValues { it.size > 1 }
+            .values
+        assertTrue("names sharing one drawable: $sharedResource", sharedResource.isEmpty())
+
+        MueIcons.timerNames.forEach {
+            assertTrue("`$it` is not in MueIcons.names and would ship undrawn", it in MueIcons.names)
+        }
+    }
+
+    /**
+     * The Activity Timer glyphs (PRD_ACTIVITY_TIMER 6), drawn rather than merely resolved.
+     *
+     * SVG lets an arc pack its two flags into one token; Android's `PathParser` does not, and
+     * AAPT compiles such a file without complaint — the failure arrives as a
+     * `Resources$NotFoundException` at inflate, on a device, which is exactly what drawing here
+     * forces. `bell`, `bell-ring`, `circle-dot`, `history`, `rotate-cw`, `more-horizontal`,
+     * `pause` and `square` are all arcs, so this is the whole set bar `play`.
+     */
+    @Test
+    fun everyTimerGlyphDrawsAShapeOfItsOwn() {
+        val drawn = MueIcons.timerNames.associateWith { name ->
+            mask(context, MueIcons.resource(name)).also {
+                assertTrue("`$name` draws nothing at all", it.contains(Painted))
+            }
+        }
+
+        // A file copied onto another would pass every check above; only the pixels tell them apart.
+        val identical = drawn.entries.groupBy({ it.value }, { it.key }).values.filter { it.size > 1 }
+        assertTrue("timer glyphs draw the same shape: $identical", identical.isEmpty())
+    }
+
+    private fun paintedPixels(context: Context, @DrawableRes resource: Int): Int =
+        mask(context, resource).count { it == Painted }
+
+    /** One icon rasterised to a coverage mask, so two glyphs can be compared by what they paint. */
+    private fun mask(context: Context, @DrawableRes resource: Int): String {
         val drawable = requireNotNull(ContextCompat.getDrawable(context, resource))
         val bitmap = Bitmap.createBitmap(RasterSize, RasterSize, Bitmap.Config.ARGB_8888)
         drawable.setBounds(0, 0, RasterSize, RasterSize)
         drawable.setTint(Color.WHITE)
         drawable.draw(Canvas(bitmap))
 
-        var painted = 0
-        for (x in 0 until RasterSize) {
+        val mask = buildString(RasterSize * RasterSize) {
             for (y in 0 until RasterSize) {
-                if (Color.alpha(bitmap.getPixel(x, y)) > 0) painted++
+                for (x in 0 until RasterSize) {
+                    append(if (Color.alpha(bitmap.getPixel(x, y)) > 0) Painted else Blank)
+                }
             }
         }
         bitmap.recycle()
-        return painted
+        return mask
     }
 }

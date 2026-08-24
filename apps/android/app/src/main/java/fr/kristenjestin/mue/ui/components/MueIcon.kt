@@ -93,6 +93,35 @@ object MueIcons {
     const val LIST_PLUS: String = "ic_list_plus"
     const val ZAP: String = "ic_zap"
 
+    /*
+     * The Activity Timer (PRD_ACTIVITY_TIMER 6). That document carries no icon table of its own,
+     * so these are the names its two prototypes draw, kept as Lucide names because
+     * PRD_ACTIVITIES 14.1 makes Lucide the family and its own table the tie-breaker — which is
+     * why the preset cards still answer `route` and `footprints` rather than the prototype's
+     * `person-standing` and `trees`. The transport glyphs stay stroked like every other vector
+     * here; the prototypes fill them with `currentColor`, which nothing in this app does.
+     */
+
+    const val PLAY: String = "ic_play"
+    const val PAUSE: String = "ic_pause"
+
+    /** Lucide draws the transport stop as `square`. Here it is the `Finish` action, nothing else. */
+    const val STOP: String = "ic_square"
+
+    /** The timer screen's overflow, which holds `Discard timer` alone (PRD_ACTIVITY_TIMER 6.3). */
+    const val MORE_HORIZONTAL: String = "ic_more_horizontal"
+
+    /** A still bell explains the notification before it is asked for, a ringing one once it is live. */
+    const val BELL: String = "ic_bell"
+    const val BELL_RING: String = "ic_bell_ring"
+
+    /** The `Active` / `Paused` dot, which is never the only carrier of that state (PRD 11). */
+    const val CIRCLE_DOT: String = "ic_circle_dot"
+
+    /** `Log past activity` and `Start again`, the dashboard actions of PRD_ACTIVITY_TIMER 6.1. */
+    const val HISTORY: String = "ic_history"
+    const val ROTATE_CW: String = "ic_rotate_cw"
+
     @DrawableRes
     fun resource(name: String): Int = when (name) {
         ActivityIcons.TAB_ENTRY -> R.drawable.ic_scale
@@ -142,8 +171,34 @@ object MueIcons {
         LIST_PLUS -> R.drawable.ic_list_plus
         ZAP -> R.drawable.ic_zap
 
+        PLAY -> R.drawable.ic_play
+        PAUSE -> R.drawable.ic_pause
+        STOP -> R.drawable.ic_square
+        MORE_HORIZONTAL -> R.drawable.ic_more_horizontal
+        BELL -> R.drawable.ic_bell
+        BELL_RING -> R.drawable.ic_bell_ring
+        CIRCLE_DOT -> R.drawable.ic_circle_dot
+        HISTORY -> R.drawable.ic_history
+        ROTATE_CW -> R.drawable.ic_rotate_cw
+
         else -> error("No Lucide vector was imported for the icon `$name`")
     }
+
+    /**
+     * The glyphs the Activity Timer introduces, named as a group so its own test can walk them
+     * without restating the list — and so [names] cannot be the place one of them is forgotten.
+     */
+    val timerNames: List<String> = listOf(
+        PLAY,
+        PAUSE,
+        STOP,
+        MORE_HORIZONTAL,
+        BELL,
+        BELL_RING,
+        CIRCLE_DOT,
+        HISTORY,
+        ROTATE_CW,
+    )
 
     /** Every name this app can draw. A test walks it so an unimported icon cannot ship. */
     val names: List<String> = listOf(
@@ -190,7 +245,7 @@ object MueIcons {
         CLOCK,
         LIST_PLUS,
         ZAP,
-    )
+    ) + timerNames
 }
 
 @Preview(name = "Icons", showBackground = true, backgroundColor = 0xFF101012)
