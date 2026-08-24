@@ -1,7 +1,7 @@
 package fr.kristenjestin.mue.ui.profile
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,14 +58,10 @@ internal fun BmiReadout(bmi: Bmi.Available, echoCount: Int, modifier: Modifier =
     val hop = remember { Animatable(0f) }
     LaunchedEffect(echoCount) {
         if (echoCount > 0 && !reduceMotion) {
+            val rise = (MueMotion.SaveHopMillis * HopRiseFraction).toInt()
             hop.snapTo(0f)
-            hop.animateTo(
-                targetValue = 0f,
-                animationSpec = keyframes {
-                    durationMillis = MueMotion.SaveHopMillis
-                    1f at (MueMotion.SaveHopMillis * HopRiseFraction).toInt() using MueMotion.Enter
-                },
-            )
+            hop.animateTo(1f, tween(rise, easing = MueMotion.Enter))
+            hop.animateTo(0f, tween(MueMotion.SaveHopMillis - rise, easing = MueMotion.Standard))
         }
     }
     val hopPx = with(LocalDensity.current) { HopHeight.toPx() }
