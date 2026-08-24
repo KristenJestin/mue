@@ -1047,7 +1047,7 @@ class LogActivityViewModelTest {
     @Test
     fun `finishing a timer opens the form on what was measured`() = reviewTest { model, _ ->
         val state = model.uiState.value
-        assertTrue(state.isTimedReview)
+        assertTrue(state.isTimedSession)
         assertFalse(state.isEditing)
         assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
         assertEquals(Movement.WALKING, state.movement)
@@ -1104,7 +1104,7 @@ class LogActivityViewModelTest {
     /** A draft saved or discarded from elsewhere leaves nothing to review, not an empty review. */
     @Test
     fun `a draft that is gone opens a blank form`() = reviewTest(timed = null) { model, drafts ->
-        assertFalse(model.uiState.value.isTimedReview)
+        assertFalse(model.uiState.value.isTimedSession)
         assertEquals("", model.uiState.value.minutes)
         assertTrue(drafts.formStates.isEmpty())
     }
@@ -1197,7 +1197,7 @@ class LogActivityViewModelTest {
             model.save()
 
             assertEquals(ActivityValidation.DURATION_ERROR, model.uiState.value.durationError)
-            assertFalse(model.uiState.value.isTimedReview)
+            assertFalse(model.uiState.value.isTimedSession)
             assertEquals("", model.uiState.value.seconds)
             assertTrue(repository.saved.isEmpty())
         }
@@ -1241,7 +1241,7 @@ class LogActivityViewModelTest {
         advanceUntilIdle()
 
         val state = reopened.uiState.value
-        assertTrue(state.isTimedReview)
+        assertTrue(state.isTimedSession)
         assertEquals("Legs heavy", state.notes)
         assertEquals("4.2", reopened.input(MetricKind.DISTANCE))
         assertEquals("43", state.minutes)
@@ -1257,7 +1257,7 @@ class LogActivityViewModelTest {
         )
         reviewTest(timed) { model, _ ->
             val state = model.uiState.value
-            assertTrue(state.isTimedReview)
+            assertTrue(state.isTimedSession)
             assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
             assertEquals("42", state.minutes)
             assertEquals("18", state.seconds)
@@ -1284,7 +1284,7 @@ class LogActivityViewModelTest {
         )
         reviewTest(timed) { model, _ ->
             val state = model.uiState.value
-            assertTrue(state.isTimedReview)
+            assertTrue(state.isTimedSession)
             assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
             assertEquals("42", state.minutes)
             assertEquals("18", state.seconds)
@@ -1312,6 +1312,60 @@ class LogActivityViewModelTest {
             detail.equipment.map { it.equipmentType },
         )
         assertTrue(model.uiState.value.justSaved)
+    }
+
+    /**
+     * FR-TIMER-006 and 007, on the *stored* session rather than on the review.
+     *
+     * Reopening a measured session to fix a note used to cost it both of the things the module
+     * exists to protect: the seconds were never put into the draft, so the save rebuilt the
+     * duration from hours and minutes alone, and `source` was decided from a draft id that a
+     * saved session no longer has. A no-op `Save changes` turned `6 min 25 sec` from the timer
+     * into `6 min` typed by hand — and took it out of `Start again`'s reach with it.
+     */
+    @Test
+    fun `re-saving a stored timed session keeps its seconds and its source`() = logTest(
+        detail = timedTreadmillDetail(),
+    ) { model, repository ->
+        model.start(EDITED)
+        advanceUntilIdle()
+
+        model.save()
+        advanceUntilIdle()
+
+        val saved = repository.saved.single()
+        assertEquals(secondsOf(6 * 60 + 25), saved.session.duration)
+        assertEquals(ActivitySource.TIMER, saved.session.source)
+    }
+
+    /** And the form offers the third span, which is what makes the correction possible at all. */
+    @Test
+    fun `a stored timed session is edited to the second`() = logTest(
+        detail = timedTreadmillDetail(),
+    ) { model, _ ->
+        model.start(EDITED)
+        advanceUntilIdle()
+
+        val state = model.uiState.value
+        assertTrue(state.isTimedSession)
+        assertEquals("25", state.seconds)
+    }
+
+    /** A hand-typed session is untouched by all of that: no seconds, and still manual. */
+    @Test
+    fun `re-saving a stored manual session leaves it manual`() = logTest(
+        detail = treadmillDetail(),
+    ) { model, repository ->
+        model.start(EDITED)
+        advanceUntilIdle()
+
+        model.save()
+        advanceUntilIdle()
+
+        val saved = repository.saved.single()
+        assertEquals(minutesOf(65), saved.session.duration)
+        assertEquals(ActivitySource.MANUAL, saved.session.source)
+        assertFalse(model.uiState.value.isTimedSession)
     }
 
     /** The two paths never cross: a review is never written as a second, manual session. */
@@ -1529,6 +1583,20 @@ private fun treadmillDetail(): ActivitySessionDetail = ActivitySessionDetail(
     metrics = ActivityMetrics.of(
         ActivityMetric(MetricKind.DISTANCE, 4_200),
         ActivityMetric(MetricKind.ESTIMATED_ENERGY, 280, MetricSource.EQUIPMENT),
+    ),
+    equipment = listOf(SessionEquipment(EquipmentType.TREADMILL)),
+)
+
+/** The same walk, but measured: `source = timer` and a duration that is not a round minute. */
+private fun timedTreadmillDetail(): ActivitySessionDetail = ActivitySessionDetail(
+    session = ActivitySession(
+        id = EDITED,
+        movement = Movement.WALKING,
+        startedOn = LocalDate.of(2026, 8, 19),
+        duration = secondsOf(6 * 60 + 25),
+        environment = ActivityEnvironment.INDOOR,
+        startedAtTime = LocalTime.of(18, 32),
+        source = ActivitySource.TIMER,
     ),
     equipment = listOf(SessionEquipment(EquipmentType.TREADMILL)),
 )

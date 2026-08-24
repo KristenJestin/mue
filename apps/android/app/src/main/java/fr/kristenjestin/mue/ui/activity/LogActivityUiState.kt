@@ -36,7 +36,7 @@ data class LogActivityUiState(
     /** PRD FR-TIMER-006: the seconds of a measured duration; blank for a hand-typed one. */
     val seconds: String = "",
     /** FR-TIMER-005: this form is reviewing a timer, which is what puts seconds on screen. */
-    val isTimedReview: Boolean = false,
+    val isTimedSession: Boolean = false,
     val perceivedEffort: Int? = null,
     val notes: String = "",
     /** PRD 9.1: the reversible `Quick log` / `Detailed log` choice. */

@@ -29,6 +29,18 @@ data class ActivityDraft(
      * decides that the duration is corrected to the second.
      */
     val timedDraftId: String? = null,
+    /**
+     * FR-TIMER-007: the **stored** session being edited was recorded by the timer.
+     *
+     * Distinct from [timedDraftId], which only ever names a `pending_review` draft. Once that
+     * draft has been saved the id is gone, but the session it produced is still a measured one
+     * — it keeps its seconds and it keeps `source = timer` — and reopening it to fix a note
+     * must not quietly turn it into something typed by hand.
+     *
+     * Additive, so an older serialised blob simply reads `false`; `Json` already ignores
+     * unknown keys, and no meaning changed, so [SCHEMA_VERSION] stands.
+     */
+    val fromTimer: Boolean = false,
     val presetId: String = ActivityPreset.DEFAULT.id,
     /** ISO `YYYY-MM-DD`; empty means "today", which the screen resolves on its own clock. */
     val startedOn: String = "",
@@ -51,8 +63,17 @@ data class ActivityDraft(
 ) {
     val preset: ActivityPreset get() = ActivityPreset.fromId(presetId)
 
-    /** PRD FR-TIMER-006: only a measured session shows seconds and corrects them. */
-    val isTimedReview: Boolean get() = timedDraftId != null
+    /**
+     * PRD FR-TIMER-006: only a measured session shows seconds and corrects them, and PRD 14.3
+     * as amended says so of a *session* and not only of a review.
+     *
+     * Both readings of "measured" answer here: the review of a `pending_review` draft, and the
+     * edit of a session the timer has already written. Asking [timedDraftId] alone conflated
+     * the two, and the second one silently lost what the first had gone to such lengths to
+     * keep — a stored `6 min 25 sec` reopened for a note came back rounded to `6 min` and
+     * recorded as manual.
+     */
+    val isTimedSession: Boolean get() = timedDraftId != null || fromTimer
 
     fun presetDraft(preset: ActivityPreset = this.preset): PresetDraft =
         byPreset[preset.id] ?: PresetDraft()

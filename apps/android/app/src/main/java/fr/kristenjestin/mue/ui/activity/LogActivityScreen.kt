@@ -429,7 +429,7 @@ private fun CommonFields(state: LogActivityUiState, actions: LogActivityActions)
 
         // FR-TIMER-006: a measured duration is stated and corrected, a typed one is entered.
         // The two never share a field — manual entry cannot express the seconds at all.
-        if (state.isTimedReview) {
+        if (state.isTimedSession) {
             TimedDurationField(
                 hours = state.hours,
                 minutes = state.minutes,

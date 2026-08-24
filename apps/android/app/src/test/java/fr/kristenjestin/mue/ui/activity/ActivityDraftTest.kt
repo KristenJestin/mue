@@ -95,7 +95,7 @@ class ActivityDraftTest {
 
     @Test
     fun `a hand-typed draft is not a review and shows no seconds`() {
-        assertFalse(ActivityDraft().isTimedReview)
+        assertFalse(ActivityDraft().isTimedSession)
         assertEquals("", ActivityDraft().seconds)
     }
 
@@ -114,7 +114,7 @@ class ActivityDraftTest {
         val restored = ActivityDraft.fromJson(draft.toJson())
 
         assertEquals(draft, restored)
-        assertTrue(restored.isTimedReview)
+        assertTrue(restored.isTimedSession)
         assertEquals("18", restored.seconds)
     }
 

@@ -214,6 +214,17 @@ class LogActivityViewModel(
                 startedAtTime = session.startedAtTime?.format(LogActivityFormat.TIME),
                 hours = session.duration.hoursPart.toString(),
                 minutes = session.duration.minutesPart.toString(),
+                /*
+                 * FR-TIMER-006: the third span, which used to be dropped here.
+                 *
+                 * A manual session has no seconds to carry — its floor is the minute — so this
+                 * reads `0` for one and changes nothing. For a measured session it is the whole
+                 * point: the draft is what the save reads back, and a span the draft never held
+                 * is a span the save cannot write.
+                 */
+                seconds = session.duration.secondsPart.toString(),
+                // And what makes the form treat it as measured at all (FR-TIMER-007).
+                fromTimer = session.source == ActivitySource.TIMER,
                 perceivedEffort = session.perceivedEffort?.value,
                 notes = session.notes.orEmpty(),
                 detailed = detail.exercises.isNotEmpty(),
@@ -692,7 +703,7 @@ class LogActivityViewModel(
         // PRD 17: the one-minute floor is the manual form's, which cannot express seconds. A
         // measured session is held to one second instead, so a `Finish` pressed after forty of
         // them records a real session rather than losing what was measured.
-        val validatedDuration = if (draft.isTimedReview) {
+        val validatedDuration = if (draft.isTimedSession) {
             ActivityValidation.validateTimedDuration(draft.hours, draft.minutes, draft.seconds)
         } else {
             ActivityValidation.validateDuration(draft.hours, draft.minutes)
@@ -818,8 +829,10 @@ class LogActivityViewModel(
                 perceivedEffort = prepared.effort,
                 notes = ActivityValidation.normalizeNotes(draft.notes),
                 // FR-TIMER-007: what tells a chronometered session from a typed one, and what
-                // the `Start again` shortcut of the timer's PRD 6.1 looks for.
-                source = if (draft.isTimedReview) ActivitySource.TIMER else ActivitySource.MANUAL,
+                // the `Start again` shortcut of the timer's PRD 6.1 looks for. It is a fact
+                // about how the session was recorded, so re-saving one after an edit restates
+                // it rather than deciding it again from whether a draft id happens to be here.
+                source = if (draft.isTimedSession) ActivitySource.TIMER else ActivitySource.MANUAL,
             ),
             metrics = ActivityMetrics.of(prepared.metrics),
             equipment = prepared.equipment,
@@ -873,7 +886,7 @@ class LogActivityViewModel(
             hours = draft.hours,
             minutes = draft.minutes,
             seconds = draft.seconds,
-            isTimedReview = draft.isTimedReview,
+            isTimedSession = draft.isTimedSession,
             perceivedEffort = draft.perceivedEffort,
             notes = draft.notes,
             detailed = draft.detailed,
