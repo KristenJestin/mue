@@ -18,10 +18,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.kristenjestin.mue.domain.model.ActivityId
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.ui.activity.ActivityNavHost
 import fr.kristenjestin.mue.ui.activity.ActivityRoute
 import fr.kristenjestin.mue.ui.activity.ActivityStack
 import fr.kristenjestin.mue.ui.activity.rememberActivityStack
+import fr.kristenjestin.mue.ui.activity.showReview
+import fr.kristenjestin.mue.ui.activity.showTimer
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -33,16 +36,28 @@ private const val PUSH_HISTORY = "push history"
 private const val PUSH_LOG = "push log"
 private const val PUSH_EDIT = "push edit"
 private const val PUSH_STRENGTH = "push strength"
+private const val PUSH_START = "push start"
+private const val START_TIMER = "start timer"
+private const val FINISH_TIMER = "finish timer"
 private const val SAVE_FROM_STRENGTH = "save from strength"
+
+private val ReviewedDraft = TimedDraftId("2c1d4e5f-0000-4000-8000-0000000000aa")
 
 private val EditedSession = ActivityId("7b6a2f1e-0000-4000-8000-000000000001")
 
-/** The stand-in name of a route, so a test can tell which screen answered. */
+/**
+ * The stand-in name of a route, so a test can tell which screen answered.
+ *
+ * Exhaustive on purpose: a route added without a name here stops this file compiling, which is
+ * how the timer's two screens announced themselves.
+ */
 private fun ActivityRoute.testName(): String = when (this) {
     ActivityRoute.Dashboard -> "Dashboard"
     ActivityRoute.History -> "History"
     ActivityRoute.Strength -> "Strength"
-    is ActivityRoute.Log -> "Log ${sessionId?.value ?: "new"}"
+    ActivityRoute.Start -> "Start"
+    ActivityRoute.Timer -> "Timer"
+    is ActivityRoute.Log -> "Log ${sessionId?.value ?: draftId?.value ?: "new"}"
 }
 
 /**
@@ -68,6 +83,10 @@ class ActivityNavHostTest {
             Text(PUSH_LOG, Modifier.clickable { stack.push(ActivityRoute.Log(sessionId = null)) })
             Text(PUSH_EDIT, Modifier.clickable { stack.push(ActivityRoute.Log(EditedSession)) })
             Text(PUSH_STRENGTH, Modifier.clickable { stack.push(ActivityRoute.Strength) })
+            Text(PUSH_START, Modifier.clickable { stack.push(ActivityRoute.Start) })
+            // The two handovers of the timer, driven as the nav host drives them.
+            Text(START_TIMER, Modifier.clickable { stack.showTimer() })
+            Text(FINISH_TIMER, Modifier.clickable { stack.showReview(ReviewedDraft) })
             Text(SAVE_FROM_STRENGTH, Modifier.clickable { stack.pop(count = 2) })
         }
     }
@@ -230,7 +249,10 @@ class ActivityNavHostTest {
         composeRule.onNodeWithText("Entry").assertIsSelected()
     }
 
-    /** Contract decision 2: no module screen hides the bar, not even the two forms. */
+    /**
+     * Contract decision 2, and PRD_ACTIVITY_TIMER 6.4's promise that the bar never moves: no
+     * module screen hides it — not the two forms, and not the timer's two either.
+     */
     @Test
     fun theBarStaysVisibleOnEverySubScreen() {
         setShell()
@@ -244,6 +266,62 @@ class ActivityNavHostTest {
             composeRule.onNodeWithText(tab.label).assertIsDisplayed()
         }
         composeRule.onNodeWithText("Activity").assertIsSelected()
+    }
+
+    @Test
+    fun theBarStaysVisibleOnTheTimersScreensToo() {
+        setShell()
+
+        composeRule.onNodeWithText("Activity").performClick()
+        composeRule.onNodeWithText(PUSH_START).performClick()
+        composeRule.onNodeWithText("Start body").assertIsDisplayed()
+        MueDestination.entries.forEach { tab ->
+            composeRule.onNodeWithText(tab.label).assertIsDisplayed()
+        }
+
+        composeRule.onNodeWithText(START_TIMER).performClick()
+        composeRule.onNodeWithText("Timer body").assertIsDisplayed()
+        MueDestination.entries.forEach { tab ->
+            composeRule.onNodeWithText(tab.label).assertIsDisplayed()
+        }
+    }
+
+    /**
+     * FR-TIMER-001 and 005 end to end on the stack: the chooser hands over to the timer, the
+     * timer hands over to its review form, and back from either reaches the dashboard rather
+     * than a screen that would start or stop something a second time.
+     */
+    @Test
+    fun theTimerHandsOverToTheChooserAndThenToTheReview() {
+        setHost()
+
+        composeRule.onNodeWithText(PUSH_START).performClick()
+        composeRule.onNodeWithText("Start body").assertIsDisplayed()
+
+        composeRule.onNodeWithText(START_TIMER).performClick()
+        composeRule.onNodeWithText("Timer body").assertIsDisplayed()
+        composeRule.onNodeWithText("Start body").assertDoesNotExist()
+
+        composeRule.onNodeWithText(FINISH_TIMER).performClick()
+        composeRule.onNodeWithText("Log ${ReviewedDraft.value} body").assertIsDisplayed()
+        composeRule.onNodeWithText("Timer body").assertDoesNotExist()
+
+        pressBack()
+        composeRule.onNodeWithText("Dashboard body").assertIsDisplayed()
+    }
+
+    /** The review's draft id is a route argument, so it has to cross the bundle with it. */
+    @Test
+    fun aReviewKeepsItsDraftIdAcrossProcessDeath() {
+        val restoration = StateRestorationTester(composeRule)
+        restoration.setContent { MueTheme { ActivityTab() } }
+
+        composeRule.onNodeWithText(FINISH_TIMER).performClick()
+        composeRule.onNodeWithText("Log ${ReviewedDraft.value} body").assertIsDisplayed()
+
+        restoration.emulateSavedInstanceStateRestore()
+
+        composeRule.onNodeWithText("Log ${ReviewedDraft.value} body").assertIsDisplayed()
     }
 
     /**

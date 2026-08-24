@@ -24,19 +24,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+/** The stand-in for the chassis banner, which the shell only ever gives a place to. */
+private const val BANNER = "banner slot"
+
 /**
- * Mechanics of the tab shell (PRD 8), driven with stand-in screens so that nothing here
- * depends on the database or on what the three real screens happen to display.
+ * Mechanics of the tab shell (PRD 8, PRD_ACTIVITY_TIMER 6.4), driven with stand-in screens so
+ * that nothing here depends on the database or on what the three real screens happen to
+ * display.
  */
 class MueNavigationHostTest {
 
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun setHost(reduceMotion: Boolean = false) {
+    private fun setHost(reduceMotion: Boolean = false, banner: Boolean = false) {
         composeRule.setContent {
             MueTheme(reduceMotion = reduceMotion) {
-                MueNavigationHost { destination ->
+                MueNavigationHost(
+                    banner = { if (banner) Text(BANNER) },
+                ) { destination ->
                     var taps by rememberSaveable { mutableIntStateOf(0) }
                     Column {
                         Text("${destination.label} body")
@@ -169,6 +175,66 @@ class MueNavigationHostTest {
         composeRule.onNodeWithText("Progress body").assertExists()
         assertEquals(entryAtRest, bodyLeft(MueDestination.ENTRY))
     }
+
+    // region the chassis banner (PRD_ACTIVITY_TIMER 6.4)
+
+    /** It sits between the content and the bar, and belongs to neither. */
+    @Test
+    fun theBannerSitsBetweenTheContentAndTheBar() {
+        setHost(banner = true)
+
+        val body = composeRule.onNodeWithText("Entry body").getUnclippedBoundsInRoot()
+        val banner = composeRule.onNodeWithText(BANNER).getUnclippedBoundsInRoot()
+        val bar = bounds(MueDestination.ENTRY)
+
+        assertTrue("the banner should sit under the content", body.top < banner.top)
+        assertTrue("the banner should sit above the bar", banner.top < bar.top)
+    }
+
+    /**
+     * The whole reason it is drawn here rather than inside the navigation: a tab change must
+     * neither slide it nor drop it (PRD 6.4).
+     */
+    @Test
+    fun theBannerHoldsStillWhileTheContentSlides() {
+        composeRule.mainClock.autoAdvance = false
+        setHost(banner = true)
+        val bannerAtRest = composeRule.onNodeWithText(BANNER).getUnclippedBoundsInRoot()
+
+        composeRule.onNodeWithText("Progress").performClick()
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(MueMotion.TabChangeMillis / 2L)
+
+        composeRule.onNodeWithText("Progress body").assertExists()
+        assertEquals(
+            bannerAtRest,
+            composeRule.onNodeWithText(BANNER).getUnclippedBoundsInRoot(),
+        )
+    }
+
+    @Test
+    fun theBannerIsPresentOnEveryTab() {
+        setHost(banner = true)
+
+        MueDestination.entries.forEach { destination ->
+            composeRule.onNodeWithText(destination.label).performClick()
+            composeRule.onNodeWithText(BANNER).assertIsDisplayed()
+        }
+    }
+
+    /** With no timer the slot draws nothing, so the shell is exactly what it always was. */
+    @Test
+    fun noBannerLeavesTheShellAsItWas() {
+        setHost()
+
+        composeRule.onNodeWithText(BANNER).assertDoesNotExist()
+        composeRule.onNodeWithText("Entry body").assertIsDisplayed()
+        MueDestination.entries.forEach { tab ->
+            composeRule.onNodeWithText(tab.label).assertIsDisplayed()
+        }
+    }
+
+    // endregion
 
     private fun bounds(destination: MueDestination) =
         composeRule.onNodeWithText(destination.label).getUnclippedBoundsInRoot()
