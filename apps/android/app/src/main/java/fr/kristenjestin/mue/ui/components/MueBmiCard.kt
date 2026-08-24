@@ -95,21 +95,12 @@ fun MueBmiCard(bmi: Bmi, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                MueText(
-                    text = BMI_LABEL,
-                    style = typography.label,
-                    color = colors.onAccentSecondary,
-                )
-                MueAnimatedNumber(
-                    text = value,
-                    modifier = Modifier.padding(top = spacing.sm),
-                    style = typography.metricDisplay,
-                    color = colors.onAccent,
-                    contentDescription = bmiDescription(bmi, value),
-                    durationMillis = MueMotion.BmiMillis,
-                )
-            }
+            MueText(
+                text = BMI_LABEL,
+                style = typography.label,
+                color = colors.onAccentSecondary,
+                modifier = Modifier.weight(1f),
+            )
             MueValueChip(
                 // No category means no label: PRD FR-BMI-002 leaves only the value and the
                 // caution text when the age does not allow one.
@@ -119,6 +110,18 @@ fun MueBmiCard(bmi: Bmi, modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(start = spacing.md),
             )
         }
+
+        // Below the row rather than beside the chip: sharing that line left the value only
+        // the width the category label did not take, and at a large font scale it was the
+        // one number the card exists to show that got truncated away.
+        MueAnimatedNumber(
+            text = value,
+            modifier = Modifier.padding(top = spacing.sm),
+            style = typography.metricDisplay,
+            color = colors.onAccent,
+            contentDescription = bmiDescription(bmi, value),
+            durationMillis = MueMotion.BmiMillis,
+        )
 
         if (bmi is Bmi.Classified) {
             BmiReferenceBar(
