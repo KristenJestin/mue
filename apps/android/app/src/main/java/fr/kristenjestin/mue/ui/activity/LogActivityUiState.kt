@@ -33,6 +33,10 @@ data class LogActivityUiState(
     val startTime: LocalTime? = null,
     val hours: String = "",
     val minutes: String = "",
+    /** PRD FR-TIMER-006: the seconds of a measured duration; blank for a hand-typed one. */
+    val seconds: String = "",
+    /** FR-TIMER-005: this form is reviewing a timer, which is what puts seconds on screen. */
+    val isTimedReview: Boolean = false,
     val perceivedEffort: Int? = null,
     val notes: String = "",
     /** PRD 9.1: the reversible `Quick log` / `Detailed log` choice. */
@@ -57,6 +61,8 @@ data class LogActivityUiState(
     val isSaving: Boolean = false,
     val datePickerVisible: Boolean = false,
     val timePickerVisible: Boolean = false,
+    /** FR-TIMER-006: the three-field correction, which manual entry never opens. */
+    val durationPickerVisible: Boolean = false,
     val picker: CatalogPickerState? = null,
     val deleteConfirmationVisible: Boolean = false,
     val quickLogConfirmationVisible: Boolean = false,
@@ -168,6 +174,14 @@ object LogActivityMessages {
     const val CLOSE_TIME_SHEET: String = "Close the start time picker"
     const val USE_THIS_DATE: String = "Use this date"
     const val USE_THIS_TIME: String = "Use this time"
+
+    /**
+     * The correction PRD FR-TIMER-006 opens from the duration summary, worded exactly as the
+     * date and start-time panels beside it are: the timer borrows the form's own furniture.
+     */
+    const val DURATION_SHEET_TITLE: String = "Activity duration"
+    const val CLOSE_DURATION_SHEET: String = "Close the duration picker"
+    const val USE_THIS_DURATION: String = "Use this duration"
 
     /** PRD 8.2 keeps the start time optional, so the sheet has to be able to take it back off. */
     const val CLEAR_START_TIME: String = "Clear"

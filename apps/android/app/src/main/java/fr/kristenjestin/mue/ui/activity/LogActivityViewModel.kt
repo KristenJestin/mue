@@ -36,8 +36,11 @@ import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.domain.model.PerceivedEffort
 import fr.kristenjestin.mue.domain.model.SessionEquipment
 import fr.kristenjestin.mue.domain.model.StrengthExerciseDetail
+import fr.kristenjestin.mue.domain.model.TimedActivityDraft
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.domain.repository.ActivityRepository
 import fr.kristenjestin.mue.domain.repository.ExerciseCatalogRepository
+import fr.kristenjestin.mue.domain.repository.TimedActivityRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -51,6 +54,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -64,9 +68,15 @@ import java.util.Locale
  * The whole draft crosses [SavedStateHandle] as one JSON string. A per-preset map of unbounded
  * exercise lists cannot be flattened into Bundle keys, and keeping the raw text is what brings
  * a half-typed `7,` back after the process has been killed (PRD 16.4).
+ *
+ * The same form is where a finished timer is reviewed (PRD_ACTIVITY_TIMER FR-TIMER-005). That
+ * adds a second store rather than a second screen: `SavedStateHandle` still carries the form
+ * across a rotation, and the draft row carries it across a closed app, because several timed
+ * drafts can wait at once and a handle belongs to whichever one was last on screen (PRD 8.2).
  */
 class LogActivityViewModel(
     private val activities: ActivityRepository,
+    private val drafts: TimedActivityRepository,
     private val catalog: ExerciseCatalogRepository,
     preferences: UserPreferencesRepository,
     private val savedState: SavedStateHandle,
@@ -128,6 +138,32 @@ class LogActivityViewModel(
         initialValue = build(_draft.value, transient.value, hapticsEnabled = true),
     )
 
+    init {
+        /*
+         * PRD 8.2: the review form's state is rewritten at every significant change rather than
+         * held back until `Save activity`, so closing the app loses nothing that was typed.
+         *
+         * A `StateFlow` is what makes that affordable. It conflates, so a burst of keystrokes
+         * costs one write per value the typing settles on; and it is collected in sequence, so
+         * the last value is also the last one written — which two racing launches could not
+         * promise. A failure is dropped on purpose: the typed columns still hold the movement
+         * and the measured duration, and a form nobody can save is a worse outcome than a
+         * correction that has to be made again.
+         */
+        viewModelScope.launch {
+            _draft.collect { draft ->
+                val id = draft.timedDraftId ?: return@collect
+                runCatching {
+                    drafts.saveReviewFormState(
+                        id = TimedDraftId(id),
+                        state = draft.toJson(),
+                        schemaVersion = ActivityDraft.SCHEMA_VERSION,
+                    )
+                }
+            }
+        }
+    }
+
     // --- Opening the form -------------------------------------------------------------
 
     /**
@@ -144,16 +180,18 @@ class LogActivityViewModel(
      * flags outlive the rotation with this ViewModel, so the discharge simply resumes and the
      * return happens as it was going to.
      */
-    fun start(sessionId: ActivityId?) {
+    fun start(sessionId: ActivityId?, draftId: TimedDraftId? = null) {
         if (transient.value.justSaved || transient.value.justDeleted) return
-        val marker = sessionId?.value.orEmpty()
+        val marker = markerOf(sessionId, draftId)
         if (savedState.get<String>(KEY_STARTED_FOR) == marker) return
         savedState[KEY_STARTED_FOR] = marker
-        transient.value = Transient(isLoading = sessionId != null)
-        if (sessionId == null) {
-            replaceDraft(ActivityDraft())
-        } else {
-            viewModelScope.launch { prefill(sessionId) }
+        transient.value = Transient(isLoading = sessionId != null || draftId != null)
+        when {
+            // FR-TIMER-005 wins over an id that should never arrive with it: a timed draft is
+            // reviewed into a new session, never into an existing one.
+            draftId != null -> viewModelScope.launch { prefillFromTimer(draftId) }
+            sessionId != null -> viewModelScope.launch { prefill(sessionId) }
+            else -> replaceDraft(ActivityDraft())
         }
     }
 
@@ -187,6 +225,77 @@ class LogActivityViewModel(
             it.copy(isLoading = false, storedExerciseCount = detail.exercises.size)
         }
     }
+
+    /**
+     * FR-TIMER-005: the form opens on what the timer measured, and FR-TIMER-008 lets it be
+     * opened again as often as the person likes until they save.
+     *
+     * A draft that is no longer there opens a blank form rather than an empty review: it was
+     * saved from another window, or discarded, and there is nothing left to review.
+     */
+    private suspend fun prefillFromTimer(id: TimedDraftId) {
+        val timed = runCatching { drafts.findDraft(id) }.getOrNull()
+        replaceDraft(if (timed == null) ActivityDraft() else reviewDraftOf(timed))
+        transient.update { it.copy(isLoading = false) }
+    }
+
+    /**
+     * PRD 8.2, and the whole of it.
+     *
+     * A form state this build wrote is decoded and gives the typing back. Anything else — a
+     * blob that will not parse, or one written under another schema version — is **not**
+     * decoded at all, and the form is rebuilt from the typed columns instead. Only the typing
+     * is lost that way; the movement, the equipment, the start instant and above all the
+     * measured duration come from columns no serialisation format can spoil.
+     *
+     * The draft id is stamped on afterwards either way, so a blob that somehow arrived without
+     * one still saves through `commitToSession` rather than as a hand-typed session.
+     */
+    private fun reviewDraftOf(timed: TimedActivityDraft): ActivityDraft {
+        val restored = timed.reviewFormState
+            ?.takeIf { timed.reviewFormSchemaVersion == ActivityDraft.SCHEMA_VERSION }
+            ?.let(ActivityDraft::fromJsonOrNull)
+        return (restored ?: rebuiltFrom(timed)).copy(timedDraftId = timed.id.value)
+    }
+
+    /**
+     * The typed columns of PRD 8.2, as a form.
+     *
+     * The start time is truncated to the minute here because `activity_sessions.started_at_time`
+     * is `HH:mm` and FR-TIMER-005 makes that a fact about the value rather than about its
+     * display: what the timer screen promised and what the form prefills have to be the same
+     * minute. The duration is where the seconds survive, which is the point of FR-TIMER-006.
+     *
+     * No measurement is prefilled: FR-TIMER-005 forbids it, and a distance Mue never observed
+     * would be a number the user is invited to accept rather than to enter.
+     */
+    private fun rebuiltFrom(timed: TimedActivityDraft): ActivityDraft {
+        val preset = ActivityPreset.of(timed.movement, timed.equipment)
+        val duration = timed.accumulatedActive
+        return ActivityDraft(
+            timedDraftId = timed.id.value,
+            presetId = preset.id,
+            startedOn = timed.startedOn.toString(),
+            startedAtTime = timed.startedAtLocalTime
+                .truncatedTo(ChronoUnit.MINUTES)
+                .format(LogActivityFormat.TIME),
+            hours = duration.hoursPart.toString(),
+            minutes = duration.minutesPart.toString(),
+            seconds = duration.secondsPart.toString(),
+            byPreset = mapOf(preset.id to presetDraftOf(preset, timed)),
+        )
+    }
+
+    /** The preset's own machine stays implicit in its tile, exactly as it does for a session. */
+    private fun presetDraftOf(preset: ActivityPreset, timed: TimedActivityDraft): PresetDraft =
+        PresetDraft(
+            movementId = timed.movement.id,
+            customMovementName = timed.customMovementName.orEmpty(),
+            environmentId = timed.environment.id,
+            equipment = timed.equipment
+                .filterNot { it.equipmentType == preset.equipment && it.customName == null }
+                .map { EquipmentDraft(it.equipmentType.id, it.customName.orEmpty()) },
+        )
 
     private fun presetDraftOf(preset: ActivityPreset, detail: ActivitySessionDetail): PresetDraft =
         PresetDraft(
@@ -265,6 +374,30 @@ class LogActivityViewModel(
     fun onMinutesChange(raw: String) {
         clear { it.copy(durationError = null) }
         updateDraft { it.copy(minutes = digits(raw, MAX_CLOCK_DIGITS)) }
+    }
+
+    // --- The measured duration (FR-TIMER-006) -----------------------------------------
+
+    fun onOpenDurationPicker() = transient.update { it.copy(durationPickerVisible = true) }
+
+    fun onDismissDurationPicker() = transient.update { it.copy(durationPickerVisible = false) }
+
+    /**
+     * FR-TIMER-006: the summary's three-field correction, and the only writer of the seconds.
+     *
+     * The three parts are stored as text like everything else in the draft, so what the wheels
+     * were left on survives a process death. Nothing is refused here — the bounds belong to
+     * `ActivityValidation.validateTimedDuration`, beside the action that would apply them.
+     */
+    fun onTimedDurationSelected(hours: Int, minutes: Int, seconds: Int) {
+        clear { it.copy(durationPickerVisible = false, durationError = null) }
+        updateDraft {
+            it.copy(
+                hours = hours.toString(),
+                minutes = minutes.toString(),
+                seconds = seconds.toString(),
+            )
+        }
     }
 
     fun onEffortChange(value: Int) {
@@ -482,7 +615,16 @@ class LogActivityViewModel(
         transient.update { it.copy(isSaving = true, saveError = null) }
         viewModelScope.launch {
             val result = runCatching {
-                activities.save(detailOf(draft, prepared))
+                val detail = detailOf(draft, prepared)
+                val timed = draft.timedDraftId
+                // FR-TIMER-007: one session created and the draft deleted, in one transaction.
+                // A failure leaves both exactly where they were (PRD 12), which is why the two
+                // are never written by two calls from here.
+                if (timed == null) {
+                    activities.save(detail)
+                } else {
+                    drafts.commitToSession(TimedDraftId(timed), detail)
+                }
             }
             // Dropped on the write rather than on the confirmation that follows it: the
             // detailed editor saves through the same path but leaves by its own callback, and
@@ -547,7 +689,14 @@ class LogActivityViewModel(
         val date = draft.startedOn.toLocalDateOrNull() ?: today()
         val validatedDate = ActivityValidation.validateStartedOn(date, today())
         val validatedTime = validateStartTime(draft.startedAtTime)
-        val validatedDuration = ActivityValidation.validateDuration(draft.hours, draft.minutes)
+        // PRD 17: the one-minute floor is the manual form's, which cannot express seconds. A
+        // measured session is held to one second instead, so a `Finish` pressed after forty of
+        // them records a real session rather than losing what was measured.
+        val validatedDuration = if (draft.isTimedReview) {
+            ActivityValidation.validateTimedDuration(draft.hours, draft.minutes, draft.seconds)
+        } else {
+            ActivityValidation.validateDuration(draft.hours, draft.minutes)
+        }
         val validatedEffort = ActivityValidation.validatePerceivedEffort(draft.perceivedEffort)
 
         val metrics = draft.activeMetricInputs()
@@ -668,7 +817,9 @@ class LogActivityViewModel(
                 startedAtTime = ActivityValidation.normalizeStartTime(prepared.startedAtTime),
                 perceivedEffort = prepared.effort,
                 notes = ActivityValidation.normalizeNotes(draft.notes),
-                source = ActivitySource.MANUAL,
+                // FR-TIMER-007: what tells a chronometered session from a typed one, and what
+                // the `Start again` shortcut of the timer's PRD 6.1 looks for.
+                source = if (draft.isTimedReview) ActivitySource.TIMER else ActivitySource.MANUAL,
             ),
             metrics = ActivityMetrics.of(prepared.metrics),
             equipment = prepared.equipment,
@@ -721,6 +872,8 @@ class LogActivityViewModel(
             startTime = LogActivityFormat.timeOrNull(draft.startedAtTime),
             hours = draft.hours,
             minutes = draft.minutes,
+            seconds = draft.seconds,
+            isTimedReview = draft.isTimedReview,
             perceivedEffort = draft.perceivedEffort,
             notes = draft.notes,
             detailed = draft.detailed,
@@ -750,6 +903,7 @@ class LogActivityViewModel(
             isSaving = flags.isSaving,
             datePickerVisible = flags.datePickerVisible,
             timePickerVisible = flags.timePickerVisible,
+            durationPickerVisible = flags.durationPickerVisible,
             picker = flags.picker?.let { refresh(it, draft) },
             deleteConfirmationVisible = flags.deleteConfirmationVisible,
             quickLogConfirmationVisible = flags.quickLogConfirmationVisible,
@@ -831,6 +985,19 @@ class LogActivityViewModel(
         fun digits(raw: String, max: Int): String = raw.filter(Char::isDigit).take(max)
 
         /**
+         * What a visit is remembered by, so returning from the strength editor is told from a
+         * genuinely new entry.
+         *
+         * The two kinds of id are prefixed rather than merged: they come from different tables,
+         * and a session and a timed draft sharing a value would otherwise open the wrong form.
+         */
+        private fun markerOf(sessionId: ActivityId?, draftId: TimedDraftId?): String = when {
+            draftId != null -> "draft:${draftId.value}"
+            sessionId != null -> "session:${sessionId.value}"
+            else -> ""
+        }
+
+        /**
          * Both separators reach the draft (PRD 12); everything else is refused at the keystroke
          * so no field can hold text a save would later have to explain.
          *
@@ -873,6 +1040,7 @@ class LogActivityViewModel(
                     as MueApplication
                 LogActivityViewModel(
                     activities = app.container.activityRepository,
+                    drafts = app.container.timer.timedActivityRepository,
                     catalog = app.container.exerciseCatalogRepository,
                     preferences = app.container.userPreferencesRepository,
                     savedState = createSavedStateHandle(),
@@ -908,6 +1076,7 @@ class LogActivityViewModel(
         val saveError: String? = null,
         val datePickerVisible: Boolean = false,
         val timePickerVisible: Boolean = false,
+        val durationPickerVisible: Boolean = false,
         val picker: CatalogPickerState? = null,
         val deleteConfirmationVisible: Boolean = false,
         val quickLogConfirmationVisible: Boolean = false,
