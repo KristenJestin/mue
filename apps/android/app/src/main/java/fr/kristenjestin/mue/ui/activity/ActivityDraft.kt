@@ -23,6 +23,12 @@ import kotlinx.serialization.json.Json
 data class ActivityDraft(
     /** The session being edited, or null while creating one (PRD FR-ACTIVITY-010). */
     val editingSessionId: String? = null,
+    /**
+     * The `pending_review` timed draft this form is reviewing (PRD FR-TIMER-005), or null for
+     * everything typed by hand. It is what routes the save through `commitToSession` and what
+     * decides that the duration is corrected to the second.
+     */
+    val timedDraftId: String? = null,
     val presetId: String = ActivityPreset.DEFAULT.id,
     /** ISO `YYYY-MM-DD`; empty means "today", which the screen resolves on its own clock. */
     val startedOn: String = "",
@@ -30,6 +36,11 @@ data class ActivityDraft(
     val startedAtTime: String? = null,
     val hours: String = "",
     val minutes: String = "",
+    /**
+     * PRD FR-TIMER-006: the seconds a measured duration keeps. Manual entry cannot express
+     * them and leaves this blank, which reads as zero everywhere it is used.
+     */
+    val seconds: String = "",
     val perceivedEffort: Int? = null,
     val notes: String = "",
     /** PRD 9.1: the reversible `Quick log` / `Detailed log` choice of a strength session. */
@@ -39,6 +50,9 @@ data class ActivityDraft(
     val exercises: List<ExerciseDraft> = emptyList(),
 ) {
     val preset: ActivityPreset get() = ActivityPreset.fromId(presetId)
+
+    /** PRD FR-TIMER-006: only a measured session shows seconds and corrects them. */
+    val isTimedReview: Boolean get() = timedDraftId != null
 
     fun presetDraft(preset: ActivityPreset = this.preset): PresetDraft =
         byPreset[preset.id] ?: PresetDraft()
@@ -56,14 +70,35 @@ data class ActivityDraft(
     fun toJson(): String = format.encodeToString(serializer(), this)
 
     companion object {
+
+        /**
+         * The version of this shape, stored beside the blob a `pending_review` draft carries
+         * (PRD_ACTIVITY_TIMER 8.2). The same number is written and compared against, so a blob
+         * this build wrote is always the one it reads back.
+         *
+         * It is bumped only when the *meaning* of a field changes — when a string that used to
+         * hold minutes comes to hold seconds, say. A field merely added needs no bump, because
+         * [format] ignores unknown keys and every field carries a default, so an older blob and
+         * a newer one both decode. Bumping for an addition would throw away typing for nothing.
+         */
+        const val SCHEMA_VERSION: Int = 1
+
         /**
          * Total and non-throwing: a draft that cannot be read is a draft that was never there,
          * and PRD 13.4 keeps the screen usable rather than crashing on restore.
          */
-        fun fromJson(raw: String?): ActivityDraft {
-            if (raw.isNullOrBlank()) return ActivityDraft()
-            return runCatching { format.decodeFromString(serializer(), raw) }
-                .getOrElse { ActivityDraft() }
+        fun fromJson(raw: String?): ActivityDraft = fromJsonOrNull(raw) ?: ActivityDraft()
+
+        /**
+         * The same decode, telling an unreadable blob from an empty draft.
+         *
+         * PRD_ACTIVITY_TIMER 8.2 rebuilds the review form from the typed columns when the blob
+         * cannot be read, which a blank draft would silently hide: the movement and the measured
+         * duration would be gone rather than kept.
+         */
+        fun fromJsonOrNull(raw: String?): ActivityDraft? {
+            if (raw.isNullOrBlank()) return null
+            return runCatching { format.decodeFromString(serializer(), raw) }.getOrNull()
         }
 
         private val format = Json {

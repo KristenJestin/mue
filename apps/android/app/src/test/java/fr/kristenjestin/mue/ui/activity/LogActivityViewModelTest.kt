@@ -10,6 +10,7 @@ import fr.kristenjestin.mue.domain.model.ActivityMetrics
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ActivitySession
 import fr.kristenjestin.mue.domain.model.ActivitySessionDetail
+import fr.kristenjestin.mue.domain.model.ActivitySource
 import fr.kristenjestin.mue.domain.model.ActivitySummary
 import fr.kristenjestin.mue.domain.model.DateWindow
 import fr.kristenjestin.mue.domain.model.EquipmentType
@@ -20,18 +21,26 @@ import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.MetricSource
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.domain.model.SessionEquipment
+import fr.kristenjestin.mue.domain.model.StartTimerOutcome
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
 import fr.kristenjestin.mue.domain.model.StrengthExercise
 import fr.kristenjestin.mue.domain.model.StrengthExerciseDetail
 import fr.kristenjestin.mue.domain.model.StrengthExerciseId
 import fr.kristenjestin.mue.domain.model.StrengthSet
 import fr.kristenjestin.mue.domain.model.StrengthSetId
+import fr.kristenjestin.mue.domain.model.TimedActivityDraft
+import fr.kristenjestin.mue.domain.model.TimedDraftId
+import fr.kristenjestin.mue.domain.model.TimedDraftStatus
+import fr.kristenjestin.mue.domain.model.TimerInstant
 import fr.kristenjestin.mue.domain.model.TrackingMode
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import fr.kristenjestin.mue.domain.model.effortOf
 import fr.kristenjestin.mue.domain.model.loadOf
 import fr.kristenjestin.mue.domain.model.minutesOf
+import fr.kristenjestin.mue.domain.model.secondsOf
 import fr.kristenjestin.mue.domain.repository.ActivityRepository
 import fr.kristenjestin.mue.domain.repository.ExerciseCatalogRepository
+import fr.kristenjestin.mue.domain.repository.TimedActivityRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.testing.LocaleRule
 import fr.kristenjestin.mue.ui.profile.MainDispatcherRule
@@ -45,6 +54,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -54,6 +64,7 @@ import kotlin.test.assertTrue
 
 private val TODAY: LocalDate = LocalDate.of(2026, 8, 24)
 private val EDITED = ActivityId("7b6a2f1e-0000-4000-8000-000000000001")
+private val TIMED = TimedDraftId("9c4d3e2a-0000-4000-8000-000000000002")
 
 /**
  * PRD FR-ACTIVITY-004 to 011 on the one object that owns the draft.
@@ -1031,6 +1042,318 @@ class LogActivityViewModelTest {
 
     // endregion
 
+    // region FR-TIMER-005 — the prefilled review form
+
+    @Test
+    fun `finishing a timer opens the form on what was measured`() = reviewTest { model, _ ->
+        val state = model.uiState.value
+        assertTrue(state.isTimedReview)
+        assertFalse(state.isEditing)
+        assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
+        assertEquals(Movement.WALKING, state.movement)
+        assertEquals(ActivityEnvironment.INDOOR, state.environment)
+        assertEquals(LocalDate.of(2026, 8, 24), state.date)
+        assertEquals(LogActivityMessages.SAVE_ACTIVITY, state.saveLabel)
+    }
+
+    /** FR-TIMER-006: the seconds are the whole point, and they arrive with the form. */
+    @Test
+    fun `the prefilled duration keeps its seconds`() = reviewTest { model, _ ->
+        val state = model.uiState.value
+        assertEquals("0", state.hours)
+        assertEquals("42", state.minutes)
+        assertEquals("18", state.seconds)
+    }
+
+    /** FR-TIMER-005: `18:32:47` is stored as `18:32`, and never rounded up to `18:33`. */
+    @Test
+    fun `the prefilled start time is truncated to the minute`() = reviewTest { model, drafts ->
+        assertEquals(LocalTime.of(18, 32), model.uiState.value.startTime)
+
+        model.save()
+        val saved = drafts.committed.single().second.session
+        assertEquals(LocalTime.of(18, 32), saved.startedAtTime)
+        assertEquals(secondsOf(42 * 60 + 18), saved.duration)
+    }
+
+    /** FR-TIMER-005: nothing Mue did not observe is filled in for the person. */
+    @Test
+    fun `no measurement is prefilled`() = reviewTest { model, _ ->
+        assertTrue(model.uiState.value.metrics.all { it.input.isEmpty() })
+        assertNull(model.uiState.value.perceivedEffort)
+        assertEquals("", model.uiState.value.notes)
+    }
+
+    @Test
+    fun `a free-named draft opens the builder already filled`() {
+        val timed = timedDraft(
+            movement = Movement.OTHER,
+            customMovementName = "Kayaking",
+            environment = ActivityEnvironment.OUTDOOR,
+            equipment = listOf(SessionEquipment(EquipmentType.OTHER, customName = "Sea kayak")),
+        )
+        reviewTest(timed) { model, _ ->
+            val state = model.uiState.value
+            assertEquals(ActivityPreset.OTHER, state.preset)
+            assertEquals("Kayaking", state.mainActivityLabel)
+            assertEquals(ActivityEnvironment.OUTDOOR, state.environment)
+            assertEquals(listOf("Sea kayak"), state.equipment.map { it.label })
+        }
+    }
+
+    /** A draft saved or discarded from elsewhere leaves nothing to review, not an empty review. */
+    @Test
+    fun `a draft that is gone opens a blank form`() = reviewTest(timed = null) { model, drafts ->
+        assertFalse(model.uiState.value.isTimedReview)
+        assertEquals("", model.uiState.value.minutes)
+        assertTrue(drafts.formStates.isEmpty())
+    }
+
+    // endregion
+
+    // region FR-TIMER-006 — correcting the measured duration
+
+    @Test
+    fun `the correction panel opens, writes the three fields and closes`() =
+        reviewTest { model, _ ->
+            model.onOpenDurationPicker()
+            assertTrue(model.uiState.value.durationPickerVisible)
+
+            model.onTimedDurationSelected(1, 5, 9)
+
+            val state = model.uiState.value
+            assertFalse(state.durationPickerVisible)
+            assertEquals("1", state.hours)
+            assertEquals("5", state.minutes)
+            assertEquals("9", state.seconds)
+        }
+
+    @Test
+    fun `a correction abandoned leaves the measured duration alone`() = reviewTest { model, _ ->
+        model.onOpenDurationPicker()
+        model.onDismissDurationPicker()
+
+        assertFalse(model.uiState.value.durationPickerVisible)
+        assertEquals("42", model.uiState.value.minutes)
+        assertEquals("18", model.uiState.value.seconds)
+    }
+
+    @Test
+    fun `a corrected duration is what gets written`() = reviewTest { model, drafts ->
+        model.onTimedDurationSelected(1, 5, 9)
+        model.save()
+
+        assertEquals(
+            secondsOf(1 * 3_600 + 5 * 60 + 9),
+            drafts.committed.single().second.session.duration,
+        )
+    }
+
+    /** FR-TIMER-006: a session of a few seconds is real, and the manual floor does not apply. */
+    @Test
+    fun `a timed session shorter than a minute is saved`() {
+        reviewTest(timedDraft(duration = secondsOf(40))) { model, drafts ->
+            assertEquals("40", model.uiState.value.seconds)
+            model.save()
+
+            assertEquals(secondsOf(40), drafts.committed.single().second.session.duration)
+            assertNull(model.uiState.value.durationError)
+        }
+    }
+
+    @Test
+    fun `a corrected duration of zero is refused with the timed message`() =
+        reviewTest { model, drafts ->
+            model.onTimedDurationSelected(0, 0, 0)
+            model.save()
+
+            assertEquals(
+                ActivityValidation.TIMED_DURATION_ERROR,
+                model.uiState.value.durationError,
+            )
+            assertEquals(ActivityValidation.TIMED_DURATION_ERROR, model.uiState.value.formError)
+            assertTrue(drafts.committed.isEmpty())
+        }
+
+    /** The ceiling is common to both modes of entry: 99 h 59 min 30 sec is past it. */
+    @Test
+    fun `a corrected duration past the ceiling is refused with the timed message`() =
+        reviewTest { model, drafts ->
+            model.onTimedDurationSelected(99, 59, 30)
+            model.save()
+
+            assertEquals(
+                ActivityValidation.TIMED_DURATION_ERROR,
+                model.uiState.value.durationError,
+            )
+            assertTrue(drafts.committed.isEmpty())
+        }
+
+    /** PRD 17: the one-minute floor is still the manual form's, and still says so. */
+    @Test
+    fun `a hand-typed session keeps the minute floor and its own message`() =
+        logTest { model, repository ->
+            model.onMinutesChange("0")
+            model.save()
+
+            assertEquals(ActivityValidation.DURATION_ERROR, model.uiState.value.durationError)
+            assertFalse(model.uiState.value.isTimedReview)
+            assertEquals("", model.uiState.value.seconds)
+            assertTrue(repository.saved.isEmpty())
+        }
+
+    // endregion
+
+    // region PRD 8.2 — the review form's own persistence
+
+    @Test
+    fun `the form state is written at every significant change`() = reviewTest { model, drafts ->
+        val afterOpening = drafts.formStates.size
+        model.onEffortChange(7)
+        model.onNotesChange("Legs heavy")
+        model.onMetricChange(MetricKind.DISTANCE, "4.2")
+
+        assertEquals(afterOpening + 3, drafts.formStates.size)
+        val (state, version) = drafts.formStates.last()
+        val stored = ActivityDraft.fromJson(state)
+        assertEquals(ActivityDraft.SCHEMA_VERSION, version)
+        assertEquals(7, stored.perceivedEffort)
+        assertEquals("Legs heavy", stored.notes)
+        assertEquals("4.2", stored.presetDraft().metricInput(MetricKind.DISTANCE))
+    }
+
+    /** The version written is the version compared against, or nothing would ever decode. */
+    @Test
+    fun `a form state written by this build is read back with its typing`() = runTest {
+        val drafts = FakeTimedActivityRepository(timedDraft())
+        val first = viewModel(FakeLogActivityRepository(), SavedStateHandle(), drafts)
+        collect(first)
+        first.start(sessionId = null, draftId = TIMED)
+        first.onNotesChange("Legs heavy")
+        first.onMetricChange(MetricKind.DISTANCE, "4.2")
+        first.onTimedDurationSelected(0, 43, 5)
+        advanceUntilIdle()
+
+        // A fresh handle: this is the app closed and opened again, not a rotation.
+        val reopened = viewModel(FakeLogActivityRepository(), SavedStateHandle(), drafts)
+        collect(reopened)
+        reopened.start(sessionId = null, draftId = TIMED)
+        advanceUntilIdle()
+
+        val state = reopened.uiState.value
+        assertTrue(state.isTimedReview)
+        assertEquals("Legs heavy", state.notes)
+        assertEquals("4.2", reopened.input(MetricKind.DISTANCE))
+        assertEquals("43", state.minutes)
+        assertEquals("5", state.seconds)
+    }
+
+    /** PRD 8.2: never blocking. The typing goes, the measured duration never does. */
+    @Test
+    fun `an unreadable form state rebuilds the form from the typed columns`() {
+        val timed = timedDraft(
+            reviewFormState = "{not json at all",
+            reviewFormSchemaVersion = ActivityDraft.SCHEMA_VERSION,
+        )
+        reviewTest(timed) { model, _ ->
+            val state = model.uiState.value
+            assertTrue(state.isTimedReview)
+            assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
+            assertEquals("42", state.minutes)
+            assertEquals("18", state.seconds)
+            assertEquals(LocalTime.of(18, 32), state.startTime)
+            assertEquals("", state.notes)
+        }
+    }
+
+    /**
+     * A blob from another schema is never decoded, not decoded and repaired: this build cannot
+     * know what its fields mean any more.
+     */
+    @Test
+    fun `a form state from an unknown version rebuilds the form from the typed columns`() {
+        val fromAnotherBuild = ActivityDraft(
+            timedDraftId = TIMED.value,
+            presetId = ActivityPreset.RUN.id,
+            minutes = "7",
+            notes = "Written by another build",
+        )
+        val timed = timedDraft(
+            reviewFormState = fromAnotherBuild.toJson(),
+            reviewFormSchemaVersion = ActivityDraft.SCHEMA_VERSION + 1,
+        )
+        reviewTest(timed) { model, _ ->
+            val state = model.uiState.value
+            assertTrue(state.isTimedReview)
+            assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
+            assertEquals("42", state.minutes)
+            assertEquals("18", state.seconds)
+            assertEquals("", state.notes)
+        }
+    }
+
+    // endregion
+
+    // region FR-TIMER-007 and 008 — saving, and walking away
+
+    @Test
+    fun `saving a review goes through the atomic hand-off`() = reviewTest { model, drafts ->
+        model.onMetricChange(MetricKind.DISTANCE, "4.2")
+        model.onEffortChange(6)
+        model.save()
+
+        val (id, detail) = drafts.committed.single()
+        assertEquals(TIMED, id)
+        assertEquals(ActivitySource.TIMER, detail.session.source)
+        assertEquals(Movement.WALKING, detail.session.movement)
+        assertEquals(4_200, detail.metrics.valueOf(MetricKind.DISTANCE))
+        assertEquals(
+            listOf(EquipmentType.TREADMILL),
+            detail.equipment.map { it.equipmentType },
+        )
+        assertTrue(model.uiState.value.justSaved)
+    }
+
+    /** The two paths never cross: a review is never written as a second, manual session. */
+    @Test
+    fun `saving a review writes nothing through the manual path`() = runTest {
+        val drafts = FakeTimedActivityRepository(timedDraft())
+        val activities = FakeLogActivityRepository()
+        val model = viewModel(activities, SavedStateHandle(), drafts)
+        collect(model)
+        model.start(sessionId = null, draftId = TIMED)
+        model.save()
+        advanceUntilIdle()
+
+        assertTrue(activities.saved.isEmpty())
+        assertEquals(1, drafts.committed.size)
+    }
+
+    /** PRD 12 and 13.4: a failed hand-off keeps the draft and says so. */
+    @Test
+    fun `a failed hand-off keeps the draft and the message`() = reviewTest { model, drafts ->
+        drafts.failCommit = true
+        model.save()
+
+        assertEquals(LogActivityMessages.SAVE_FAILED, model.uiState.value.saveError)
+        assertFalse(model.uiState.value.justSaved)
+        assertNotNull(drafts.findDraft(TIMED))
+    }
+
+    /** FR-TIMER-008: nothing is lost by walking away, and the draft is still there to reopen. */
+    @Test
+    fun `leaving the form keeps the draft waiting`() = reviewTest { model, drafts ->
+        model.onNotesChange("Half a thought")
+
+        assertTrue(drafts.committed.isEmpty())
+        val waiting = assertNotNull(drafts.findDraft(TIMED))
+        assertEquals(TimedDraftStatus.PENDING_REVIEW, waiting.status)
+        assertEquals(secondsOf(42 * 60 + 18), waiting.accumulatedActive)
+        assertEquals("Half a thought", ActivityDraft.fromJson(waiting.reviewFormState).notes)
+    }
+
+    // endregion
+
     // region harness
 
     private fun LogActivityViewModel.metric(kind: MetricKind): MetricFieldState =
@@ -1055,8 +1378,10 @@ class LogActivityViewModelTest {
     private fun viewModel(
         repository: FakeLogActivityRepository,
         savedState: SavedStateHandle,
+        drafts: FakeTimedActivityRepository = FakeTimedActivityRepository(),
     ): LogActivityViewModel = LogActivityViewModel(
         activities = repository,
+        drafts = drafts,
         catalog = FakeExerciseCatalogRepository(),
         preferences = FakeUserPreferencesRepository(),
         savedState = savedState,
@@ -1074,6 +1399,24 @@ class LogActivityViewModelTest {
         collect(model)
         advanceUntilIdle()
         body(model, repository)
+    }
+
+    /**
+     * The same harness opened on a finished timer (FR-TIMER-005): the form is started on the
+     * draft, not on a blank session, and the timed repository is the one being asserted.
+     */
+    private fun reviewTest(
+        timed: TimedActivityDraft? = timedDraft(),
+        savedState: SavedStateHandle = SavedStateHandle(),
+        start: Boolean = true,
+        body: suspend TestScope.(LogActivityViewModel, FakeTimedActivityRepository) -> Unit,
+    ) = runTest {
+        val drafts = FakeTimedActivityRepository(timed)
+        val model = viewModel(FakeLogActivityRepository(), savedState, drafts)
+        collect(model)
+        if (start) model.start(sessionId = null, draftId = TIMED)
+        advanceUntilIdle()
+        body(model, drafts)
     }
 
     // endregion
@@ -1136,6 +1479,34 @@ private fun draftWithACustomExercise(): ActivityDraft = ActivityDraft(
             sets = listOf(SetDraft(reps = "5", loadKg = "80")),
         ),
     ),
+)
+
+/**
+ * A finished timer waiting to be reviewed: a treadmill walk of `42 min 18 sec` started at
+ * `18:32:47`, which is FR-TIMER-005's own example of a start time that loses its seconds while
+ * the duration keeps them.
+ */
+private fun timedDraft(
+    movement: Movement = Movement.WALKING,
+    equipment: List<SessionEquipment> = listOf(SessionEquipment(EquipmentType.TREADMILL)),
+    environment: ActivityEnvironment = ActivityEnvironment.INDOOR,
+    customMovementName: String? = null,
+    duration: ActivityDuration = secondsOf(42 * 60 + 18),
+    reviewFormState: String? = null,
+    reviewFormSchemaVersion: Int = 0,
+): TimedActivityDraft = TimedActivityDraft(
+    id = TIMED,
+    status = TimedDraftStatus.PENDING_REVIEW,
+    movement = movement,
+    startedAtMillis = 0L,
+    startedOn = LocalDate.of(2026, 8, 24),
+    startedAtLocalTime = LocalTime.of(18, 32, 47),
+    accumulatedActive = duration,
+    customMovementName = customMovementName,
+    environment = environment,
+    equipment = equipment,
+    reviewFormState = reviewFormState,
+    reviewFormSchemaVersion = reviewFormSchemaVersion,
 )
 
 private fun benchPress(): ExerciseDefinition = ExerciseDefinition(
@@ -1283,6 +1654,63 @@ private class FakeExerciseCatalogRepository : ExerciseCatalogRepository {
         equipment = equipment,
         isCustom = true,
     ).also { definitions[it.id.value] = it }
+}
+
+/**
+ * The timed side of PRD 8.2 and FR-TIMER-007.
+ *
+ * The form state is stored exactly as the repository stores it — an opaque string beside a
+ * version number, never read — so a test asserting what came back is asserting the ViewModel's
+ * own encoding and nothing else.
+ */
+private class FakeTimedActivityRepository(
+    private var draft: TimedActivityDraft? = null,
+) : TimedActivityRepository {
+
+    val formStates = mutableListOf<Pair<String?, Int>>()
+    val committed = mutableListOf<Pair<TimedDraftId, ActivitySessionDetail>>()
+    var failCommit: Boolean = false
+
+    override fun observeLiveDraft(): Flow<TimedActivityDraft?> = flowOf(null)
+
+    override suspend fun findLiveDraft(): TimedActivityDraft? = null
+
+    override fun observeDraftsToReview(): Flow<List<TimedActivityDraft>> =
+        flowOf(listOfNotNull(draft))
+
+    override suspend fun findDraft(id: TimedDraftId): TimedActivityDraft? =
+        draft?.takeIf { it.id == id }
+
+    override fun observeLastTimedStart(): Flow<StartTimerRequest?> = flowOf(null)
+
+    override suspend fun start(
+        request: StartTimerRequest,
+        now: TimerInstant,
+        zone: ZoneId,
+    ): StartTimerOutcome = error("the review form never starts a timer")
+
+    override suspend fun pause(id: TimedDraftId, now: TimerInstant): TimedActivityDraft? = null
+
+    override suspend fun resume(id: TimedDraftId, now: TimerInstant): TimedActivityDraft? = null
+
+    override suspend fun finish(id: TimedDraftId, now: TimerInstant): TimedActivityDraft? = null
+
+    override suspend fun discard(id: TimedDraftId) {
+        draft = null
+    }
+
+    override suspend fun saveReviewFormState(id: TimedDraftId, state: String?, schemaVersion: Int) {
+        formStates += state to schemaVersion
+        draft = draft?.takeIf { it.id == id }
+            ?.copy(reviewFormState = state, reviewFormSchemaVersion = schemaVersion)
+            ?: draft
+    }
+
+    override suspend fun commitToSession(id: TimedDraftId, detail: ActivitySessionDetail) {
+        if (failCommit) error("the disk said no")
+        committed += id to detail
+        draft = null
+    }
 }
 
 private class FakeUserPreferencesRepository : UserPreferencesRepository {

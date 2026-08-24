@@ -46,6 +46,7 @@ import fr.kristenjestin.mue.domain.model.ActivityEnvironment
 import fr.kristenjestin.mue.domain.model.ActivityId
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.MetricKind
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.ui.components.MueChoiceCard
 import fr.kristenjestin.mue.ui.components.MueChoiceRow
 import fr.kristenjestin.mue.ui.components.MueEffortSlider
@@ -81,6 +82,11 @@ private val BackIconSize: Dp = 18.dp
  * [sessionId] is null while creating, which is what tells `Save activity` from `Save changes`
  * and what decides whether `Delete activity` appears at all. [onOpenStrengthSession] leaves the
  * draft untouched: PRD 9.1 makes the detailed editor another view of the very same one.
+ *
+ * [draftId] is the other way in (PRD_ACTIVITY_TIMER FR-TIMER-005): the same form, opened on a
+ * finished timer, with the movement, the place, the equipment, the start and the measured
+ * duration already filled in. Leaving it keeps the draft (FR-TIMER-008); only `Save activity`
+ * turns it into a session.
  */
 @Composable
 fun LogActivityScreen(
@@ -90,12 +96,13 @@ fun LogActivityScreen(
     onSaved: () -> Unit,
     onDeleted: () -> Unit,
     modifier: Modifier = Modifier,
+    draftId: TimedDraftId? = null,
 ) {
     val viewModel = logActivityViewModel()
 
     // Idempotent: returning from the strength editor recomposes this screen, and the draft the
     // two share must survive that (PRD 9.1).
-    LaunchedEffect(sessionId) { viewModel.start(sessionId) }
+    LaunchedEffect(sessionId, draftId) { viewModel.start(sessionId, draftId) }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = rememberMueHaptics(state.hapticsEnabled)
@@ -115,6 +122,9 @@ fun LogActivityScreen(
             onStartTimeSelected = viewModel::onStartTimeSelected,
             onHoursChange = viewModel::onHoursChange,
             onMinutesChange = viewModel::onMinutesChange,
+            onOpenDurationPicker = viewModel::onOpenDurationPicker,
+            onDismissDurationPicker = viewModel::onDismissDurationPicker,
+            onTimedDurationSelected = viewModel::onTimedDurationSelected,
             onEffortChange = viewModel::onEffortChange,
             onNotesChange = viewModel::onNotesChange,
             onMetricChange = viewModel::onMetricChange,
@@ -166,6 +176,10 @@ internal class LogActivityActions(
     val onStartTimeSelected: (LocalTime?) -> Unit = {},
     val onHoursChange: (String) -> Unit = {},
     val onMinutesChange: (String) -> Unit = {},
+    val onOpenDurationPicker: () -> Unit = {},
+    val onDismissDurationPicker: () -> Unit = {},
+    /** FR-TIMER-006: hours, minutes and seconds together, from the correction panel. */
+    val onTimedDurationSelected: (Int, Int, Int) -> Unit = { _, _, _ -> },
     val onEffortChange: (Int) -> Unit = {},
     val onNotesChange: (String) -> Unit = {},
     val onMetricChange: (MetricKind, String) -> Unit = { _, _ -> },
@@ -305,6 +319,16 @@ internal fun LogActivityContent(
         onConfirm = actions.onStartTimeSelected,
     )
 
+    TimedDurationSheet(
+        visible = state.durationPickerVisible,
+        hours = state.hours,
+        minutes = state.minutes,
+        seconds = state.seconds,
+        onDismiss = actions.onDismissDurationPicker,
+        onConfirm = actions.onTimedDurationSelected,
+        hapticsEnabled = state.hapticsEnabled,
+    )
+
     CatalogPickerSheet(
         picker = state.picker,
         onQueryChange = actions.onPickerQueryChange,
@@ -403,14 +427,26 @@ private fun CommonFields(state: LogActivityUiState, actions: LogActivityActions)
             }
         }
 
-        ActivityDurationField(
-            hours = state.hours,
-            minutes = state.minutes,
-            onHoursChange = actions.onHoursChange,
-            onMinutesChange = actions.onMinutesChange,
-            errorMessage = state.durationError,
-            hapticsEnabled = state.hapticsEnabled,
-        )
+        // FR-TIMER-006: a measured duration is stated and corrected, a typed one is entered.
+        // The two never share a field — manual entry cannot express the seconds at all.
+        if (state.isTimedReview) {
+            TimedDurationField(
+                hours = state.hours,
+                minutes = state.minutes,
+                seconds = state.seconds,
+                onClick = actions.onOpenDurationPicker,
+                errorMessage = state.durationError,
+            )
+        } else {
+            ActivityDurationField(
+                hours = state.hours,
+                minutes = state.minutes,
+                onHoursChange = actions.onHoursChange,
+                onMinutesChange = actions.onMinutesChange,
+                errorMessage = state.durationError,
+                hapticsEnabled = state.hapticsEnabled,
+            )
+        }
     }
 }
 
