@@ -155,6 +155,21 @@ private fun BannerRow(timer: LiveTimerUiState, notice: TimerNotice?, onOpen: () 
                 modifier = Modifier.testTag(TimerTestTags.BANNER_LABEL),
             )
             notice?.let {
+                /*
+                 * `mergeDescendants` is what makes this line audible at all.
+                 *
+                 * The strip is one `clickable`, so it merges every descendant into a single
+                 * node — which is right for the label and the value, since PRD 6.4 makes the
+                 * whole surface one `Open` and a screen reader should stop on it once. But
+                 * `LiveRegion` merges by the default policy, where the parent wins and an
+                 * absent parent value drops the property outright: the notice's live region
+                 * never reached the node TalkBack actually reads, and FR-TIMER-002's and
+                 * FR-TIMER-010's messages would have been drawn in silence.
+                 *
+                 * A node that merges its own descendants is left out of its ancestor's merge
+                 * and stays independently focusable, which keeps the live region and still
+                 * leaves the tap to the strip around it.
+                 */
                 MueText(
                     text = it.message,
                     style = type.micro,
@@ -163,7 +178,9 @@ private fun BannerRow(timer: LiveTimerUiState, notice: TimerNotice?, onOpen: () 
                     modifier = Modifier
                         .padding(top = MueTheme.spacing.xxs)
                         .testTag(TimerTestTags.NOTICE)
-                        .semantics { liveRegion = LiveRegionMode.Polite },
+                        .semantics(mergeDescendants = true) {
+                            liveRegion = LiveRegionMode.Polite
+                        },
                 )
             }
         }
