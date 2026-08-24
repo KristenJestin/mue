@@ -25,6 +25,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.test.espresso.Espresso
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ActivityDuration
 import fr.kristenjestin.mue.domain.model.EquipmentType
@@ -201,6 +202,12 @@ class StrengthSessionScreenTest {
             .performTextReplacement("Zercher squat")
 
         composeRule.onNodeWithText(EXERCISE_PICKER_EMPTY).assertIsDisplayed()
+
+        // Typing raised the keyboard, and the panel is resized by it rather than panned over it.
+        // A tap aimed before that settles lands where the footer used to be, which is what made
+        // this the one test in the suite that failed only under load.
+        Espresso.closeSoftKeyboard()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag(EXERCISE_CREATE_TAG).performScrollTo().performClick()
 
         assertEquals("Zercher squat", draft.exercises.single().name)
