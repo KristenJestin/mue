@@ -191,11 +191,11 @@ internal fun ActivityDashboardContent(
                 )
             }
 
-            if (state.showStartAgain) {
+            state.startAgain?.let { shortcut ->
                 item(key = "startAgain") {
                     StartAgainCard(
-                        state = requireNotNull(state.startAgain),
-                        onClick = { onStartAgain(requireNotNull(state.startAgain).request) },
+                        state = shortcut,
+                        onClick = { onStartAgain(shortcut.request) },
                         modifier = Modifier.padding(top = spacing.md),
                     )
                 }
