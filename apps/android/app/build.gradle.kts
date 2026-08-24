@@ -106,6 +106,10 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
 
+    // An activity draft is a nested structure, so `SavedStateHandle` holds it as one JSON
+    // string rather than as a flat set of Bundle keys.
+    implementation(libs.kotlinx.serialization.json)
+
     // Local unit tests
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
@@ -133,8 +137,8 @@ dependencies {
  *
  * The force covers the app as well as the test APK on purpose: an instrumentation APK loads
  * shared classes from the app's classloader first, so pinning the test side alone would change
- * nothing. Mue itself serializes nothing — no `@Serializable` in the sources — so the bump only
- * moves a library both AndroidX artifacts already expect to share.
+ * nothing. The app now serializes its activity draft with the very same version it declares
+ * above, so the force only moves a library every party here already expects to share.
  */
 configurations.configureEach {
     resolutionStrategy.force(

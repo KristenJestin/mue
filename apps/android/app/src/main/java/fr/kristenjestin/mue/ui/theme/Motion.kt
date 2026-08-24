@@ -79,6 +79,29 @@ object MueMotion {
     /** Vertical roll of a single digit. */
     const val NumberRollMillis: Int = 220
 
+    /*
+     * The Activities module, timed by PRD_ACTIVITIES section 14.2. Every one of them still goes
+     * through `spec` or `durationOf`, so reduce motion collapses them like everything else.
+     */
+
+    /** `Log activity` rising over the dashboard. */
+    const val ActivityOpenMillis: Int = 260
+
+    /** Preset change: the old fields fade out, the new ones arrive with a short vertical move. */
+    const val PresetChangeMillis: Int = 200
+
+    /** An exercise or a set expanding into the list. */
+    const val ActivityRowExpandMillis: Int = 200
+
+    /** The amber halo that marks the row a duplicated set just created. */
+    const val SetDuplicateHaloMillis: Int = 600
+
+    /** Weekly bars growing from their base, on first display only. */
+    const val WeeklyBarGrowthMillis: Int = 520
+
+    /** Delay between two neighbouring weekly bars, so the week reads left to right. */
+    const val WeeklyBarStaggerMillis: Int = 40
+
     /** Every slide degrades to a fade of this length when animations are reduced. */
     const val ReducedMillis: Int = 100
 
