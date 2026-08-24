@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.Weight
-import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -470,12 +470,13 @@ class EntryScreenTest {
     @Test
     fun saving_confirms_without_leaving_the_screen() {
         start()
+        // The confirmation runs on the frame clock, so the test drives that clock rather
+        // than letting an idle wait run the whole second in one go.
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Save measurement").performClick()
-        composeRule.waitForIdle()
+        composeRule.advanceToTheQuietButton()
 
-        // The button lets `Save measurement` go before `Saved` arrives, so the confirmation
-        // is a sequence rather than the state of the frame the tap landed on.
-        composeRule.awaitText(MueSaveConfirmationLabel)
+        composeRule.onNodeWithText(MueSaveConfirmationLabel).assertIsDisplayed()
         composeRule.onNodeWithText("Where are you today?").assertIsDisplayed()
     }
 
@@ -483,10 +484,11 @@ class EntryScreenTest {
     @Test
     fun saving_still_confirms_with_animations_reduced() {
         start(reduceMotion = true)
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithText("Save measurement").performClick()
-        composeRule.waitForIdle()
+        composeRule.advanceToTheQuietButton()
 
-        composeRule.awaitText(MueSaveConfirmationLabel)
+        composeRule.onNodeWithText(MueSaveConfirmationLabel).assertIsDisplayed()
     }
 
     // --- FR-ENTRY-007, the greeting --------------------------------------------------

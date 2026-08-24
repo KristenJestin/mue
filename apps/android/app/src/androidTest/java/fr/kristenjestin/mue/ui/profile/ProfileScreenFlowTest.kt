@@ -23,7 +23,7 @@ import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
-import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.components.formatBmiValue
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -78,11 +78,12 @@ class ProfileScreenFlowTest {
 
         typeName("Kris")
         typeHeight("180")
+        composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithTag(ProfileTestTags.SAVE_BUTTON).performScrollTo().performClick()
-        composeRule.waitForIdle()
+        composeRule.advanceToTheQuietButton()
 
         assertEquals(UserProfile("Kris", 180, null), profiles.stored)
-        composeRule.awaitText(MueSaveConfirmationLabel)
+        composeRule.onNodeWithText(MueSaveConfirmationLabel).assertExists()
     }
 
     @Test

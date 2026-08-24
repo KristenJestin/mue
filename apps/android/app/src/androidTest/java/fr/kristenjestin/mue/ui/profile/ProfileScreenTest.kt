@@ -20,7 +20,7 @@ import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
-import fr.kristenjestin.mue.ui.awaitText
+import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.BmiReferenceScale
 import fr.kristenjestin.mue.ui.components.MueBmiCardTags
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
@@ -160,11 +160,13 @@ class ProfileScreenTest {
 
     @Test
     fun aSuccessfulSaveShowsItsConfirmation() {
+        // The word arrives once the label has let go of `Save profile`, not on the frame the
+        // save landed on, so the test owns the clock the sequence runs on.
+        composeRule.mainClock.autoAdvance = false
         setContent(ProfileUiState(profileSaved = true))
+        composeRule.advanceToTheQuietButton()
 
-        // The word arrives once the label has let go of `Save profile`, not on the frame of
-        // the tap: the button fades one out before the other comes in.
-        composeRule.awaitText(MueSaveConfirmationLabel)
+        composeRule.onNodeWithText(MueSaveConfirmationLabel).assertExists()
     }
 
     @Test
