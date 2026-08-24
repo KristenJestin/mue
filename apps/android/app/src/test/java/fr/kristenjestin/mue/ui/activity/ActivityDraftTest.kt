@@ -4,6 +4,7 @@ import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.MetricKind
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -89,6 +90,64 @@ class ActivityDraftTest {
         assertEquals(ActivityPreset.RUN, restored.preset)
         assertEquals("Hi", restored.notes)
     }
+
+    // region PRD_ACTIVITY_TIMER 8.2 — the review form's serialised column
+
+    @Test
+    fun `a hand-typed draft is not a review and shows no seconds`() {
+        assertFalse(ActivityDraft().isTimedReview)
+        assertEquals("", ActivityDraft().seconds)
+    }
+
+    @Test
+    fun `a review draft survives the trip through its stored blob`() {
+        val draft = ActivityDraft(
+            timedDraftId = "9c4d3e2a-0000-4000-8000-000000000002",
+            presetId = ActivityPreset.TREADMILL_WALK.id,
+            startedOn = "2026-08-24",
+            startedAtTime = "18:32",
+            hours = "0",
+            minutes = "42",
+            seconds = "18",
+            notes = "Legs heavy",
+        )
+        val restored = ActivityDraft.fromJson(draft.toJson())
+
+        assertEquals(draft, restored)
+        assertTrue(restored.isTimedReview)
+        assertEquals("18", restored.seconds)
+    }
+
+    /**
+     * The rule that lets [ActivityDraft.SCHEMA_VERSION] stay where it is: a field merely added
+     * still decodes under the version that predates it, so nothing is bumped for an addition.
+     */
+    @Test
+    fun `a blob written before the timed fields existed still decodes`() {
+        val restored = ActivityDraft.fromJson(
+            """{"presetId":"run","minutes":"30","notes":"Before the timer"}""",
+        )
+
+        assertEquals(ActivityPreset.RUN, restored.preset)
+        assertEquals("30", restored.minutes)
+        assertEquals("", restored.seconds)
+        assertNull(restored.timedDraftId)
+    }
+
+    /**
+     * PRD 8.2 tells an unreadable blob from an empty draft, which a blank one cannot: rebuilding
+     * the form from the typed columns and opening it blank are opposite outcomes.
+     */
+    @Test
+    fun `an unreadable blob answers null rather than an empty draft`() {
+        assertNull(ActivityDraft.fromJsonOrNull(null))
+        assertNull(ActivityDraft.fromJsonOrNull(""))
+        assertNull(ActivityDraft.fromJsonOrNull("{"))
+        assertNull(ActivityDraft.fromJsonOrNull("not json at all"))
+        assertEquals(ActivityDraft(), ActivityDraft.fromJsonOrNull(ActivityDraft().toJson()))
+    }
+
+    // endregion
 
     @Test
     fun `a new set is seeded empty, never with a plausible-looking default`() {

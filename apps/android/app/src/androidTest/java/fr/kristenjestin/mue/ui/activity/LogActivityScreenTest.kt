@@ -31,12 +31,24 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.height
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso
+import fr.kristenjestin.mue.MueApplication
 import fr.kristenjestin.mue.domain.logic.ActivityValidation
+import fr.kristenjestin.mue.domain.model.ActivityDuration
+import fr.kristenjestin.mue.domain.model.ActivityEnvironment
 import fr.kristenjestin.mue.domain.model.ActivityPreset
+import fr.kristenjestin.mue.domain.model.ActivitySession
+import fr.kristenjestin.mue.domain.model.ActivitySource
 import fr.kristenjestin.mue.domain.model.EquipmentType
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.Movement
+import fr.kristenjestin.mue.domain.model.SessionEquipment
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
+import fr.kristenjestin.mue.domain.model.TimedDraftId
+import fr.kristenjestin.mue.domain.model.TimerInstant
+import fr.kristenjestin.mue.domain.repository.ActivityRepository
+import fr.kristenjestin.mue.domain.repository.TimedActivityRepository
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
@@ -44,12 +56,19 @@ import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueWheelPickerDefaults
 import fr.kristenjestin.mue.ui.setWheel
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.timer.TimerFormat
+import fr.kristenjestin.mue.ui.timer.TimerTestTags
 import fr.kristenjestin.mue.ui.wheelValue
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit.MINUTES
 
 private const val WAIT_MILLIS = 10_000L
 
@@ -59,6 +78,22 @@ private const val CATALOGUE_ROWS = 14
 /** Long enough to clear the touch slop several times over, short enough to stay on screen. */
 private const val DRAG_PIXELS = 400f
 private const val DRAG_MILLIS = 200L
+
+/**
+ * FR-TIMER-005's own example: a session that starts at a time carrying seconds and lasts a span
+ * that carries them too. The minute survives into the session, the seconds survive as duration.
+ */
+private val STARTED_AT: LocalTime = LocalTime.of(9, 15, 47)
+private val MEASURED: ActivityDuration = durationOf(42 * 60 + 18)
+private val CORRECTED: ActivityDuration = durationOf(43 * 60 + 30)
+
+/** Any monotonic reading will do, as long as both clocks then move by the same span. */
+private const val ELAPSED_REALTIME = 120_000L
+
+private const val TYPED_NOTE = "Legs heavy"
+
+private fun durationOf(seconds: Int): ActivityDuration =
+    checkNotNull(ActivityDuration.ofSecondsOrNull(seconds))
 
 /**
  * Compose coverage of PRD FR-ACTIVITY-004 to 011.
@@ -154,6 +189,93 @@ class LogActivityScreenTest {
 
         compose.onNodeWithTag(ActivityTestTags.MOVEMENT_PICKER)
             .assertTextContains(Movement.YOGA.displayName)
+    }
+
+    // endregion
+
+    // region FR-TIMER-005 to 008 — the review hand-off
+
+    /** FR-TIMER-005: `Finish` opens this form already filled, seconds and all. */
+    @Test
+    fun finishingATimerOpensThePrefilledForm() {
+        val draft = seedFinishedDraft()
+        reviewScreen(draft)
+
+        compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.TREADMILL_WALK.id))
+            .assertIsSelected()
+        compose.onNodeWithTag(TimerTestTags.DURATION_SUMMARY)
+            .assertTextContains(TimerFormat.reviewSummary(MEASURED))
+        // FR-TIMER-005: the start time loses its seconds because the column has none.
+        compose.onNodeWithTag(ActivityTestTags.START_TIME_FIELD)
+            .assertTextContains(LogActivityFormat.startTime(STARTED_AT.truncatedTo(MINUTES)))
+
+        // FR-TIMER-005: the treadmill's own measurements are offered and left for the person.
+        compose.onNodeWithTag(ActivityTestTags.metricField(MetricKind.DISTANCE.id))
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    /** FR-TIMER-006 end to end: the summary opens three wheels, and the save keeps them. */
+    @Test
+    fun theMeasuredDurationIsCorrectedThenSaved() {
+        val draft = seedFinishedDraft()
+        var saved = false
+        reviewScreen(draft, onSaved = { saved = true })
+
+        compose.onNodeWithTag(TimerTestTags.DURATION_SUMMARY).performClick()
+        compose.waitForIdle()
+
+        compose.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 43)
+        compose.setWheel(TimerTestTags.DURATION_SECONDS_FIELD, 30)
+        compose.onNodeWithText(LogActivityMessages.USE_THIS_DURATION).performClick()
+        // The panel is a window of its own and leaves on an animation, so the form is only
+        // reachable again once it has gone rather than once the click has been delivered.
+        compose.waitUntil(WAIT_MILLIS) {
+            compose.onAllNodes(hasText(LogActivityMessages.USE_THIS_DURATION))
+                .fetchSemanticsNodes()
+                .isEmpty()
+        }
+
+        compose.onNodeWithTag(TimerTestTags.DURATION_SUMMARY)
+            .assertTextContains(TimerFormat.reviewSummary(CORRECTED))
+
+        compose.onNodeWithTag(ActivityTestTags.SAVE_BUTTON).performClick()
+        compose.waitUntil(WAIT_MILLIS) { saved }
+
+        // FR-TIMER-007: one session created and the draft gone, in one transaction.
+        val session = runBlocking {
+            assertEquals(null, drafts.findDraft(draft))
+            savedTimedSession()
+        }
+        assertEquals(CORRECTED, session.duration)
+        assertEquals(ActivitySource.TIMER, session.source)
+        assertEquals(STARTED_AT.truncatedTo(MINUTES), session.startedAtTime)
+    }
+
+    /** FR-TIMER-008 and PRD 8.2: what was typed is still there when the card is tapped again. */
+    @Test
+    fun reopeningAPendingDraftBringsBackWhatWasTyped() {
+        val draft = seedFinishedDraft()
+        runBlocking {
+            drafts.saveReviewFormState(
+                id = draft,
+                state = ActivityDraft(
+                    timedDraftId = draft.value,
+                    presetId = ActivityPreset.TREADMILL_WALK.id,
+                    hours = "0",
+                    minutes = "43",
+                    seconds = "30",
+                    notes = TYPED_NOTE,
+                ).toJson(),
+                schemaVersion = ActivityDraft.SCHEMA_VERSION,
+            )
+        }
+
+        reviewScreen(draft)
+
+        compose.onNodeWithTag(TimerTestTags.DURATION_SUMMARY)
+            .assertTextContains(TimerFormat.reviewSummary(CORRECTED))
+        input(ActivityTestTags.NOTES_FIELD).performScrollTo().assertTextContains(TYPED_NOTE)
     }
 
     // endregion
@@ -646,6 +768,86 @@ class LogActivityScreenTest {
             }
         }
     }
+
+    /** The same screen, opened on a finished timer instead of on a blank session. */
+    private fun reviewScreen(draftId: TimedDraftId, onSaved: () -> Unit = {}) {
+        compose.setContent {
+            MueTheme {
+                LogActivityScreen(
+                    sessionId = null,
+                    onBack = {},
+                    onOpenStrengthSession = {},
+                    onSaved = onSaved,
+                    onDeleted = {},
+                    modifier = Modifier.fillMaxSize(),
+                    draftId = draftId,
+                )
+            }
+        }
+        // The prefill is a database read, so it lands a frame or more after the first
+        // composition; `waitForIdle` knows nothing about a query on the IO dispatcher.
+        compose.waitUntil(WAIT_MILLIS) {
+            compose.onAllNodes(hasTestTag(TimerTestTags.DURATION_SUMMARY))
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+    }
+
+    /**
+     * The timer of FR-TIMER-005, run through the real repository rather than mocked: the point
+     * of these three tests is that a row written by the timer opens as a form.
+     *
+     * The start is placed at a fixed time *today* so the date the form prefills is never in the
+     * future, whatever hour the emulator happens to be at, and so the truncated minute is a
+     * known one. Both clocks move by the measured span, which is what makes the closed segment
+     * exactly [MEASURED].
+     */
+    private fun seedFinishedDraft(): TimedDraftId = runBlocking {
+        drafts.findLiveDraft()?.let { drafts.discard(it.id) }
+        val wall = LocalDate.now().atTime(STARTED_AT)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val started = TimerInstant(wallMillis = wall, elapsedRealtimeMillis = ELAPSED_REALTIME)
+        val id = drafts.start(
+            request = StartTimerRequest(
+                movement = Movement.WALKING,
+                environment = ActivityEnvironment.INDOOR,
+                equipment = listOf(SessionEquipment(EquipmentType.TREADMILL)),
+            ),
+            now = started,
+        ).draft.id
+        val span = MEASURED.seconds * 1_000L
+        drafts.finish(
+            id = id,
+            now = started.copy(
+                wallMillis = started.wallMillis + span,
+                elapsedRealtimeMillis = started.elapsedRealtimeMillis + span,
+            ),
+        )
+        id
+    }
+
+    /**
+     * The session FR-TIMER-007 wrote, found by the two facts the review carried into it: the
+     * corrected duration and the truncated start minute. A summary carries no source, so the
+     * origin is read from the detail rather than searched for.
+     */
+    private suspend fun savedTimedSession(): ActivitySession {
+        val summary = activities.observeAllSummaries().first().first {
+            it.duration == CORRECTED && it.startedAtTime == STARTED_AT.truncatedTo(MINUTES)
+        }
+        return checkNotNull(activities.findDetail(summary.id)).session
+    }
+
+    private val drafts: TimedActivityRepository
+        get() = application.container.timer.timedActivityRepository
+
+    private val activities: ActivityRepository
+        get() = application.container.activityRepository
+
+    private val application: MueApplication
+        get() = ApplicationProvider.getApplicationContext()
 
     private fun content(state: LogActivityUiState, actions: LogActivityActions) =
         content(mutableStateOf(state), actions)
