@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ActivityDuration
@@ -32,6 +34,7 @@ import fr.kristenjestin.mue.domain.model.StrengthSetId
 import fr.kristenjestin.mue.domain.model.TrackingMode
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -163,7 +166,7 @@ class StrengthSessionScreenTest {
         setScreen()
 
         composeRule.onNodeWithTag(ActivityTestTags.ADD_EXERCISE).performClick()
-        composeRule.onNodeWithText(EXERCISE_SECTION_DEFAULT).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(EXERCISE_SECTION_DEFAULT).assertIsDisplayed()
         composeRule.onNodeWithTag(exercisePickerRowTag(squat)).performClick()
 
         composeRule.onNodeWithText("Barbell squat").assertIsDisplayed()
@@ -179,7 +182,7 @@ class StrengthSessionScreenTest {
         composeRule.onNodeWithContentDescription("Search the exercise catalogue")
             .performTextReplacement("plank")
 
-        composeRule.onNodeWithText(EXERCISE_SECTION_RESULTS).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(EXERCISE_SECTION_RESULTS).assertIsDisplayed()
         composeRule.onNodeWithTag(exercisePickerRowTag(plank)).assertIsDisplayed()
         composeRule.onNodeWithTag(exercisePickerRowTag(squat)).assertDoesNotExist()
     }
@@ -279,16 +282,20 @@ class StrengthSessionScreenTest {
 
     /** Contract decision 3: the effort column is offered only where a column is free. */
     @Test
-    fun perSetEffortIsOfferedInRepsOnlyAndNotUnderALoad() {
+    fun perSetEffortIsOfferedWhereNoLoadTakesTheColumn() {
         setScreen(StrengthDraftEditor.apply(ActivityDraft(detailed = true), StrengthEdit.AddExercise(pullUp)))
 
-        composeRule.onNodeWithContentDescription("Set 1, Perceived effort, 1 to 10")
+        composeRule.onNodeWithContentDescription(SET_EFFORT_CELL)
             .performScrollTo()
             .assertIsDisplayed()
+    }
 
+    /** The other half of decision 3, in its own test: a rule takes one screen per case. */
+    @Test
+    fun perSetEffortIsNotOfferedUnderALoad() {
         setScreen(withOneSquat())
-        composeRule.onAllNodesWithContentDescription("Set 1, Perceived effort, 1 to 10")
-            .assertCountEquals(0)
+
+        composeRule.onAllNodesWithContentDescription(SET_EFFORT_CELL).assertCountEquals(0)
     }
 
     // endregion
@@ -304,14 +311,12 @@ class StrengthSessionScreenTest {
             ),
         )
 
-        composeRule.onNodeWithContentDescription("Move Barbell squat down")
-            .performScrollTo()
-            .performClick()
+        reveal("Move Barbell squat down").performClick()
         assertEquals(listOf("Plank", "Barbell squat"), draft.exercises.map { it.name })
 
-        composeRule.onNodeWithContentDescription("Move Barbell squat up")
-            .performScrollTo()
-            .performClick()
+        // The card has moved below the fold, and a lazy item off screen is not composed at
+        // all: only scrolling the list itself can bring the control back.
+        reveal("Move Barbell squat up").performClick()
         assertEquals(listOf("Barbell squat", "Plank"), draft.exercises.map { it.name })
     }
 
@@ -319,11 +324,8 @@ class StrengthSessionScreenTest {
     fun theEndsOfTheListAnnounceThatTheyCannotMove() {
         setScreen(withOneSquat())
 
-        composeRule.onNodeWithContentDescription("Move Barbell squat up")
-            .performScrollTo()
-            .assertIsNotEnabled()
-        composeRule.onNodeWithContentDescription("Move Barbell squat down")
-            .assertIsNotEnabled()
+        reveal("Move Barbell squat up").assertIsNotEnabled()
+        reveal("Move Barbell squat down").assertIsNotEnabled()
     }
 
     // endregion
@@ -416,9 +418,8 @@ class StrengthSessionScreenTest {
     fun theDurationIsTypedInHoursAndMinutesAsOnTheLogForm() {
         setScreen()
 
-        composeRule.onNodeWithTag(ActivityTestTags.DURATION_HOURS_FIELD).performTextReplacement("2")
-        composeRule.onNodeWithTag(ActivityTestTags.DURATION_MINUTES_FIELD)
-            .performTextReplacement("15")
+        composeRule.field(ActivityTestTags.DURATION_HOURS_FIELD).performTextReplacement("2")
+        composeRule.field(ActivityTestTags.DURATION_MINUTES_FIELD).performTextReplacement("15")
 
         assertEquals("2", draft.hours)
         assertEquals("15", draft.minutes)
@@ -554,4 +555,19 @@ class StrengthSessionScreenTest {
             StrengthDraftEditor.persistableExercises(draft).single().sets.single().duration?.seconds,
         )
     }
+
+    /**
+     * Scrolls the exercise list until [description] is on screen, then returns it.
+     *
+     * `performScrollTo` cannot do this: it asks for the node first, and a `LazyColumn` item
+     * that is off screen has not been composed, so there is no node to ask about.
+     */
+    private fun reveal(description: String): SemanticsNodeInteraction {
+        composeRule.onNodeWithTag(ActivityTestTags.EXERCISE_LIST)
+            .performScrollToNode(hasContentDescription(description))
+        return composeRule.onNodeWithContentDescription(description)
+    }
 }
+
+/** The per-set effort cell of contract decision 3, named once. */
+private const val SET_EFFORT_CELL = "Set 1, Perceived effort, 1 to 10"

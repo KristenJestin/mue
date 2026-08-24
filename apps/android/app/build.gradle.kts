@@ -97,8 +97,9 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // No navigation library: the shell is three sibling tabs with no back stack to model,
-    // so `MueNavigationHost` is a saved integer and Compose's own AnimatedContent.
+    // No navigation library: the shell is four sibling tabs with no back stack to model, so
+    // `MueNavigationHost` is a saved integer, and the one tab that does have a stack --
+    // Activity -- models it as a saved list of routes. Both are Compose's own AnimatedContent.
 
     // Storage
     implementation(libs.androidx.room.runtime)

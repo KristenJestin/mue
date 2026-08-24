@@ -9,10 +9,7 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,6 +21,7 @@ import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
+import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -329,9 +327,7 @@ class LogActivityScreenTest {
         compose.onAllNodes(hasText(text)).fetchSemanticsNodes().size
 
     /** The tag sits on the field container for a text field, on the box for a clock pair. */
-    private fun input(tag: String): SemanticsNodeInteraction = compose.onNode(
-        hasSetTextAction() and (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))),
-    )
+    private fun input(tag: String): SemanticsNodeInteraction = compose.field(tag)
 
     private fun realScreen(
         onBack: () -> Unit = {},

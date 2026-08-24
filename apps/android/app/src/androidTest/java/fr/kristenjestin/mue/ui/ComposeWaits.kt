@@ -1,5 +1,9 @@
 package fr.kristenjestin.mue.ui
 
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
@@ -26,3 +30,16 @@ fun ComposeTestRule.advanceToTheQuietButton(label: String = MueSaveConfirmationL
     }
     throw AssertionError("the button never said `$label`")
 }
+
+/**
+ * The editable field a screen tagged, whether the tag landed on the field or on its container.
+ *
+ * `MueTextField` is a labelled container wrapping a `BasicTextField`, and a `testTag` given to
+ * it lands on the container — which carries no `RequestFocus`, so `performTextReplacement`
+ * cannot act on it. Rather than merge the field's semantics into its label and value, which
+ * would change what a screen reader announces for every form in the app, the tests reach the
+ * field under the tag. Tagging the field directly keeps working, hence the `or`.
+ */
+fun ComposeTestRule.field(tag: String): SemanticsNodeInteraction = onNode(
+    hasSetTextAction() and (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))),
+)
