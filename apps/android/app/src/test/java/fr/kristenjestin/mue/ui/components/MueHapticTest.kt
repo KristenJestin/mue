@@ -83,7 +83,9 @@ class MueHapticTest {
         val (flare, gap, settle) = Triple(timings[1], timings[2], timings[3])
         assertTrue(flare >= 20L, "the flare must still spin the mass up, got $flare ms")
         assertTrue(settle >= 20L, "the settle must still spin the mass up, got $settle ms")
-        assertTrue(gap > flare, "the two beats would run together, gap $gap ms")
+        // Android's own double-click fallback leaves 100 ms; an eccentric mass needs about
+        // that long to wind down before a second beat reads as separate.
+        assertTrue(gap >= 80L, "the two beats would smear into one, gap $gap ms")
         assertTrue(timings.sum() <= 250L, "a save must not drone, got ${timings.sum()} ms")
     }
 

@@ -62,11 +62,15 @@ enum class MueHaptic(
      * One measurement saved (PRD FR-ENTRY-006). On a plain motor this is two beats — a short
      * flare and a longer settle — because a single pulse there can only differ from the tick
      * by a duration the hand does not measure.
+     *
+     * The 100 ms between them is Android's own `config_doubleClickVibePattern` spacing: an
+     * eccentric mass takes about that long to wind down, and a shorter gap arrives as one
+     * smeared buzz rather than two beats.
      */
     Confirm(
         onAmplitudeControl = MueMotorRequest.Pulse(durationMillis = 26L, amplitude = 180),
         onPlainMotor = MueMotorRequest.Pattern(
-            timingsMillis = listOf(0L, 35L, 85L, 65L),
+            timingsMillis = listOf(0L, 35L, 100L, 60L),
             amplitude = DEFAULT_AMPLITUDE,
         ),
     );
