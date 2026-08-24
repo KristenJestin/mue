@@ -783,6 +783,39 @@ class LogActivityViewModelTest {
             assertEquals("", model.uiState.value.minutes)
         }
 
+    /**
+     * The screen calls `start` on every entry, including the one a rotation causes.
+     *
+     * The save marker is dropped on the write rather than on the discharge that follows it, so
+     * without a guard a rotation inside that second reads as a new visit: the form empties, the
+     * confirmation is lost and the return to the dashboard never happens.
+     */
+    @Test
+    fun `rotating while the save confirms neither empties the form nor loses the return`() =
+        logTest { model, repository ->
+            model.onMinutesChange("30")
+            model.save()
+
+            model.start(null)
+
+            assertTrue(model.uiState.value.justSaved)
+            assertEquals("30", model.uiState.value.minutes)
+            assertEquals(1, repository.saved.size)
+        }
+
+    /** The same for a delete, whose beat is read on the screen rather than on the button. */
+    @Test
+    fun `rotating while the delete confirms keeps the acknowledgement on screen`() =
+        logTest(detail = treadmillDetail()) { model, _ ->
+            model.start(EDITED)
+            model.onRequestDelete()
+            model.onConfirmDelete()
+
+            model.start(EDITED)
+
+            assertTrue(model.uiState.value.justDeleted)
+        }
+
     /** PRD 13.4: nothing is confirmed, nothing is lost, and the action can be tried again. */
     @Test
     fun `a failed write keeps the draft and offers another try`() = logTest { model, repository ->

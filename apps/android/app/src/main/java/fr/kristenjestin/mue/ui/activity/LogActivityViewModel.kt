@@ -137,8 +137,15 @@ class LogActivityViewModel(
      * here would wipe the very draft the two screens share. The marker is what tells a genuine
      * new visit from a return: it is dropped once a save or a delete has landed, which is what
      * makes the next `Log activity` open on a blank form.
+     *
+     * A confirmation still playing is neither. The save marker is dropped on the write rather
+     * than on the discharge that follows it, so a rotation during that second would otherwise
+     * look like a new visit and reopen a blank form on top of a session already written. The
+     * flags outlive the rotation with this ViewModel, so the discharge simply resumes and the
+     * return happens as it was going to.
      */
     fun start(sessionId: ActivityId?) {
+        if (transient.value.justSaved || transient.value.justDeleted) return
         val marker = sessionId?.value.orEmpty()
         if (savedState.get<String>(KEY_STARTED_FOR) == marker) return
         savedState[KEY_STARTED_FOR] = marker
