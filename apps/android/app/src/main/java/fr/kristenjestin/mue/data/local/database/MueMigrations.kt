@@ -142,5 +142,67 @@ internal object MueMigrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    /**
+     * 3 → 4: the two tables of the Activity Timer (timer PRD 9).
+     *
+     * Purely additive again. `measurements` and the six activity tables are neither read, nor
+     * written, nor mentioned, so every weight and every session arrives here byte for byte.
+     *
+     * No catalogue is seeded. [MIGRATION_2_3] had to, because `Callback.onCreate` fires on a
+     * fresh install alone and an upgrading phone would otherwise open the exercise picker on
+     * nothing; version 4 adds no catalogue and calling the seed here would only be a second
+     * chance to double it.
+     *
+     * `ActivitySource` gaining `timer` belongs to this version and yet changes no schema: the
+     * column is `TEXT` and an enum persists by its stable id, so a new value is a new string in
+     * a column that already accepts it.
+     *
+     * The statements are the ones Room exports for version 4, kept identical on purpose — a
+     * migrated file and a freshly created one have to be the same database, and
+     * `MigrationTestHelper` compares them column by column and index by index.
+     */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `timed_activity_drafts` " +
+                    "(`id` TEXT NOT NULL, `status` TEXT NOT NULL, `movement` TEXT NOT NULL, " +
+                    "`custom_movement_name` TEXT, `environment` TEXT NOT NULL, " +
+                    "`started_at_millis` INTEGER NOT NULL, `started_on` TEXT NOT NULL, " +
+                    "`started_at_local_time` TEXT NOT NULL, " +
+                    "`accumulated_active_seconds` INTEGER NOT NULL, " +
+                    "`current_segment_started_at_millis` INTEGER, " +
+                    "`current_segment_started_elapsed_realtime_millis` INTEGER, " +
+                    "`boot_reference_millis` INTEGER, `finished_at_millis` INTEGER, " +
+                    "`review_form_state` TEXT, " +
+                    "`review_form_schema_version` INTEGER NOT NULL DEFAULT 0, " +
+                    "`created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_timed_activity_drafts_status` " +
+                    "ON `timed_activity_drafts` (`status`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `timed_draft_equipment` " +
+                    "(`id` TEXT NOT NULL, `draft_id` TEXT NOT NULL, " +
+                    "`equipment_type` TEXT NOT NULL, `custom_name` TEXT, " +
+                    "`custom_name_folded` TEXT NOT NULL DEFAULT '', " +
+                    "`position` INTEGER NOT NULL, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`draft_id`) REFERENCES `timed_activity_drafts`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_timed_draft_equipment_draft_id` " +
+                    "ON `timed_draft_equipment` (`draft_id`)"
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                    "`index_timed_draft_equipment_draft_id_equipment_type_custom_name_folded` " +
+                    "ON `timed_draft_equipment` (`draft_id`, `equipment_type`, `custom_name_folded`)"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 }

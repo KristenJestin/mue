@@ -23,6 +23,8 @@ import androidx.room.RoomDatabase
         ExerciseDefinitionEntity::class,
         StrengthExerciseEntity::class,
         StrengthSetEntity::class,
+        TimedActivityDraftEntity::class,
+        TimedDraftEquipmentEntity::class,
     ],
     version = MueDatabase.VERSION,
     exportSchema = true,
@@ -35,14 +37,17 @@ abstract class MueDatabase : RoomDatabase() {
 
     abstract fun exerciseCatalogDao(): ExerciseCatalogDao
 
+    abstract fun timerDao(): TimerDao
+
     companion object {
         const val NAME = "mue.db"
 
         /**
          * 2: the weight column moved from tenths to hundredths of a kilogram (PRD 20.3).
          * 3: the six additive tables of the Activities module (PRD 16.2).
+         * 4: the two additive tables of the Activity Timer (timer PRD 9).
          */
-        const val VERSION = 3
+        const val VERSION = 4
 
         fun build(context: Context): MueDatabase =
             Room.databaseBuilder(context.applicationContext, MueDatabase::class.java, NAME)

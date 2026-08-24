@@ -51,4 +51,10 @@ class AppContainer(private val applicationContext: Context) {
     val csvExportWriter: CsvExportWriter by lazy {
         CsvExportWriter(applicationContext.cacheDir)
     }
+
+    /**
+     * The Activity Timer, whole. One property rather than five, so the module can be built and
+     * changed without this file moving again.
+     */
+    val timer: TimerContainer by lazy { TimerContainer(applicationContext, database) }
 }
