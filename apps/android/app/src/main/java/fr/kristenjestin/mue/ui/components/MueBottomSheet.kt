@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,12 +19,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +60,16 @@ private val DismissThreshold = 120.dp
 
 object MueBottomSheetDefaults {
 
+    /**
+     * How much of the window a panel may take. The prototypes cap the exercise picker at 82 %
+     * and the catalogue picker at 78 %; the taller of the two is the default because the cap
+     * only ever bites on content that would otherwise cover the screen whole.
+     */
+    const val MaxHeightFraction: Float = 0.82f
+
+    /** The catalogue picker's own cap, per `log-activity.html`. */
+    const val CatalogueMaxHeightFraction: Float = 0.78f
+
     /** The screen gutter, kept below the panel so the last action clears the home indicator. */
     @Composable
     fun contentPadding(
@@ -75,6 +89,11 @@ object MueBottomSheetDefaults {
  *
  * Reduced motion keeps the scrim and the panel but drops the travel: the sheet simply
  * fades in place.
+ *
+ * [bodyScrolls] is what makes a long catalogue usable. It is opt-in rather than always on
+ * because it moves the dismissing drag from the whole panel to the handle and title: a panel
+ * that both drags and scrolls on the same gesture would swallow every list flick. The three
+ * sheets that predate the catalogues hold a calendar or four rows and keep the panel-wide drag.
  */
 @Composable
 fun MueBottomSheet(
@@ -84,6 +103,9 @@ fun MueBottomSheet(
     title: String? = null,
     scrimContentDescription: String = "Close",
     contentPadding: PaddingValues = MueBottomSheetDefaults.contentPadding(),
+    maxHeightFraction: Float = MueBottomSheetDefaults.MaxHeightFraction,
+    bodyScrolls: Boolean = false,
+    header: @Composable (ColumnScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var mounted by remember { mutableStateOf(false) }
@@ -140,7 +162,25 @@ fun MueBottomSheet(
             }
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        val dismissDrag = Modifier.draggable(
+            orientation = Orientation.Vertical,
+            state = rememberDraggableState { delta ->
+                scope.launch {
+                    dragOffset.snapTo((dragOffset.value + delta).coerceAtLeast(0f))
+                }
+            },
+            onDragStopped = {
+                if (dragOffset.value > dismissThresholdPx) {
+                    onDismissRequest()
+                } else {
+                    dragOffset.animateTo(0f, settleSpec)
+                }
+            },
+        )
+
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val panelMaxHeight = maxHeight * maxHeightFraction
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -158,6 +198,7 @@ fun MueBottomSheet(
                 modifier = modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .heightIn(max = panelMaxHeight)
                     .graphicsLayer {
                         alpha = progress
                         translationY = if (reduceMotion) {
@@ -168,21 +209,7 @@ fun MueBottomSheet(
                     }
                     .clip(MueTheme.shapes.sheet)
                     .background(colors.canvasElevated)
-                    .draggable(
-                        orientation = Orientation.Vertical,
-                        state = rememberDraggableState { delta ->
-                            scope.launch {
-                                dragOffset.snapTo((dragOffset.value + delta).coerceAtLeast(0f))
-                            }
-                        },
-                        onDragStopped = {
-                            if (dragOffset.value > dismissThresholdPx) {
-                                onDismissRequest()
-                            } else {
-                                dragOffset.animateTo(0f, settleSpec)
-                            }
-                        },
-                    )
+                    .then(if (bodyScrolls) Modifier else dismissDrag)
                     // A panel holding a text field has to clear the keyboard it raises. Same
                     // union as the tab bar: the IME inset already covers the navigation bar,
                     // so chaining the two would lift the panel a navigation bar too far.
@@ -190,19 +217,38 @@ fun MueBottomSheet(
                     .padding(contentPadding),
                 verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
             ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(top = 10.dp, bottom = 2.dp)
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(MueTheme.shapes.pill)
-                        .background(colors.textQuiet),
-                )
-                title?.let {
-                    MueText(it, MueTheme.typography.sectionTitle, color = colors.textPrimary)
+                Column(
+                    modifier = if (bodyScrolls) dismissDrag else Modifier,
+                    verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(top = 10.dp, bottom = 2.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(MueTheme.shapes.pill)
+                            .background(colors.textQuiet),
+                    )
+                    title?.let {
+                        MueText(it, MueTheme.typography.sectionTitle, color = colors.textPrimary)
+                    }
+                    header?.invoke(this)
                 }
-                content()
+
+                if (bodyScrolls) {
+                    Column(
+                        // `fill = false` so a short catalogue still lets the panel wrap its
+                        // content instead of standing at the full cap with a gap under it.
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
+                        content = content,
+                    )
+                } else {
+                    content()
+                }
             }
         }
     }
