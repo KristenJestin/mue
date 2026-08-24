@@ -56,6 +56,7 @@ import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
+import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueText
@@ -197,31 +198,41 @@ internal fun LogActivityContent(
     actions: LogActivityActions,
     modifier: Modifier = Modifier,
 ) {
-    MueSubScreenScaffold(
-        title = state.screenTitle,
-        onNavigateBack = actions.onBack,
-        navigationIcon = {
-            MueIcon(
-                iconName = MueIcons.ARROW_LEFT,
-                tint = MueTheme.colors.textSecondary,
-                size = BackIconSize,
-            )
-        },
-        modifier = modifier,
-        horizontalPadding = MueTheme.spacing.screenHorizontal,
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            var actionHeight by remember { mutableStateOf(0.dp) }
-            val density = LocalDensity.current
+    var actionHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    val scroll = rememberScrollState()
 
+    // The band sits outside the scaffold, as it does on `Strength session`: it is chrome over
+    // the whole window, so its edge runs the full width instead of stopping at the gutter.
+    Box(modifier = modifier.fillMaxSize()) {
+        MueSubScreenScaffold(
+            title = state.screenTitle,
+            onNavigateBack = actions.onBack,
+            navigationIcon = {
+                MueIcon(
+                    iconName = MueIcons.ARROW_LEFT,
+                    tint = MueTheme.colors.textSecondary,
+                    size = BackIconSize,
+                )
+            },
+            horizontalPadding = MueTheme.spacing.screenHorizontal,
+        ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    // Outside the scroll, so the viewport itself ends above the pinned action:
-                    // a field that takes focus is then brought into a place the keyboard and
-                    // the action leave visible, rather than under them.
-                    .padding(bottom = actionHeight)
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxWidth()
+                    .weight(1f)
+                    // The pinned action's clearance, split where the band itself is split.
+                    //
+                    // Outside the scroll, the viewport ends above the *solid* part: a field
+                    // that takes focus is brought into a place the keyboard and the action
+                    // leave visible, rather than under them. The ramp is left in, so it draws
+                    // over live content — which is both what dissolves the rows leaving the
+                    // screen and what lets a thumb landing in the fade still scroll.
+                    .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
+                    .verticalScroll(scroll)
+                    // Inside the scroll, so the last field comes to rest clear of the fade
+                    // instead of ending its life half dissolved.
+                    .padding(bottom = MueStickyActionRamp),
                 verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
             ) {
                 MueScreenTitle(
@@ -264,19 +275,18 @@ internal fun LogActivityContent(
                     },
                 )
             }
+        }
 
-            MueStickyBottomAction(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .onSizeChanged { size ->
-                        actionHeight = with(density) { size.height.toDp() }
-                    },
-                // The scaffold already holds the screen gutter; adding it again would inset
-                // the save action from the very fields it belongs to.
-                horizontalPadding = 0.dp,
-            ) {
-                SaveArea(state, actions)
-            }
+        MueStickyBottomAction(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .testTag(ActivityTestTags.SAVE_AREA)
+                .onSizeChanged { size ->
+                    actionHeight = with(density) { size.height.toDp() }
+                },
+            coversContent = scroll.canScrollForward,
+        ) {
+            SaveArea(state, actions)
         }
     }
 

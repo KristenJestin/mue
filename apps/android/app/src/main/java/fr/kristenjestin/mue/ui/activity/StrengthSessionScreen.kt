@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -26,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -63,6 +66,7 @@ import fr.kristenjestin.mue.ui.components.MueSetListActions
 import fr.kristenjestin.mue.ui.components.MueSetMeasure
 import fr.kristenjestin.mue.ui.components.MueSetRow
 import fr.kristenjestin.mue.ui.components.MueSetRowAction
+import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
@@ -96,7 +100,12 @@ internal const val TRACKING_MODE_SHEET_TITLE = "How is each set tracked?"
  */
 private const val EMPTY_CELL = "—"
 
-/** Room under the list for the pinned save action, which floats over it. */
+/**
+ * Room under the list for the pinned save action, which floats over it.
+ *
+ * Only what the first frame lays out with: the band grows a line when a session is not
+ * saveable yet, so its real height is measured rather than assumed.
+ */
 private val BottomActionClearance: Dp = 128.dp
 
 /** The prototype's `h-10 w-10` exercise avatar. */
@@ -207,6 +216,10 @@ internal fun StrengthSessionScreen(
     val hasValidSet = setCount > 0
     val announce: (String) -> Unit = { announcement = it }
 
+    var actionHeight by remember { mutableStateOf(BottomActionClearance) }
+    val density = LocalDensity.current
+    val listState = rememberLazyListState()
+
     Box(modifier = modifier.fillMaxSize()) {
         MueSubScreenScaffold(
             title = STRENGTH_SCREEN_TITLE,
@@ -220,10 +233,17 @@ internal fun StrengthSessionScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
+                    // The pinned action's clearance, split where the band itself is split, as
+                    // on the log form: the list stops above the *solid* block, so nothing it
+                    // brings into view can land behind chrome that swallows a tap, while the
+                    // ramp stays inside the list and answers a drag that starts in the fade.
+                    .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
                     .testTag(ActivityTestTags.EXERCISE_LIST),
+                state = listState,
                 contentPadding = PaddingValues(
                     top = MueTheme.spacing.md,
-                    bottom = BottomActionClearance,
+                    // Inside the list, so the last row comes to rest clear of the fade.
+                    bottom = MueStickyActionRamp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
             ) {
@@ -310,7 +330,15 @@ internal fun StrengthSessionScreen(
             }
         }
 
-        MueStickyBottomAction(modifier = Modifier.align(Alignment.BottomCenter)) {
+        MueStickyBottomAction(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .testTag(ActivityTestTags.SAVE_AREA)
+                .onSizeChanged { size ->
+                    actionHeight = with(density) { size.height.toDp() }
+                },
+            coversContent = listState.canScrollForward,
+        ) {
             if (!hasValidSet) {
                 MueText(
                     text = NEEDS_A_VALID_SET,

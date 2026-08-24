@@ -31,6 +31,8 @@ internal object ActivityTestTags {
     const val MOVEMENT_PICKER: String = "activity:movementPicker"
     const val ENVIRONMENT_PICKER: String = "activity:environmentPicker"
     const val EQUIPMENT_PICKER: String = "activity:equipmentPicker"
+    /** The whole pinned band: its ramp, the save action, and what sits beside it. */
+    const val SAVE_AREA: String = "activity:saveArea"
     const val SAVE_BUTTON: String = "activity:saveButton"
     const val DELETE_BUTTON: String = "activity:deleteButton"
 

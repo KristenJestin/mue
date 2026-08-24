@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -21,10 +23,13 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.test.espresso.Espresso
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ActivityDuration
@@ -38,6 +43,7 @@ import fr.kristenjestin.mue.domain.model.StrengthSetId
 import fr.kristenjestin.mue.domain.model.TrackingMode
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.setWheel
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -619,6 +625,39 @@ class StrengthSessionScreenTest {
     }
 
     /**
+     * The same promise the log form makes: the fade above the save action is drawn over the
+     * list, so a drag that starts in it belongs to the list.
+     */
+    @Test
+    fun aDragThatStartsInTheFadeAboveTheSaveActionScrollsTheExerciseList() {
+        setScreen(withOneSquat())
+
+        val before = listOffset()
+        val start = with(composeRule.density) {
+            val band = composeRule.onNodeWithTag(ActivityTestTags.SAVE_AREA).getBoundsInRoot()
+            (band.top + MueStickyActionRamp / 2f).toPx()
+        }
+        composeRule.onRoot().performTouchInput {
+            swipe(Offset(centerX, start), Offset(centerX, start - DRAG_PIXELS), DRAG_MILLIS)
+        }
+        composeRule.waitForIdle()
+
+        val after = listOffset()
+        assertTrue("the list did not move: $before then $after", after > before)
+    }
+
+    /**
+     * How far the list has travelled, read from the range it publishes to assistive services.
+     *
+     * A row's bounds would not do: a `LazyColumn` drops an item that scrolls off, so the very
+     * node a before-and-after would compare is the one that stops existing.
+     */
+    private fun listOffset(): Float = composeRule.onNodeWithTag(ActivityTestTags.EXERCISE_LIST)
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
+
+    /**
      * Scrolls the exercise list until [description] is on screen, then returns it.
      *
      * `performScrollTo` cannot do this: it asks for the node first, and a `LazyColumn` item
@@ -633,3 +672,7 @@ class StrengthSessionScreenTest {
 
 /** The per-set effort cell of contract decision 3, named once. */
 private const val SET_EFFORT_CELL = "Set 1, Perceived effort, 1 to 10"
+
+/** Long enough to clear the touch slop several times over, short enough to stay on screen. */
+private const val DRAG_PIXELS = 400f
+private const val DRAG_MILLIS = 200L

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -23,9 +24,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.height
 import androidx.test.espresso.Espresso
 import fr.kristenjestin.mue.domain.logic.ActivityValidation
@@ -36,6 +40,7 @@ import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueWheelPickerDefaults
 import fr.kristenjestin.mue.ui.setWheel
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -50,6 +55,10 @@ private const val WAIT_MILLIS = 10_000L
 
 /** As many equipment rows as the real catalogue has, which is what pushed the notice away. */
 private const val CATALOGUE_ROWS = 14
+
+/** Long enough to clear the touch slop several times over, short enough to stay on screen. */
+private const val DRAG_PIXELS = 400f
+private const val DRAG_MILLIS = 200L
 
 /**
  * Compose coverage of PRD FR-ACTIVITY-004 to 011.
@@ -540,7 +549,59 @@ class LogActivityScreenTest {
 
     // endregion
 
+    // region The pinned save action
+
+    /**
+     * The reported defect: a thumb that lands in the fade above `Save activity` and drags must
+     * scroll the form. The fade is drawn over the form rather than instead of it, so nothing in
+     * that band may be what answers — or fail to answer — the gesture.
+     */
+    @Test
+    fun aDragThatStartsInTheFadeAboveTheSaveActionScrollsTheForm() {
+        realScreen()
+
+        val before = presetRowTop()
+        dragUpFrom(fadeCentre())
+
+        val after = presetRowTop()
+        assertTrue("the form did not move: $before then $after", after < before)
+    }
+
+    /** The action itself is chrome: pressing it and pulling must not take the form with it. */
+    @Test
+    fun aDragThatStartsOnTheSaveActionLeavesTheFormWhereItIs() {
+        realScreen()
+
+        val before = presetRowTop()
+        dragUpFrom(saveActionCentre())
+
+        assertEquals(before, presetRowTop(), 0.5f)
+    }
+
+    // endregion
+
     // region harness
+
+    /** Halfway down the band's ramp, which is drawn over the form and belongs to it. */
+    private fun fadeCentre(): Float = with(compose.density) {
+        val band = compose.onNodeWithTag(ActivityTestTags.SAVE_AREA).getBoundsInRoot()
+        (band.top + MueStickyActionRamp / 2f).toPx()
+    }
+
+    private fun saveActionCentre(): Float = with(compose.density) {
+        val button = compose.onNodeWithTag(ActivityTestTags.SAVE_BUTTON).getBoundsInRoot()
+        (button.top + button.height / 2f).toPx()
+    }
+
+    private fun presetRowTop(): Float =
+        compose.onNodeWithTag(ActivityTestTags.PRESET_ROW).getBoundsInRoot().top.value
+
+    private fun dragUpFrom(y: Float) {
+        compose.onRoot().performTouchInput {
+            swipe(Offset(centerX, y), Offset(centerX, y - DRAG_PIXELS), DRAG_MILLIS)
+        }
+        compose.waitForIdle()
+    }
 
     private fun nodesReading(text: String): Int =
         compose.onAllNodes(hasText(text)).fetchSemanticsNodes().size
