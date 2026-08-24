@@ -5,10 +5,12 @@ import kotlin.math.roundToLong
 /**
  * A span of time, stored as whole seconds (PRD 8.2).
  *
- * A session is typed as hours and minutes, so its value is always a multiple of sixty; the
- * second stays the stored unit for the Health Connect translation PRD 16.6 anticipates. A
- * strength set uses the same class with far smaller values, so the class itself only refuses
- * negatives and the session bounds are applied where a session is validated.
+ * A session typed by hand is entered as hours and minutes and its value is then always a
+ * multiple of sixty; a timed session is not, since PRD 17 lets the timer record its seconds. The
+ * second is the stored unit for both, and for the Health Connect translation PRD 16.6
+ * anticipates. A strength set uses the same class with far smaller values, so the class itself
+ * only refuses negatives and each set of bounds is applied where its own kind of span is
+ * validated.
  */
 @JvmInline
 value class ActivityDuration private constructor(val seconds: Int) : Comparable<ActivityDuration> {
@@ -24,6 +26,9 @@ value class ActivityDuration private constructor(val seconds: Int) : Comparable<
     val secondsPart: Int get() = seconds % SECONDS_PER_MINUTE
 
     val isSessionLength: Boolean get() = seconds in SESSION_RANGE
+
+    /** The same span judged by the timed bounds of PRD FR-TIMER-006, one second at the floor. */
+    val isTimedSessionLength: Boolean get() = seconds in TIMED_RANGE
 
     operator fun plus(other: ActivityDuration): ActivityDuration =
         ActivityDuration(seconds + other.seconds)
@@ -42,6 +47,24 @@ value class ActivityDuration private constructor(val seconds: Int) : Comparable<
 
         val SESSION_RANGE: IntRange = SESSION_MIN_SECONDS..SESSION_MAX_SECONDS
 
+        /**
+         * One second, the shortest timed session PRD FR-TIMER-006 accepts.
+         *
+         * [SESSION_MIN_SECONDS] above is untouched and stays the floor of the manual form, which
+         * has no way to express seconds at all. A `Finish` pressed a few seconds after `Start
+         * timer` records a real session rather than losing the measured time.
+         */
+        const val TIMED_MIN_SECONDS: Int = 1
+
+        /** PRD 17: the ceiling is common to both modes of entry; only the floor differs. */
+        val TIMED_RANGE: IntRange = TIMED_MIN_SECONDS..SESSION_MAX_SECONDS
+
+        /**
+         * What PRD FR-TIMER-010 judges coherent. Zero belongs inside it: a timer starts at
+         * `00:00:00`, so a total of zero while running is a real reading and not a fault.
+         */
+        val ELAPSED_RANGE: LongRange = 0L..SESSION_MAX_SECONDS.toLong()
+
         val ZERO: ActivityDuration = ActivityDuration(0)
 
         /** Null below zero. Zero is allowed: an empty day of the weekly bars is a real total. */
@@ -58,6 +81,34 @@ value class ActivityDuration private constructor(val seconds: Int) : Comparable<
         /** The session bounds of PRD FR-ACTIVITY-005, applied to an hours-and-minutes pair. */
         fun ofSessionOrNull(hours: Int, minutes: Int): ActivityDuration? =
             ofHoursAndMinutesOrNull(hours, minutes)?.takeIf { it.isSessionLength }
+
+        /** The three-field form PRD FR-TIMER-006 corrects a timed duration with. */
+        fun ofHoursMinutesAndSecondsOrNull(
+            hours: Int,
+            minutes: Int,
+            seconds: Int,
+        ): ActivityDuration? {
+            if (hours < 0 || minutes < 0 || seconds < 0) return null
+            val total = hours.toLong() * SECONDS_PER_HOUR +
+                minutes.toLong() * SECONDS_PER_MINUTE +
+                seconds.toLong()
+            return if (total > Int.MAX_VALUE) null else ActivityDuration(total.toInt())
+        }
+
+        /** The timed bounds of PRD FR-TIMER-006, applied to an hours, minutes, seconds triple. */
+        fun ofTimedSessionOrNull(hours: Int, minutes: Int, seconds: Int): ActivityDuration? =
+            ofHoursMinutesAndSecondsOrNull(hours, minutes, seconds)
+                ?.takeIf { it.isTimedSessionLength }
+
+        /**
+         * A running total judged by [ELAPSED_RANGE] (PRD FR-TIMER-010).
+         *
+         * The argument is a `Long` and is range-tested before it is narrowed: a wall clock moved
+         * by years overflows an `Int` of seconds, and an overflowed `Int` can land back inside
+         * the valid range — a corrupt duration that would pass the coherence check.
+         */
+        fun ofElapsedOrNull(totalSeconds: Long): ActivityDuration? =
+            if (totalSeconds in ELAPSED_RANGE) ActivityDuration(totalSeconds.toInt()) else null
 
         fun sum(durations: Iterable<ActivityDuration>): ActivityDuration =
             durations.fold(ZERO, ActivityDuration::plus)
