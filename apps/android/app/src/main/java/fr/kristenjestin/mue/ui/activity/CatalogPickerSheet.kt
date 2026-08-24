@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -110,6 +111,7 @@ internal fun CatalogPickerSheet(
                         selected = entry.selected,
                         showDivider = index > 0,
                         onClick = { onSelect(entry.id) },
+                        modifier = Modifier.testTag(ActivityTestTags.catalogEntry(entry.id)),
                         selectedIndicator = {
                             MueIcon(
                                 iconName = MueIcons.CHECK,

@@ -62,7 +62,8 @@ private val PaceBoxWidth: Dp = 34.dp
 /** A small box still has to be reachable; the container around it is 64 dp tall (PRD 15). */
 private val ClockBoxHeight: Dp = 36.dp
 
-private val MetricIconSize: Dp = 16.dp
+/** The accent glyph a field or a card header carries, sized to the caption beside it. */
+internal val MetricIconSize: Dp = 16.dp
 
 /**
  * The part of the form the preset decides (PRD FR-ACTIVITY-004 to 008).
@@ -506,7 +507,7 @@ private fun FieldIcon(iconName: String) {
 
 /** The small grey line a card opens with, e.g. `Equipment · optional` under its icon. */
 @Composable
-private fun LabelWithIcon(label: String, icon: String) {
+internal fun LabelWithIcon(label: String, icon: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),

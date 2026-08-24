@@ -123,6 +123,7 @@ fun StrengthSessionScreen(
         catalogue = state.catalogue,
         lastPerformances = state.lastPerformances,
         saved = state.saved,
+        hapticsEnabled = state.hapticsEnabled,
         onEdit = state::edit,
         onSave = state::save,
         onBack = onBack,
@@ -156,6 +157,13 @@ interface StrengthSessionState {
     /** True once the write has landed; the save button plays its discharge on it. */
     val saved: Boolean
 
+    /**
+     * FR-PROFILE-004, read by the duration wheel. Defaulted rather than required: only the
+     * adapter backed by the ViewModel can know the preference, and a test double driving the
+     * screen has no reason to state it.
+     */
+    val hapticsEnabled: Boolean get() = true
+
     fun edit(edit: StrengthEdit)
 
     fun save()
@@ -178,6 +186,7 @@ internal fun StrengthSessionScreen(
     onBack: () -> Unit,
     onSaved: () -> Unit,
     modifier: Modifier = Modifier,
+    hapticsEnabled: Boolean = true,
     today: LocalDate = LocalDate.now(),
     locale: Locale = Locale.getDefault(),
 ) {
@@ -233,6 +242,7 @@ internal fun StrengthSessionScreen(
                         energyInput = energyInput,
                         energyError = energy.errorMessage,
                         onEdit = onEdit,
+                        hapticsEnabled = hapticsEnabled,
                     )
                 }
 
@@ -388,38 +398,24 @@ private fun SessionFields(
     energyError: String?,
     onEdit: (StrengthEdit) -> Unit,
     modifier: Modifier = Modifier,
+    hapticsEnabled: Boolean = true,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm)) {
-            MueTextField(
-                label = "Hours",
-                value = draft.hours,
-                onValueChange = { onEdit(StrengthEdit.SetDurationHours(it)) },
-                placeholder = EMPTY_NUMBER_HINT,
-                suffix = "h",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = MueTheme.typography.metricMedium,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag(ActivityTestTags.DURATION_HOURS_FIELD),
-            )
-            MueTextField(
-                label = "Minutes",
-                value = draft.minutes,
-                onValueChange = { onEdit(StrengthEdit.SetDurationMinutes(it)) },
-                placeholder = EMPTY_NUMBER_HINT,
-                suffix = "min",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = MueTheme.typography.metricMedium,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag(ActivityTestTags.DURATION_MINUTES_FIELD),
-            )
-        }
-        durationError?.let { FieldError(it) }
+        // The same field as the log form's, because the two edit the same draft value: PRD 9.1
+        // makes them two views of one session, and one duration entered two ways is worse than
+        // either. It is also where the prototype's bare minutes box is overruled by
+        // FR-ACTIVITY-005, per the build contract.
+        ActivityDurationField(
+            hours = draft.hours,
+            minutes = draft.minutes,
+            onHoursChange = { onEdit(StrengthEdit.SetDurationHours(it)) },
+            onMinutesChange = { onEdit(StrengthEdit.SetDurationMinutes(it)) },
+            errorMessage = durationError,
+            hapticsEnabled = hapticsEnabled,
+        )
 
         MueTextField(
             label = "Estimated energy · optional",
@@ -445,18 +441,6 @@ private fun SessionFields(
             modifier = Modifier.testTag(ActivityTestTags.EFFORT_SLIDER),
         )
     }
-}
-
-@Composable
-private fun FieldError(message: String) {
-    MueText(
-        text = message,
-        style = MueTheme.typography.caption,
-        color = MueTheme.colors.error,
-        modifier = Modifier
-            .padding(horizontal = MueTheme.spacing.xs)
-            .semantics { liveRegion = LiveRegionMode.Polite },
-    )
 }
 
 /**

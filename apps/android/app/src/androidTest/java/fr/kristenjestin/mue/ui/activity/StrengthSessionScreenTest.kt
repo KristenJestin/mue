@@ -4,7 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -35,8 +38,10 @@ import fr.kristenjestin.mue.domain.model.TrackingMode
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.field
+import fr.kristenjestin.mue.ui.setWheel
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.wheelValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -414,12 +419,13 @@ class StrengthSessionScreenTest {
 
     // region The session trio
 
+    /** The editor and the log form show one duration, on the same two wheels (PRD 9.1). */
     @Test
-    fun theDurationIsTypedInHoursAndMinutesAsOnTheLogForm() {
+    fun theDurationIsChosenInHoursAndMinutesAsOnTheLogForm() {
         setScreen()
 
-        composeRule.field(ActivityTestTags.DURATION_HOURS_FIELD).performTextReplacement("2")
-        composeRule.field(ActivityTestTags.DURATION_MINUTES_FIELD).performTextReplacement("15")
+        composeRule.setWheel(ActivityTestTags.DURATION_HOURS_FIELD, 2)
+        composeRule.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 15)
 
         assertEquals("2", draft.hours)
         assertEquals("15", draft.minutes)
@@ -428,16 +434,50 @@ class StrengthSessionScreenTest {
     /**
      * PRD 12, and the log form's own hint.
      *
-     * The editor used to draw an unfilled hour as `0`, which reads as a value rather than an
-     * absence — and a screen reader reads it out as one. The two screens edit the same duration,
-     * so they cannot spell an empty one two ways.
+     * The optional measurements still spell an absence rather than a zero. The duration is the
+     * one field that cannot: it is required, and a wheel has to rest on something. It rests on
+     * `0`, which the save refuses with the range in the message rather than writing a session
+     * nobody logged — the honest reading of PRD 12, whose rule is about *optional* values.
      */
     @Test
-    fun anUnfilledDurationIsAnAbsenceRatherThanAZero() {
+    fun anUnfilledOptionalMeasurementIsAnAbsenceRatherThanAZero() {
         setScreen(ActivityDraft(presetId = ActivityPreset.STRENGTH_TRAINING.id, detailed = true))
 
-        composeRule.onAllNodesWithText(EMPTY_NUMBER_HINT).assertCountEquals(3)
-        composeRule.onAllNodesWithText("0").assertCountEquals(0)
+        composeRule.onAllNodesWithText(EMPTY_NUMBER_HINT).assertCountEquals(1)
+        assertEquals(0, composeRule.wheelValue(ActivityTestTags.DURATION_HOURS_FIELD))
+        assertEquals(0, composeRule.wheelValue(ActivityTestTags.DURATION_MINUTES_FIELD))
+    }
+
+    /** A wheel says its value out loud, unit and all, because it only draws the digits. */
+    @Test
+    fun eachDurationWheelIsAnAdjustableControlThatSpeaksItsValue() {
+        setScreen()
+
+        composeRule.setWheel(ActivityTestTags.DURATION_HOURS_FIELD, 1)
+        composeRule.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 45)
+
+        composeRule.onNodeWithTag(ActivityTestTags.DURATION_HOURS_FIELD)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1 hour"))
+        composeRule.onNodeWithTag(ActivityTestTags.DURATION_MINUTES_FIELD)
+            .assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "45 minutes"),
+            )
+    }
+
+    /** PRD FR-ACTIVITY-005: neither wheel can be pushed past the range the PRD sets. */
+    @Test
+    fun neitherDurationWheelCanLeaveTheRangeThePrdSets() {
+        setScreen()
+
+        composeRule.setWheel(ActivityTestTags.DURATION_HOURS_FIELD, 1_000)
+        composeRule.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 1_000)
+        assertEquals("99", draft.hours)
+        assertEquals("59", draft.minutes)
+
+        composeRule.setWheel(ActivityTestTags.DURATION_HOURS_FIELD, -5)
+        composeRule.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, -5)
+        assertEquals("0", draft.hours)
+        assertEquals("0", draft.minutes)
     }
 
     @Test

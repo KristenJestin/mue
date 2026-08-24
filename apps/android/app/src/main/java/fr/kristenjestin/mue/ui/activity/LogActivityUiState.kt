@@ -175,6 +175,12 @@ object LogActivityMessages {
     const val DURATION_LABEL: String = "Duration"
     const val HOURS_SUFFIX: String = "h"
     const val MINUTES_SUFFIX: String = "min"
+
+    /** The caption under each duration wheel, and the name a screen reader gives it. */
+    const val HOURS_UNIT: String = "hours"
+    const val MINUTES_UNIT: String = "minutes"
+    const val DURATION_HOURS_LABEL: String = "Duration in hours"
+    const val DURATION_MINUTES_LABEL: String = "Duration in minutes"
     const val NOTES_LABEL: String = "Notes"
 
     const val OPTIONAL_BADGE: String = "OPTIONAL"
@@ -238,6 +244,15 @@ object LogActivityMessages {
 
     /** `Estimated energy · optional` — how the strength editor names the same field. */
     fun optional(label: String): String = "$label · optional"
+
+    /**
+     * What a duration wheel says out loud as it moves. The unit is spoken with the number
+     * because the wheel only draws the digits (PRD_ACTIVITIES 15).
+     */
+    fun spokenHours(hours: Int): String = if (hours == 1) "1 hour" else "$hours hours"
+
+    fun spokenMinutes(minutes: Int): String =
+        if (minutes == 1) "1 minute" else "$minutes minutes"
 
     fun resultCount(count: Int): String = if (count == 1) "1 result" else "$count results"
 

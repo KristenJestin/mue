@@ -967,6 +967,8 @@ private class SharedStrengthSessionState(
     /** Contract decision 8: the discharge plays first, and the editor leaves after it. */
     override val saved: Boolean get() = uiState.value.justSaved
 
+    override val hapticsEnabled: Boolean get() = uiState.value.hapticsEnabled
+
     override fun edit(edit: StrengthEdit) = viewModel.onStrengthEdit(edit)
 
     override fun save() = viewModel.save()

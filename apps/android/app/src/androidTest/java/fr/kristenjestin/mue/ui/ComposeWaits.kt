@@ -1,11 +1,15 @@
 package fr.kristenjestin.mue.ui
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
 import fr.kristenjestin.mue.ui.theme.MueMotion
 
@@ -43,3 +47,23 @@ fun ComposeTestRule.advanceToTheQuietButton(label: String = MueSaveConfirmationL
 fun ComposeTestRule.field(tag: String): SemanticsNodeInteraction = onNode(
     hasSetTextAction() and (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))),
 )
+
+/**
+ * Moves a `MueWheelPicker` the way an assistive service moves it.
+ *
+ * The wheel publishes no text and no set-text action: it is an adjustable control, so a test
+ * drives it through the very `SetProgress` action TalkBack's adjust gesture uses. Aiming a
+ * synthetic swipe at it instead would prove the gesture works and nothing at all about the
+ * contract PRD_ACTIVITIES 15 asks of it.
+ */
+fun ComposeTestRule.setWheel(tag: String, value: Int) {
+    onNodeWithTag(tag).performSemanticsAction(SemanticsActions.SetProgress) { it(value.toFloat()) }
+    waitForIdle()
+}
+
+/** What the wheel currently reads, taken from the range info a screen reader would announce. */
+fun ComposeTestRule.wheelValue(tag: String): Int = onNodeWithTag(tag)
+    .fetchSemanticsNode()
+    .config[SemanticsProperties.ProgressBarRangeInfo]
+    .current
+    .toInt()

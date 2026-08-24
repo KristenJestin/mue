@@ -393,24 +393,13 @@ private fun CommonFields(state: LogActivityUiState, actions: LogActivityActions)
             }
         }
 
-        TwoPartNumberField(
-            label = LogActivityMessages.DURATION_LABEL,
-            icon = ActivityIcons.TIMER,
-            first = ClockPart(
-                value = state.hours,
-                onValueChange = actions.onHoursChange,
-                suffix = LogActivityMessages.HOURS_SUFFIX,
-                contentDescription = "Duration hours",
-                testTag = ActivityTestTags.DURATION_HOURS_FIELD,
-            ),
-            second = ClockPart(
-                value = state.minutes,
-                onValueChange = actions.onMinutesChange,
-                suffix = LogActivityMessages.MINUTES_SUFFIX,
-                contentDescription = "Duration minutes",
-                testTag = ActivityTestTags.DURATION_MINUTES_FIELD,
-            ),
+        ActivityDurationField(
+            hours = state.hours,
+            minutes = state.minutes,
+            onHoursChange = actions.onHoursChange,
+            onMinutesChange = actions.onMinutesChange,
             errorMessage = state.durationError,
+            hapticsEnabled = state.hapticsEnabled,
         )
     }
 }

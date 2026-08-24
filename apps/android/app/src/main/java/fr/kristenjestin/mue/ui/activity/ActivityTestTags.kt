@@ -45,6 +45,9 @@ internal object ActivityTestTags {
 
     fun metricField(kindId: String): String = "activity:metric:$kindId"
 
+    /** One row of the movement or equipment catalogue; the chip it adds carries the same name. */
+    fun catalogEntry(entryId: String): String = "activity:catalogEntry:$entryId"
+
     fun equipmentChip(index: Int): String = "activity:equipment:$index"
 
     fun exercise(index: Int): String = "activity:exercise:$index"

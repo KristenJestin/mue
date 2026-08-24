@@ -5,29 +5,46 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.unit.height
+import androidx.test.espresso.Espresso
 import fr.kristenjestin.mue.domain.logic.ActivityValidation
 import fr.kristenjestin.mue.domain.model.ActivityPreset
+import fr.kristenjestin.mue.domain.model.EquipmentType
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
 import fr.kristenjestin.mue.ui.field
 import fr.kristenjestin.mue.ui.components.MueSaveConfirmationLabel
+import fr.kristenjestin.mue.ui.components.MueWheelPickerDefaults
+import fr.kristenjestin.mue.ui.setWheel
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.wheelValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.LocalTime
 
 private const val WAIT_MILLIS = 10_000L
 
@@ -57,7 +74,7 @@ class LogActivityScreenTest {
         compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.TREADMILL_WALK.id))
             .assertIsSelected()
 
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).performTextInput("45")
+        compose.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 45)
         input(ActivityTestTags.metricField(MetricKind.DISTANCE.id))
             .performScrollTo()
             .performTextInput("4.2")
@@ -76,7 +93,7 @@ class LogActivityScreenTest {
     fun switchingPresetsMidFormLosesNothing() {
         realScreen()
 
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).performTextInput("45")
+        compose.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 45)
         input(ActivityTestTags.metricField(MetricKind.INCLINE.id))
             .performScrollTo()
             .performTextInput("2.5")
@@ -86,7 +103,7 @@ class LogActivityScreenTest {
         compose.waitForIdle()
 
         // The common fields are untouched, and the run's own measurements start empty.
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).assertTextContains("45")
+        assertEquals(45, compose.wheelValue(ActivityTestTags.DURATION_MINUTES_FIELD))
         compose.onNodeWithText(LogActivityMessages.detailsTitle(ActivityPreset.RUN))
             .assertIsDisplayed()
 
@@ -98,7 +115,7 @@ class LogActivityScreenTest {
         input(ActivityTestTags.metricField(MetricKind.INCLINE.id))
             .performScrollTo()
             .assertTextContains("2.5")
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).assertTextContains("45")
+        assertEquals(45, compose.wheelValue(ActivityTestTags.DURATION_MINUTES_FIELD))
     }
 
     @Test
@@ -280,14 +297,14 @@ class LogActivityScreenTest {
             }
         }
 
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).performTextInput("45")
+        compose.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 45)
         compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.STRENGTH_TRAINING.id))
             .performClick()
         compose.onNodeWithTag(ActivityTestTags.DETAILED_LOG).performScrollTo().performClick()
 
         compose.waitUntil(WAIT_MILLIS) { editorOpen.value }
         compose.onNodeWithText(STRENGTH_SCREEN_TITLE).assertIsDisplayed()
-        input(ActivityTestTags.DURATION_MINUTES_FIELD).assertTextContains("45")
+        assertEquals(45, compose.wheelValue(ActivityTestTags.DURATION_MINUTES_FIELD))
     }
 
     /** A refusal nobody can see is a refusal nobody understands (PRD FR-ACTIVITY-008). */
@@ -321,10 +338,230 @@ class LogActivityScreenTest {
 
     // endregion
 
+    // region The schedule row
+
+    /**
+     * The two fields sit side by side and have to read as one control, so they are measured
+     * together rather than each to its own content. They used to be two different components —
+     * a picker row beside a pair of number boxes — and ended a few dp apart.
+     *
+     * All three states of the row are checked, because the message under one of them is exactly
+     * what used to push that half past the other.
+     */
+    @Test
+    fun theDateAndTheStartTimeAreAlwaysTheSameHeight() {
+        val state = mutableStateOf(LogActivityUiState())
+        content(state, LogActivityActions())
+
+        assertSameFieldHeight("with no time")
+
+        state.value = state.value.copy(startTime = LocalTime.of(18, 30))
+        compose.waitForIdle()
+        assertSameFieldHeight("with a time")
+
+        state.value = state.value.copy(dateError = ActivityValidation.DATE_ERROR)
+        compose.waitForIdle()
+        assertSameFieldHeight("with a message under the date")
+
+        state.value = state.value.copy(
+            dateError = null,
+            startTimeError = LogActivityMessages.START_TIME_ERROR,
+        )
+        compose.waitForIdle()
+        assertSameFieldHeight("with a message under the time")
+    }
+
+    /** PRD 12: an untouched optional value is never drawn as a plausible midnight. */
+    @Test
+    fun anUnsetStartTimeSaysSoRatherThanReadingAsMidnight() {
+        content(state = LogActivityUiState(), actions = LogActivityActions())
+
+        compose.onNodeWithTag(ActivityTestTags.START_TIME_FIELD)
+            .assertTextContains(LogActivityMessages.NO_START_TIME)
+        assertEquals(0, nodesReading("00:00"))
+    }
+
+    @Test
+    fun theStartTimeFieldRaisesItsPanelAndTheDateRaisesItsOwn() {
+        var timeOpened = 0
+        var dateOpened = 0
+        content(
+            state = LogActivityUiState(),
+            actions = LogActivityActions(
+                onOpenTimePicker = { timeOpened++ },
+                onOpenDatePicker = { dateOpened++ },
+            ),
+        )
+
+        compose.onNodeWithTag(ActivityTestTags.START_TIME_FIELD).performClick()
+        compose.onNodeWithTag(ActivityTestTags.DATE_FIELD).performClick()
+
+        assertEquals(1, timeOpened)
+        assertEquals(1, dateOpened)
+    }
+
+    /** PRD 8.2: the panel can always take the time back off, so null stays reachable. */
+    @Test
+    fun theStartTimePanelCanClearTheTimeItIsShowing() {
+        var cleared = false
+        var picked: LocalTime? = null
+        content(
+            state = LogActivityUiState(
+                startTime = LocalTime.of(18, 30),
+                timePickerVisible = true,
+            ),
+            actions = LogActivityActions(
+                onStartTimeSelected = { time ->
+                    picked = time
+                    if (time == null) cleared = true
+                },
+            ),
+        )
+
+        compose.onNodeWithTag(ActivityTestTags.START_TIME_PICKER).assertIsDisplayed()
+        compose.onNodeWithTag(ActivityTestTags.CLEAR_START_TIME).performClick()
+
+        assertTrue(cleared)
+        assertEquals(null, picked)
+    }
+
+    /** Nothing to clear when nothing is set: the action would claim a state that already holds. */
+    @Test
+    fun theStartTimePanelOffersNoClearWhenNoTimeIsSet() {
+        content(
+            state = LogActivityUiState(timePickerVisible = true),
+            actions = LogActivityActions(),
+        )
+
+        compose.onNodeWithTag(ActivityTestTags.START_TIME_PICKER).assertIsDisplayed()
+        compose.onNodeWithTag(ActivityTestTags.CONFIRM_START_TIME).assertIsDisplayed()
+        compose.onNodeWithTag(ActivityTestTags.CLEAR_START_TIME).assertDoesNotExist()
+    }
+
+    // endregion
+
+    // region The duration wheels
+
+    /** PRD_ACTIVITIES 15: the wheel is an adjustable control and never a gesture-only one. */
+    @Test
+    fun eachDurationWheelIsAnAdjustableControlAnyAssistiveServiceCanMove() {
+        realScreen()
+
+        listOf(
+            ActivityTestTags.DURATION_HOURS_FIELD to LogActivityMessages.DURATION_HOURS_LABEL,
+            ActivityTestTags.DURATION_MINUTES_FIELD to LogActivityMessages.DURATION_MINUTES_LABEL,
+        ).forEach { (tag, label) ->
+            compose.onNodeWithTag(tag)
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+                .assert(
+                    SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(label)),
+                )
+        }
+
+        compose.setWheel(ActivityTestTags.DURATION_HOURS_FIELD, 1)
+        compose.setWheel(ActivityTestTags.DURATION_MINUTES_FIELD, 45)
+
+        compose.onNodeWithTag(ActivityTestTags.DURATION_HOURS_FIELD)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1 hour"))
+        compose.onNodeWithTag(ActivityTestTags.DURATION_MINUTES_FIELD)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "45 minutes"))
+    }
+
+    /** Every row of the wheel is the touch target PRD 15 sets, and the wheel is three of them. */
+    @Test
+    fun aDurationWheelIsBuiltOfFortyEightDpRows() {
+        realScreen()
+
+        val height = compose.onNodeWithTag(ActivityTestTags.DURATION_MINUTES_FIELD)
+            .getBoundsInRoot()
+            .height
+        assertEquals(
+            MueWheelPickerDefaults.RowHeight.value * MueWheelPickerDefaults.VisibleRows,
+            height.value,
+            1f,
+        )
+        assertEquals(48f, MueWheelPickerDefaults.RowHeight.value, 0f)
+    }
+
+    // endregion
+
+    // region The equipment catalogue
+
+    /**
+     * The sheet says `Select one or more`, so a row is a switch and the panel stays open around
+     * it. Three additions and one removal, without the panel leaving once.
+     */
+    @Test
+    fun theEquipmentSheetAccumulatesSelectionsWithoutClosing() {
+        realScreen()
+
+        compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.OTHER.id)).performClick()
+        compose.onNodeWithTag(ActivityTestTags.EQUIPMENT_PICKER).performScrollTo().performClick()
+
+        listOf(EquipmentType.YOGA_MAT, EquipmentType.KETTLEBELL, EquipmentType.RESISTANCE_BANDS)
+            .forEach { type ->
+                catalogRow(type).performScrollTo().performClick()
+                compose.waitForIdle()
+                compose.onNodeWithText(LogActivityMessages.EQUIPMENT_PICKER_TITLE)
+                    .assertIsDisplayed()
+                catalogRow(type).assertIsSelected()
+            }
+
+        // Tapping a chosen row takes it back off, and the panel still does not leave.
+        catalogRow(EquipmentType.KETTLEBELL).performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(LogActivityMessages.EQUIPMENT_PICKER_TITLE).assertIsDisplayed()
+        catalogRow(EquipmentType.KETTLEBELL).assertIsNotSelected()
+
+        // It closes on a back press, one of the three ways out it has (× and a drag are the others).
+        Espresso.pressBack()
+        compose.waitForIdle()
+        compose.onNodeWithText(LogActivityMessages.EQUIPMENT_PICKER_TITLE).assertDoesNotExist()
+
+        compose.onNodeWithTag(ActivityTestTags.equipmentChip(0)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(ActivityTestTags.equipmentChip(1)).assertIsDisplayed()
+        compose.onNodeWithTag(ActivityTestTags.equipmentChip(2)).assertDoesNotExist()
+    }
+
+    /** The movement is a single choice, so its own sheet still leaves on the row that answers it. */
+    @Test
+    fun theMovementSheetStillClosesOnThePick() {
+        realScreen()
+
+        compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.OTHER.id)).performClick()
+        compose.onNodeWithTag(ActivityTestTags.MOVEMENT_PICKER).performScrollTo().performClick()
+        compose.onNodeWithText(Movement.YOGA.displayName).performScrollTo().performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(LogActivityMessages.ACTIVITY_PICKER_TITLE).assertDoesNotExist()
+        compose.onNodeWithText(Movement.YOGA.displayName).assertIsDisplayed()
+    }
+
+    // endregion
+
     // region harness
 
     private fun nodesReading(text: String): Int =
         compose.onAllNodes(hasText(text)).fetchSemanticsNodes().size
+
+    /**
+     * One row of the open catalogue sheet, told apart from the chip of the same name behind it.
+     *
+     * The tag lands on the row's container so that its divider travels with it; the selectable
+     * part — the one that answers `assertIsSelected` — is the row inside.
+     */
+    private fun catalogRow(type: EquipmentType): SemanticsNodeInteraction = compose.onNode(
+        isSelectable() and hasAnyAncestor(hasTestTag(ActivityTestTags.catalogEntry(type.id))),
+    )
+
+    /** The two halves of the schedule row measure the same, whatever either of them is showing. */
+    private fun assertSameFieldHeight(state: String) {
+        val date = compose.onNodeWithTag(ActivityTestTags.DATE_FIELD).getBoundsInRoot()
+        val time = compose.onNodeWithTag(ActivityTestTags.START_TIME_FIELD).getBoundsInRoot()
+        assertEquals("height $state", date.height.value, time.height.value, 0.5f)
+        assertEquals("top $state", date.top.value, time.top.value, 0.5f)
+    }
 
     /** The tag sits on the field container for a text field, on the box for a clock pair. */
     private fun input(tag: String): SemanticsNodeInteraction = compose.field(tag)
