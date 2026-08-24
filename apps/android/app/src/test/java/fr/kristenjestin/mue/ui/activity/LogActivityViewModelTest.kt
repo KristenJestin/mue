@@ -618,6 +618,95 @@ class LogActivityViewModelTest {
             assertEquals(loadOf(60.0), exercises.single().sets.single().load)
         }
 
+    /** Contract section 5: the editor speaks in values and this is the only thing holding state. */
+    @Test
+    fun `an edit from the strength editor lands on the very draft the form shows`() =
+        logTest { model, _ ->
+            model.onPresetSelected(ActivityPreset.STRENGTH_TRAINING)
+            model.onDetailedLogSelected()
+            model.onStrengthEdit(StrengthEdit.AddExercise(benchPress()))
+            model.onStrengthEdit(StrengthEdit.EditSet(0, 0, StrengthSetField.REPETITIONS, "8"))
+
+            assertEquals(1, model.uiState.value.exerciseCount)
+            assertEquals("8", model.draft.value.exercises.single().sets.single().reps)
+        }
+
+    /**
+     * The session trio of the strength screen writes the fields the log form's own inputs write,
+     * so the two views cannot drift apart.
+     */
+    @Test
+    fun `the session duration, effort and energy are one value on both screens`() =
+        logTest { model, _ ->
+            model.onPresetSelected(ActivityPreset.STRENGTH_TRAINING)
+            model.onStrengthEdit(StrengthEdit.SetDurationMinutes("45"))
+            model.onStrengthEdit(StrengthEdit.SetSessionEffort(7))
+            model.onStrengthEdit(StrengthEdit.SetEstimatedEnergy("320"))
+
+            val state = model.uiState.value
+            assertEquals("45", state.minutes)
+            assertEquals(7, state.perceivedEffort)
+            assertEquals("320", model.input(MetricKind.ESTIMATED_ENERGY))
+        }
+
+    /**
+     * PRD 9.2: the picker mints a definition for a name it does not know, and nothing writes it.
+     * The save path resolves it against the catalogue, or the foreign key would have nothing to
+     * point at.
+     */
+    @Test
+    fun `an exercise the catalogue has never seen is created before the session references it`() =
+        logTest(savedState = handleWith(draftWithACustomExercise())) { model, repository ->
+            model.save()
+
+            val definition = repository.saved.single().exercises.single().definition
+            assertEquals("Zercher squat", definition.name)
+            assertEquals("definition-zercher squat", definition.id.value)
+        }
+
+    /** PRD 11.4: a re-opened session must not quote itself back as its own last performance. */
+    @Test
+    fun `the last performance of a drafted exercise leaves the edited session out`() =
+        logTest(detail = detailWithExercises(1)) { model, repository ->
+            model.start(EDITED)
+
+            assertEquals(EDITED, repository.performanceExclusions.single())
+        }
+
+    /** What `Add exercise` lists comes from the catalogue, not from the draft (PRD 9.2). */
+    @Test
+    fun `the exercise catalogue reaches the strength editor`() = logTest { model, _ ->
+        assertEquals(
+            listOf("Bench press", "Squat"),
+            model.catalogue.value.map { it.name },
+        )
+    }
+
+    // endregion
+
+    // region PRD 9.1 — the quick log's equipment
+
+    @Test
+    fun `the quick strength log collects equipment too`() = logTest { model, repository ->
+        model.onPresetSelected(ActivityPreset.STRENGTH_TRAINING)
+        assertTrue(model.uiState.value.showsEquipment)
+
+        model.onOpenEquipmentPicker()
+        model.onCatalogEntrySelected(EquipmentType.BARBELL.id)
+        model.onMinutesChange("45")
+        model.save()
+
+        assertEquals(
+            listOf(EquipmentType.BARBELL),
+            repository.saved.single().equipment.map { it.equipmentType },
+        )
+    }
+
+    @Test
+    fun `a preset with a machine of its own asks for no equipment`() = logTest { model, _ ->
+        assertFalse(model.uiState.value.showsEquipment)
+    }
+
     // endregion
 
     // region PRD 7 — editing an existing session
@@ -746,7 +835,7 @@ class LogActivityViewModelTest {
     @Test
     fun `a half-typed draft comes back after a process death`() = runTest {
         val handle = SavedStateHandle()
-        val repository = FakeActivityRepository()
+        val repository = FakeLogActivityRepository()
         val first = viewModel(repository, handle)
         collect(first)
         first.start(null)
@@ -772,7 +861,7 @@ class LogActivityViewModelTest {
     @Test
     fun `an edited session comes back as an edit after a process death`() = runTest {
         val handle = SavedStateHandle()
-        val repository = FakeActivityRepository(detail = treadmillDetail())
+        val repository = FakeLogActivityRepository(detail = treadmillDetail())
         val first = viewModel(repository, handle)
         collect(first)
         first.start(EDITED)
@@ -797,12 +886,18 @@ class LogActivityViewModelTest {
 
     private fun LogActivityViewModel.input(kind: MetricKind): String = metric(kind).input
 
+    /**
+     * Every flow the screens read. All three are `WhileSubscribed`, so nothing behind them runs
+     * until something is collecting — including the queries the strength editor's two feeds make.
+     */
     private fun TestScope.collect(model: LogActivityViewModel) {
         backgroundScope.launch { model.uiState.collect {} }
+        backgroundScope.launch { model.catalogue.collect {} }
+        backgroundScope.launch { model.lastPerformances.collect {} }
     }
 
     private fun viewModel(
-        repository: FakeActivityRepository,
+        repository: FakeLogActivityRepository,
         savedState: SavedStateHandle,
     ): LogActivityViewModel = LogActivityViewModel(
         activities = repository,
@@ -816,9 +911,9 @@ class LogActivityViewModelTest {
     private fun logTest(
         detail: ActivitySessionDetail? = null,
         savedState: SavedStateHandle = SavedStateHandle(),
-        body: suspend TestScope.(LogActivityViewModel, FakeActivityRepository) -> Unit,
+        body: suspend TestScope.(LogActivityViewModel, FakeLogActivityRepository) -> Unit,
     ) = runTest {
-        val repository = FakeActivityRepository(detail = detail)
+        val repository = FakeLogActivityRepository(detail = detail)
         val model = viewModel(repository, savedState)
         collect(model)
         advanceUntilIdle()
@@ -870,6 +965,28 @@ private fun draftWithOneValidSet(plusEmptyExercise: Boolean = false): ActivityDr
 
 private fun draftWithOneEmptySet(): ActivityDraft =
     strengthDraft(listOf(SetDraft()), plusEmptyExercise = false)
+
+/** What the picker leaves behind for a name nobody has stored yet (PRD 9.2). */
+private fun draftWithACustomExercise(): ActivityDraft = ActivityDraft(
+    presetId = ActivityPreset.STRENGTH_TRAINING.id,
+    minutes = "45",
+    detailed = true,
+    exercises = listOf(
+        ExerciseDraft(
+            definitionId = "never-written-down",
+            name = "Zercher squat",
+            trackingModeId = TrackingMode.WEIGHT_AND_REPS.id,
+            isCustom = true,
+            sets = listOf(SetDraft(reps = "5", loadKg = "80")),
+        ),
+    ),
+)
+
+private fun benchPress(): ExerciseDefinition = ExerciseDefinition(
+    id = ExerciseDefinitionId("definition-bench"),
+    name = "Bench press",
+    trackingMode = TrackingMode.WEIGHT_AND_REPS,
+)
 
 private fun treadmillDetail(): ActivitySessionDetail = ActivitySessionDetail(
     session = ActivitySession(
@@ -932,12 +1049,15 @@ private fun detailWithExercises(count: Int): ActivitySessionDetail = ActivitySes
 
 // region doubles
 
-private class FakeActivityRepository(
+private class FakeLogActivityRepository(
     private val detail: ActivitySessionDetail? = null,
 ) : ActivityRepository {
 
     val saved = mutableListOf<ActivitySessionDetail>()
     val deleted = mutableListOf<ActivityId>()
+
+    /** Which session each last-performance lookup was told to skip (PRD 11.4). */
+    val performanceExclusions = mutableListOf<ActivityId?>()
     var failSave: Boolean = false
 
     override fun observeRecentSummaries(limit: Int): Flow<List<ActivitySummary>> =
@@ -965,7 +1085,10 @@ private class FakeActivityRepository(
     override suspend fun findLastPerformance(
         exercise: ExerciseDefinitionId,
         excludingSession: ActivityId?,
-    ): LastPerformance? = null
+    ): LastPerformance? {
+        performanceExclusions += excludingSession
+        return null
+    }
 }
 
 /** Behaves like the Room catalogue: a known id resolves, a name folds into one definition. */

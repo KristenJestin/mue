@@ -33,6 +33,9 @@ import org.junit.Test
 
 private const val WAIT_MILLIS = 10_000L
 
+/** As many equipment rows as the real catalogue has, which is what pushed the notice away. */
+private const val CATALOGUE_ROWS = 14
+
 /**
  * Compose coverage of PRD FR-ACTIVITY-004 to 011.
  *
@@ -233,6 +236,80 @@ class LogActivityScreenTest {
         compose.onNodeWithText(LogActivityMessages.TRY_AGAIN).performClick()
 
         assertTrue(retried == 1)
+    }
+
+    /** PRD 9.1: the quick strength log records equipment, and only the builder used to. */
+    @Test
+    fun theQuickStrengthLogOffersEquipment() {
+        realScreen()
+
+        compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.STRENGTH_TRAINING.id))
+            .performClick()
+
+        compose.onNodeWithTag(ActivityTestTags.EQUIPMENT_PICKER)
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText(LogActivityMessages.CHOOSE_EQUIPMENT).assertIsDisplayed()
+    }
+
+    /**
+     * The seam of the build contract's section 5, driven end to end: both screens read and write
+     * one draft through the adapter, so a duration typed on the form is the editor's duration.
+     */
+    @Test
+    fun theStrengthEditorEditsTheDraftTheFormIsShowing() {
+        val editorOpen = mutableStateOf(false)
+        compose.setContent {
+            MueTheme {
+                val model = logActivityViewModel()
+                if (editorOpen.value) {
+                    StrengthSessionScreen(
+                        onBack = { editorOpen.value = false },
+                        onSaved = {},
+                        modifier = Modifier.fillMaxSize(),
+                        state = rememberSharedStrengthSessionState(model),
+                    )
+                } else {
+                    LogActivityScreen(
+                        sessionId = null,
+                        onBack = {},
+                        onOpenStrengthSession = { editorOpen.value = true },
+                        onSaved = {},
+                        onDeleted = {},
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+
+        input(ActivityTestTags.DURATION_MINUTES_FIELD).performTextInput("45")
+        compose.onNodeWithTag(ActivityTestTags.preset(ActivityPreset.STRENGTH_TRAINING.id))
+            .performClick()
+        compose.onNodeWithTag(ActivityTestTags.DETAILED_LOG).performScrollTo().performClick()
+
+        compose.waitUntil(WAIT_MILLIS) { editorOpen.value }
+        compose.onNodeWithText(STRENGTH_SCREEN_TITLE).assertIsDisplayed()
+        input(ActivityTestTags.DURATION_MINUTES_FIELD).assertTextContains("45")
+    }
+
+    /** A refusal nobody can see is a refusal nobody understands (PRD FR-ACTIVITY-008). */
+    @Test
+    fun aRefusedDuplicateIsExplainedWhereTheListIs() {
+        content(
+            state = LogActivityUiState(
+                preset = ActivityPreset.OTHER,
+                picker = CatalogPickerState(
+                    target = CatalogTarget.EQUIPMENT,
+                    results = List(CATALOGUE_ROWS) { index ->
+                        CatalogEntry("id-$index", "Equipment $index", "Meta $index")
+                    },
+                    notice = LogActivityMessages.ALREADY_ADDED,
+                ),
+            ),
+            actions = LogActivityActions(),
+        )
+
+        compose.onNodeWithText(LogActivityMessages.ALREADY_ADDED).assertIsDisplayed()
     }
 
     @Test
