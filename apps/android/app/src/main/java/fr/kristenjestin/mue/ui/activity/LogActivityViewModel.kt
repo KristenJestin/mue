@@ -247,18 +247,14 @@ class LogActivityViewModel(
         updateDraft { it.copy(startedOn = date.toString()) }
     }
 
-    fun onStartHoursChange(raw: String) = onStartTimeChange(digits(raw, MAX_CLOCK_DIGITS), null)
+    fun onOpenTimePicker() = transient.update { it.copy(timePickerVisible = true) }
 
-    fun onStartMinutesChange(raw: String) = onStartTimeChange(null, digits(raw, MAX_CLOCK_DIGITS))
+    fun onDismissTimePicker() = transient.update { it.copy(timePickerVisible = false) }
 
-    private fun onStartTimeChange(hours: String?, minutes: String?) {
-        val (currentHours, currentMinutes) = LogActivityFormat.splitClock(_draft.value.startedAtTime)
-        val joined = LogActivityFormat.joinClock(
-            hours ?: currentHours,
-            minutes ?: currentMinutes,
-        )
-        clear { it.copy(startTimeError = null) }
-        updateDraft { it.copy(startedAtTime = joined.ifEmpty { null }) }
+    /** PRD 8.2: null clears the time and stays distinct from midnight, which is a real 00:00. */
+    fun onStartTimeSelected(time: LocalTime?) {
+        clear { it.copy(timePickerVisible = false, startTimeError = null) }
+        updateDraft { it.copy(startedAtTime = time?.format(LogActivityFormat.TIME)) }
     }
 
     fun onHoursChange(raw: String) {
@@ -618,18 +614,18 @@ class LogActivityViewModel(
         )
     }
 
-    /** The optional start time of PRD 8.2; blank stays distinct from midnight. */
-    private fun validateStartTime(raw: String?): Validated<LocalTime?> {
-        val (hours, minutes) = LogActivityFormat.splitClock(raw)
-        if (hours.isBlank() && minutes.isBlank()) return Validated.Valid(null)
-        val typedHours = hours.ifBlank { "0" }.toIntOrNull()
-        val typedMinutes = minutes.ifBlank { "0" }.toIntOrNull()
-        if (typedHours == null || typedMinutes == null ||
-            typedHours !in 0..23 || typedMinutes !in 0..59
-        ) {
-            return Validated.Invalid(LogActivityMessages.START_TIME_ERROR)
-        }
-        return Validated.Valid(LocalTime.of(typedHours, typedMinutes))
+    /**
+     * The optional start time of PRD 8.2; blank stays distinct from midnight.
+     *
+     * The picker can only produce a real minute of the day, so this is a guard rather than a
+     * rule the form exercises: the draft crosses `SavedStateHandle` as text, and a string this
+     * app did not write is refused here rather than silently dropped.
+     */
+    private fun validateStartTime(raw: String?): Validated<LocalTime?> = when {
+        raw.isNullOrBlank() -> Validated.Valid(null)
+        else -> LogActivityFormat.timeOrNull(raw)
+            ?.let { Validated.Valid(it) }
+            ?: Validated.Invalid(LogActivityMessages.START_TIME_ERROR)
     }
 
     private fun movementOf(draft: ActivityDraft): Movement? =
@@ -716,15 +712,13 @@ class LogActivityViewModel(
     ): LogActivityUiState {
         val preset = draft.preset
         val presetDraft = draft.presetDraft()
-        val (startHours, startMinutes) = LogActivityFormat.splitClock(draft.startedAtTime)
         return LogActivityUiState(
             isEditing = draft.editingSessionId != null,
             isLoading = flags.isLoading,
             preset = preset,
             today = today(),
             date = draft.startedOn.toLocalDateOrNull() ?: today(),
-            startHours = startHours,
-            startMinutes = startMinutes,
+            startTime = LogActivityFormat.timeOrNull(draft.startedAtTime),
             hours = draft.hours,
             minutes = draft.minutes,
             perceivedEffort = draft.perceivedEffort,
@@ -755,6 +749,7 @@ class LogActivityViewModel(
             saveError = flags.saveError,
             isSaving = flags.isSaving,
             datePickerVisible = flags.datePickerVisible,
+            timePickerVisible = flags.timePickerVisible,
             picker = flags.picker?.let { refresh(it, draft) },
             deleteConfirmationVisible = flags.deleteConfirmationVisible,
             quickLogConfirmationVisible = flags.quickLogConfirmationVisible,
@@ -912,6 +907,7 @@ class LogActivityViewModel(
         val formError: String? = null,
         val saveError: String? = null,
         val datePickerVisible: Boolean = false,
+        val timePickerVisible: Boolean = false,
         val picker: CatalogPickerState? = null,
         val deleteConfirmationVisible: Boolean = false,
         val quickLogConfirmationVisible: Boolean = false,

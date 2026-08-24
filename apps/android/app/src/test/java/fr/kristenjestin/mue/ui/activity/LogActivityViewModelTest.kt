@@ -85,8 +85,7 @@ class LogActivityViewModelTest {
         model.onMinutesChange("5")
         model.onEffortChange(7)
         model.onNotesChange("Felt good")
-        model.onStartHoursChange("18")
-        model.onStartMinutesChange("30")
+        model.onStartTimeSelected(LocalTime.of(18, 30))
 
         model.onPresetSelected(ActivityPreset.RUN)
 
@@ -95,8 +94,7 @@ class LogActivityViewModelTest {
         assertEquals("5", state.minutes)
         assertEquals(7, state.perceivedEffort)
         assertEquals("Felt good", state.notes)
-        assertEquals("18", state.startHours)
-        assertEquals("30", state.startMinutes)
+        assertEquals(LocalTime.of(18, 30), state.startTime)
     }
 
     @Test
@@ -189,8 +187,7 @@ class LogActivityViewModelTest {
     fun `an hour and a start time reach the session`() = logTest { model, repository ->
         model.onHoursChange("1")
         model.onMinutesChange("5")
-        model.onStartHoursChange("18")
-        model.onStartMinutesChange("30")
+        model.onStartTimeSelected(LocalTime.of(18, 30))
         model.save()
 
         val session = repository.saved.single().session
@@ -295,11 +292,17 @@ class LogActivityViewModelTest {
         assertTrue(repository.saved.isEmpty())
     }
 
+    /**
+     * The picker cannot produce an impossible time, but the draft crosses `SavedStateHandle` as
+     * text: a string this app did not write is refused rather than silently dropped, and the
+     * field says so instead of standing there empty and saving something else.
+     */
     @Test
-    fun `an impossible start time refuses the save with its message`() =
-        logTest { model, repository ->
-            model.onMinutesChange("30")
-            model.onStartHoursChange("25")
+    fun `a start time the app did not write refuses the save with its message`() =
+        logTest(savedState = handleWith(ActivityDraft(minutes = "30", startedAtTime = "25:61"))) {
+            model, repository ->
+            assertNull(model.uiState.value.startTime)
+
             model.save()
 
             assertEquals(
@@ -308,6 +311,38 @@ class LogActivityViewModelTest {
             )
             assertTrue(repository.saved.isEmpty())
         }
+
+    /** PRD 8.2: `Clear` takes the time back off, and leaves no midnight behind. */
+    @Test
+    fun `clearing the start time is not the same as picking midnight`() =
+        logTest { model, repository ->
+            model.onMinutesChange("30")
+            model.onStartTimeSelected(LocalTime.MIDNIGHT)
+            model.save()
+            assertEquals(LocalTime.MIDNIGHT, repository.saved.single().session.startedAtTime)
+
+            model.onStartTimeSelected(null)
+            assertNull(model.uiState.value.startTime)
+            model.save()
+
+            assertNull(repository.saved.last().session.startedAtTime)
+        }
+
+    @Test
+    fun `the start time panel opens and closes on its own`() = logTest { model, _ ->
+        assertFalse(model.uiState.value.timePickerVisible)
+
+        model.onOpenTimePicker()
+        assertTrue(model.uiState.value.timePickerVisible)
+
+        model.onDismissTimePicker()
+        assertFalse(model.uiState.value.timePickerVisible)
+
+        model.onOpenTimePicker()
+        model.onStartTimeSelected(LocalTime.of(7, 5))
+        assertFalse(model.uiState.value.timePickerVisible)
+        assertEquals(LocalTime.of(7, 5), model.uiState.value.startTime)
+    }
 
     @Test
     fun `the builder needs an activity before anything is written`() =
@@ -807,8 +842,7 @@ class LogActivityViewModelTest {
             assertEquals(ActivityPreset.TREADMILL_WALK, state.preset)
             assertEquals("1", state.hours)
             assertEquals("5", state.minutes)
-            assertEquals("18", state.startHours)
-            assertEquals("30", state.startMinutes)
+            assertEquals(LocalTime.of(18, 30), state.startTime)
             assertEquals(7, state.perceivedEffort)
             assertEquals("Felt good", state.notes)
             assertEquals("4.2", model.input(MetricKind.DISTANCE))

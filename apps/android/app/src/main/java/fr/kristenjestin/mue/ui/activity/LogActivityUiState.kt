@@ -10,6 +10,7 @@ import fr.kristenjestin.mue.domain.model.MetricSource
 import fr.kristenjestin.mue.domain.model.Movement
 import java.text.NumberFormat
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
@@ -28,9 +29,8 @@ data class LogActivityUiState(
     val preset: ActivityPreset = ActivityPreset.DEFAULT,
     val today: LocalDate = LocalDate.now(),
     val date: LocalDate = LocalDate.now(),
-    /** The optional start time, in the two boxes it is typed in; both blank means no time. */
-    val startHours: String = "",
-    val startMinutes: String = "",
+    /** PRD 8.2: the optional start time. Null is no time at all, and is not midnight. */
+    val startTime: LocalTime? = null,
     val hours: String = "",
     val minutes: String = "",
     val perceivedEffort: Int? = null,
@@ -56,6 +56,7 @@ data class LogActivityUiState(
     val saveError: String? = null,
     val isSaving: Boolean = false,
     val datePickerVisible: Boolean = false,
+    val timePickerVisible: Boolean = false,
     val picker: CatalogPickerState? = null,
     val deleteConfirmationVisible: Boolean = false,
     val quickLogConfirmationVisible: Boolean = false,
@@ -156,6 +157,21 @@ object LogActivityMessages {
     const val DATE_LABEL: String = "Date"
     const val CHANGE_DATE: String = "Change"
     const val START_TIME_LABEL: String = "Start time · optional"
+
+    /** What the start-time field reads before one is picked; never a plausible `00:00`. */
+    const val NO_START_TIME: String = "Not set"
+    const val CHANGE_START_TIME: String = "Change"
+
+    const val DATE_SHEET_TITLE: String = "Activity date"
+    const val TIME_SHEET_TITLE: String = "Start time"
+    const val CLOSE_DATE_SHEET: String = "Close the date picker"
+    const val CLOSE_TIME_SHEET: String = "Close the start time picker"
+    const val USE_THIS_DATE: String = "Use this date"
+    const val USE_THIS_TIME: String = "Use this time"
+
+    /** PRD 8.2 keeps the start time optional, so the sheet has to be able to take it back off. */
+    const val CLEAR_START_TIME: String = "Clear"
+
     const val DURATION_LABEL: String = "Duration"
     const val HOURS_SUFFIX: String = "h"
     const val MINUTES_SUFFIX: String = "min"
@@ -255,6 +271,18 @@ object LogActivityFormat {
 
     fun date(date: LocalDate, locale: Locale = Locale.getDefault()): String =
         date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(locale))
+
+    /**
+     * The draft keeps the start time as the `HH:mm` PRD 16.3 stores, so a half-written draft
+     * survives a process death as text. Anything the app did not write reads as no time.
+     */
+    fun timeOrNull(raw: String?): LocalTime? = raw
+        ?.takeIf { it.isNotBlank() }
+        ?.let { runCatching { LocalTime.parse(it, TIME) }.getOrNull() }
+
+    /** What the start-time field shows: the phone's own clock convention, or `Not set`. */
+    fun startTime(time: LocalTime?, locale: Locale = Locale.getDefault()): String =
+        time?.let { ActivityFormat.time(it, locale) } ?: LogActivityMessages.NO_START_TIME
 
     /**
      * A value typed in two boxes is kept joined by a colon, so a preset draft holds one string

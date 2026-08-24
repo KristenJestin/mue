@@ -10,19 +10,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SelectableDates
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
@@ -63,13 +60,13 @@ import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.rememberMueHaptics
+import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import kotlinx.coroutines.delay
 import java.time.LocalDate
-
-private const val MILLIS_PER_DAY = 86_400_000L
+import java.time.LocalTime
 
 /** Three tiles a row, as in the prototype; six presets fit without a hidden gesture (PRD 15). */
 private const val PRESETS_PER_ROW = 3
@@ -112,8 +109,9 @@ fun LogActivityScreen(
             onOpenDatePicker = viewModel::onOpenDatePicker,
             onDismissDatePicker = viewModel::onDismissDatePicker,
             onDateSelected = viewModel::onDateSelected,
-            onStartHoursChange = viewModel::onStartHoursChange,
-            onStartMinutesChange = viewModel::onStartMinutesChange,
+            onOpenTimePicker = viewModel::onOpenTimePicker,
+            onDismissTimePicker = viewModel::onDismissTimePicker,
+            onStartTimeSelected = viewModel::onStartTimeSelected,
             onHoursChange = viewModel::onHoursChange,
             onMinutesChange = viewModel::onMinutesChange,
             onEffortChange = viewModel::onEffortChange,
@@ -161,8 +159,10 @@ internal class LogActivityActions(
     val onOpenDatePicker: () -> Unit = {},
     val onDismissDatePicker: () -> Unit = {},
     val onDateSelected: (LocalDate) -> Unit = {},
-    val onStartHoursChange: (String) -> Unit = {},
-    val onStartMinutesChange: (String) -> Unit = {},
+    val onOpenTimePicker: () -> Unit = {},
+    val onDismissTimePicker: () -> Unit = {},
+    /** Null is `Clear`: PRD 8.2 keeps the start time optional and never makes it midnight. */
+    val onStartTimeSelected: (LocalTime?) -> Unit = {},
     val onHoursChange: (String) -> Unit = {},
     val onMinutesChange: (String) -> Unit = {},
     val onEffortChange: (Int) -> Unit = {},
@@ -280,14 +280,20 @@ internal fun LogActivityContent(
         }
     }
 
-    if (state.datePickerVisible) {
-        ActivityDatePickerDialog(
-            selected = state.date,
-            today = state.today,
-            onSelect = actions.onDateSelected,
-            onDismiss = actions.onDismissDatePicker,
-        )
-    }
+    ActivityDateSheet(
+        visible = state.datePickerVisible,
+        selected = state.date,
+        today = state.today,
+        onDismiss = actions.onDismissDatePicker,
+        onConfirm = actions.onDateSelected,
+    )
+
+    ActivityTimeSheet(
+        visible = state.timePickerVisible,
+        selected = state.startTime,
+        onDismiss = actions.onDismissTimePicker,
+        onConfirm = actions.onStartTimeSelected,
+    )
 
     CatalogPickerSheet(
         picker = state.picker,
@@ -340,42 +346,51 @@ private fun PresetTiles(state: LogActivityUiState, actions: LogActivityActions) 
 /** Date, optional start time and the duration every session must have (PRD FR-ACTIVITY-005). */
 @Composable
 private fun CommonFields(state: LogActivityUiState, actions: LogActivityActions) {
+    val locale = rememberMueLocale()
     Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-            Column(modifier = Modifier.weight(1f)) {
-                MuePickerField(
-                    label = LogActivityMessages.DATE_LABEL,
-                    value = LogActivityFormat.date(state.date),
-                    onClick = actions.onOpenDatePicker,
-                    modifier = Modifier.testTag(ActivityTestTags.DATE_FIELD),
-                    onClickLabel = LogActivityMessages.CHANGE_DATE,
-                )
-                state.dateError?.let { message ->
-                    FieldError(message, Modifier.padding(top = MueTheme.spacing.xxs))
-                }
-            }
-
-            TwoPartNumberField(
-                // No trailing icon: `Start time · optional` needs the whole half-width row, and
-                // the label is what names the field. PRD 14.1's table asks for no clock here.
-                label = LogActivityMessages.START_TIME_LABEL,
-                first = ClockPart(
-                    value = state.startHours,
-                    onValueChange = actions.onStartHoursChange,
-                    suffix = ":",
-                    contentDescription = "Start time hours",
-                    testTag = ActivityTestTags.START_TIME_FIELD,
-                ),
-                second = ClockPart(
-                    value = state.startMinutes,
-                    onValueChange = actions.onStartMinutesChange,
-                    suffix = "",
-                    contentDescription = "Start time minutes",
-                    testTag = "${ActivityTestTags.START_TIME_FIELD}:minutes",
-                ),
-                errorMessage = state.startTimeError,
-                modifier = Modifier.weight(1f),
+        /*
+         * Date and start time are one row and have to read as one control, so the pair is
+         * measured together: `IntrinsicSize.Min` gives the row the taller of the two boxes and
+         * `fillMaxHeight` makes both exactly that, whatever a long date or a short clock would
+         * have asked for on its own. Each box sizing to its own content is what left the two
+         * ending at different heights.
+         */
+        Row(
+            modifier = Modifier.height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
+        ) {
+            MuePickerField(
+                label = LogActivityMessages.DATE_LABEL,
+                value = LogActivityFormat.date(state.date, locale),
+                onClick = actions.onOpenDatePicker,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .testTag(ActivityTestTags.DATE_FIELD),
+                onClickLabel = LogActivityMessages.CHANGE_DATE,
             )
+
+            // The same component as the date beside it, not a pair of number boxes: both open a
+            // panel, so the two read and measure alike. PRD 14.1's table asks for no icon here.
+            MuePickerField(
+                label = LogActivityMessages.START_TIME_LABEL,
+                value = LogActivityFormat.startTime(state.startTime, locale),
+                onClick = actions.onOpenTimePicker,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .testTag(ActivityTestTags.START_TIME_FIELD),
+                onClickLabel = LogActivityMessages.CHANGE_START_TIME,
+            )
+        }
+
+        // Under the row rather than inside either column, so a message on one side cannot make
+        // that side's box taller than the other's.
+        if (state.dateError != null || state.startTimeError != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
+                ScheduleError(state.dateError, Modifier.weight(1f))
+                ScheduleError(state.startTimeError, Modifier.weight(1f))
+            }
         }
 
         TwoPartNumberField(
@@ -463,8 +478,13 @@ private fun ColumnScope.SaveArea(state: LogActivityUiState, actions: LogActivity
     }
 }
 
+/** One half of the schedule row's message line; the empty half keeps the columns aligned. */
 @Composable
-private fun FieldError(message: String, modifier: Modifier = Modifier) {
+private fun ScheduleError(message: String?, modifier: Modifier) {
+    if (message == null) {
+        Spacer(modifier)
+        return
+    }
     MueText(
         text = message,
         style = MueTheme.typography.caption,
@@ -476,57 +496,6 @@ private fun FieldError(message: String, modifier: Modifier = Modifier) {
 }
 
 // endregion
-
-/**
- * The date picker, the base PRD's first documented Material exception: it is a calendar with a
- * year browser, keyboard entry and full accessibility, and PRD 12.1 already admits it.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ActivityDatePickerDialog(
-    selected: LocalDate,
-    today: LocalDate,
-    onSelect: (LocalDate) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    // PRD FR-ACTIVITY-005: a future date is not refused, it is never offered.
-    val selectableDates = remember(today) {
-        object : SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                utcTimeMillis.toLocalDate() <= today
-
-            override fun isSelectableYear(year: Int): Boolean = year <= today.year
-        }
-    }
-    val pickerState = rememberDatePickerState(
-        initialSelectedDateMillis = selected.toEpochDay() * MILLIS_PER_DAY,
-        selectableDates = selectableDates,
-    )
-
-    DatePickerDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val millis = pickerState.selectedDateMillis
-                    if (millis == null) onDismiss() else onSelect(millis.toLocalDate())
-                },
-            ) { MueText("OK", MueTheme.typography.button, color = MueTheme.colors.accent) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                MueText(CANCEL, MueTheme.typography.button, color = MueTheme.colors.textSecondary)
-            }
-        },
-        colors = DatePickerDefaults.colors(containerColor = MueTheme.colors.canvasElevated),
-    ) {
-        DatePicker(state = pickerState, showModeToggle = false)
-    }
-}
-
-/** The picker speaks UTC milliseconds; the app only ever deals in local calendar days. */
-private fun Long.toLocalDate(): LocalDate =
-    LocalDate.ofEpochDay(Math.floorDiv(this, MILLIS_PER_DAY))
 
 /**
  * PRD 14.2: the old block leaves in a short fade, the new one arrives with a slight vertical
