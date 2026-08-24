@@ -12,34 +12,72 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 
+/** Mirrors `VibrationEffect.DEFAULT_AMPLITUDE`, kept here so this file stays pure. */
+const val DEFAULT_AMPLITUDE: Int = -1
+
 /**
- * The two sensations Mue produces, described without reference to any Android API so the
- * choice of one over the other stays testable on the JVM.
- *
- * The fallbacks are what a motor with no predefined effects is asked for instead. They are
- * short on purpose: the tick fires every half kilogram of a drag (PRD FR-ENTRY-002) and has
- * to read as a graduation passing under the finger, not as a notification.
+ * What Mue asks the motor for, described without reference to any Android API so the choice
+ * stays testable on the JVM.
  */
-enum class MueHaptic(val fallbackDurationMillis: Long, val fallbackAmplitude: Int) {
+sealed interface MueMotorRequest {
+
+    /** One continuous pulse. */
+    data class Pulse(val durationMillis: Long, val amplitude: Int) : MueMotorRequest
+
+    /** Alternating off and on durations, starting with an off step, played once. */
+    data class Pattern(val timingsMillis: List<Long>, val amplitude: Int) : MueMotorRequest
+}
+
+/**
+ * The two sensations Mue produces.
+ *
+ * Each carries two fallbacks because the phones that reach this code have two different kinds
+ * of actuator, and what reads as a light tick on one is nothing at all on the other.
+ *
+ * A motor reporting `AMPLITUDE_CONTROL` is a linear resonant actuator: it reaches its target
+ * within a few milliseconds, so a brief pulse at a chosen strength is enough, and strength is
+ * what separates the tick from the save.
+ *
+ * A motor reporting none is an eccentric rotating mass, which has to physically spin a weight
+ * up before anything reaches the hand. Below roughly twenty milliseconds it never gets there.
+ * The Galaxy A71 is one of these — `mCapabilities=[]`, no resonant frequency — and its own
+ * system feedback runs at 45 ms per touch. Amplitude is not a lever on such a motor: the HAL
+ * ignores it. Time is, so the two sensations are separated by shape instead of strength.
+ */
+enum class MueHaptic(
+    private val onAmplitudeControl: MueMotorRequest,
+    private val onPlainMotor: MueMotorRequest,
+) {
 
     /** Every 0.5 kg of scale travel. */
-    Tick(fallbackDurationMillis = 10L, fallbackAmplitude = 70),
-
-    /** One measurement saved (PRD FR-ENTRY-006). */
-    Confirm(fallbackDurationMillis = 26L, fallbackAmplitude = 180);
+    Tick(
+        onAmplitudeControl = MueMotorRequest.Pulse(durationMillis = 10L, amplitude = 70),
+        onPlainMotor = MueMotorRequest.Pulse(
+            durationMillis = 22L,
+            amplitude = DEFAULT_AMPLITUDE,
+        ),
+    ),
 
     /**
-     * Amplitude to ask the motor for. A motor with no amplitude control is given
-     * `VibrationEffect.DEFAULT_AMPLITUDE`, which lets the system pick its own strength rather
-     * than having the request silently rounded up to full power.
+     * One measurement saved (PRD FR-ENTRY-006). On a plain motor this is two beats — a short
+     * flare and a longer settle — because a single pulse there can only differ from the tick
+     * by a duration the hand does not measure.
      */
-    fun amplitude(hasAmplitudeControl: Boolean): Int =
-        if (hasAmplitudeControl) fallbackAmplitude else DEFAULT_AMPLITUDE
+    Confirm(
+        onAmplitudeControl = MueMotorRequest.Pulse(durationMillis = 26L, amplitude = 180),
+        onPlainMotor = MueMotorRequest.Pattern(
+            timingsMillis = listOf(0L, 35L, 85L, 65L),
+            amplitude = DEFAULT_AMPLITUDE,
+        ),
+    );
 
-    companion object {
-        /** Mirrors `VibrationEffect.DEFAULT_AMPLITUDE`, kept here so this file stays pure. */
-        const val DEFAULT_AMPLITUDE: Int = -1
-    }
+    /**
+     * `VibrationEffect.DEFAULT_AMPLITUDE` is what a motor without amplitude control is asked
+     * for, rather than a number: a number there is rounded up to full power, which is the one
+     * strength Mue never wants.
+     */
+    fun requestFor(hasAmplitudeControl: Boolean): MueMotorRequest =
+        if (hasAmplitudeControl) onAmplitudeControl else onPlainMotor
 }
 
 /**
@@ -120,11 +158,19 @@ class MueHaptics(vibrator: Vibrator?, val enabled: Boolean) {
                     return VibrationEffect.createPredefined(predefined)
                 }
             }
-            return VibrationEffect.createOneShot(
-                haptic.fallbackDurationMillis,
-                haptic.amplitude(hasAmplitudeControl()),
-            )
+            return when (val request = haptic.requestFor(hasAmplitudeControl())) {
+                is MueMotorRequest.Pulse ->
+                    VibrationEffect.createOneShot(request.durationMillis, request.amplitude)
+
+                is MueMotorRequest.Pattern ->
+                    VibrationEffect.createWaveform(
+                        request.timingsMillis.toLongArray(),
+                        NO_REPEAT,
+                    )
+            }
         }
+
+        const val NO_REPEAT = -1
     }
 }
 
