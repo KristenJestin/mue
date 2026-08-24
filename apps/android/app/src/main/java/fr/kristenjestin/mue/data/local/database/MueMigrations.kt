@@ -39,5 +39,108 @@ internal object MueMigrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2)
+    /**
+     * 2 → 3: the six tables of the Activities module (PRD 16.2).
+     *
+     * Purely additive — `measurements` is not read, not written and not mentioned — so a phone
+     * that has been logging weights since version 1 arrives here with its history byte for byte.
+     *
+     * The statements are the ones Room exports for version 3, kept identical on purpose: a
+     * migrated file and a freshly created one have to be the same database, and
+     * `MigrationTestHelper` compares them column by column, index by index.
+     *
+     * The seed at the end is what makes the exercise catalogue exist on a phone that already has
+     * Mue. `Callback.onCreate` fires on a fresh install only, so without this line every
+     * upgrading device would open the exercise picker on nothing.
+     */
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `activity_sessions` " +
+                    "(`id` TEXT NOT NULL, `movement` TEXT NOT NULL, `custom_movement_name` TEXT, " +
+                    "`environment` TEXT NOT NULL, `started_on` TEXT NOT NULL, `started_at_time` TEXT, " +
+                    "`duration_seconds` INTEGER NOT NULL, `perceived_effort` INTEGER, `notes` TEXT, " +
+                    "`source` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_activity_sessions_started_on` " +
+                    "ON `activity_sessions` (`started_on`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `exercise_definitions` " +
+                    "(`id` TEXT NOT NULL, `name` TEXT NOT NULL, `name_folded` TEXT NOT NULL, " +
+                    "`tracking_mode` TEXT NOT NULL, `equipment` TEXT, `is_custom` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_exercise_definitions_name_folded` " +
+                    "ON `exercise_definitions` (`name_folded`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `activity_metrics` " +
+                    "(`session_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `value` INTEGER NOT NULL, " +
+                    "`source` TEXT NOT NULL, PRIMARY KEY(`session_id`, `kind`), " +
+                    "FOREIGN KEY(`session_id`) REFERENCES `activity_sessions`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `session_equipment` " +
+                    "(`id` TEXT NOT NULL, `session_id` TEXT NOT NULL, `equipment_type` TEXT NOT NULL, " +
+                    "`custom_name` TEXT, `custom_name_folded` TEXT NOT NULL DEFAULT '', " +
+                    "`position` INTEGER NOT NULL, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`session_id`) REFERENCES `activity_sessions`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_session_equipment_session_id` " +
+                    "ON `session_equipment` (`session_id`)"
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                    "`index_session_equipment_session_id_equipment_type_custom_name_folded` " +
+                    "ON `session_equipment` (`session_id`, `equipment_type`, `custom_name_folded`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `strength_exercises` " +
+                    "(`id` TEXT NOT NULL, `session_id` TEXT NOT NULL, " +
+                    "`exercise_definition_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `notes` TEXT, " +
+                    "PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`session_id`) REFERENCES `activity_sessions`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                    "FOREIGN KEY(`exercise_definition_id`) REFERENCES `exercise_definitions`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE RESTRICT )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_strength_exercises_session_id` " +
+                    "ON `strength_exercises` (`session_id`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_strength_exercises_exercise_definition_id` " +
+                    "ON `strength_exercises` (`exercise_definition_id`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `strength_sets` " +
+                    "(`id` TEXT NOT NULL, `strength_exercise_id` TEXT NOT NULL, " +
+                    "`position` INTEGER NOT NULL, `set_type` TEXT NOT NULL DEFAULT 'working', " +
+                    "`repetitions` INTEGER, `load_grams` INTEGER, `duration_seconds` INTEGER, " +
+                    "`perceived_effort` INTEGER, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`strength_exercise_id`) REFERENCES `strength_exercises`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_strength_sets_strength_exercise_id` " +
+                    "ON `strength_sets` (`strength_exercise_id`)"
+            )
+
+            ExerciseCatalogSeed.insertInto(db)
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

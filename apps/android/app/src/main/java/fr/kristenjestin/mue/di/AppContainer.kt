@@ -7,7 +7,11 @@ import fr.kristenjestin.mue.data.local.datastore.userPreferencesDataStore
 import fr.kristenjestin.mue.data.local.datastore.userProfileDataStore
 import fr.kristenjestin.mue.data.repository.DataStoreUserPreferencesRepository
 import fr.kristenjestin.mue.data.repository.DataStoreUserProfileRepository
+import fr.kristenjestin.mue.data.repository.RoomActivityRepository
+import fr.kristenjestin.mue.data.repository.RoomExerciseCatalogRepository
 import fr.kristenjestin.mue.data.repository.RoomMeasurementRepository
+import fr.kristenjestin.mue.domain.repository.ActivityRepository
+import fr.kristenjestin.mue.domain.repository.ExerciseCatalogRepository
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
@@ -26,6 +30,14 @@ class AppContainer(private val applicationContext: Context) {
 
     val measurementRepository: MeasurementRepository by lazy {
         RoomMeasurementRepository(database.measurementDao())
+    }
+
+    val activityRepository: ActivityRepository by lazy {
+        RoomActivityRepository(database.activityDao())
+    }
+
+    val exerciseCatalogRepository: ExerciseCatalogRepository by lazy {
+        RoomExerciseCatalogRepository(database.exerciseCatalogDao())
     }
 
     val userProfileRepository: UserProfileRepository by lazy {
