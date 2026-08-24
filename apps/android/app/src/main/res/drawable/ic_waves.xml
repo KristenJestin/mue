@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lucide `waves` (ISC). Stroked 24x24 grid, never filled; tinted by the caller. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M2 12q2.5 2 5 0t5 0 5 0 5 0"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M2 19q2.5 2 5 0t5 0 5 0 5 0"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M2 5q2.5 2 5 0t5 0 5 0 5 0"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+</vector>

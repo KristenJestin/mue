@@ -10,9 +10,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import fr.kristenjestin.mue.domain.model.ActivityEnvironment
 import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.MetricKind
+import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueIcons
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -91,6 +93,35 @@ class MueIconTest {
             val name = ActivityIcons.forEnvironment(environment)
             assertTrue(paintedPixels(context, MueIcons.resource(name)) > 0)
         }
+        Movement.entries.forEach { movement ->
+            val name = ActivityIcons.forMovement(movement)
+            assertTrue("`$movement` draws nothing", paintedPixels(context, MueIcons.resource(name)) > 0)
+        }
+    }
+
+    /**
+     * Every movement is told apart by its glyph.
+     *
+     * PRD 14.1 tabulates the six presets only, so everything reached through the `Other` builder
+     * used to share `shapes` and a mixed history read as one repeated card. `shapes` now belongs
+     * to `Other` alone, and no two movements answer the same vector unless the PRD says so.
+     */
+    @Test
+    fun onlyTheOtherMovementFallsBackOnTheGenericGlyph() {
+        Movement.entries.filterNot { it == Movement.OTHER }.forEach { movement ->
+            assertNotEquals(
+                "`$movement` still has no icon of its own",
+                ActivityIcons.SHAPES,
+                ActivityIcons.forMovement(movement),
+            )
+        }
+        assertEquals(ActivityIcons.SHAPES, ActivityIcons.forMovement(Movement.OTHER))
+
+        // The two walks share `footprints`, but they are one movement; no two movements do.
+        val shared = Movement.entries
+            .groupBy(ActivityIcons::forMovement)
+            .filterValues { it.size > 1 }
+        assertTrue("movements share a glyph: $shared", shared.isEmpty())
     }
 
     private fun paintedPixels(context: Context, @DrawableRes resource: Int): Int {

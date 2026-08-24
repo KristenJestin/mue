@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.model.ActivityDuration
 import fr.kristenjestin.mue.domain.model.ActivityId
-import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.ActivitySummary
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.components.MueIcon
@@ -149,14 +148,13 @@ private fun FactRow(facts: List<String>, modifier: Modifier = Modifier) {
 }
 
 /**
- * The glyph of PRD 14.1, chosen through the preset the card would reopen the session in.
+ * The glyph of PRD 14.1, read straight off the movement.
  *
- * A summary carries no equipment, so `ActivityPreset.of` reads a treadmill walk as an outdoor
- * one — which changes nothing here, since both walks share `footprints` by that very table.
- * Going through the preset keeps one movement-to-icon rule in the module instead of two.
+ * It used to go through `ActivityPreset.of`, which answers `OTHER` for everything the six
+ * presets do not cover — so a swim, a hike and a dance all came back `shapes`. The presets
+ * delegate to the same table, so there is still only one movement-to-icon rule.
  */
-private fun iconOf(movement: Movement): String =
-    ActivityIcons.forPreset(ActivityPreset.of(movement, equipment = emptyList()))
+private fun iconOf(movement: Movement): String = ActivityIcons.forMovement(movement)
 
 // region Previews
 

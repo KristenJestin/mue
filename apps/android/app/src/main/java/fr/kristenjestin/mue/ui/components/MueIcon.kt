@@ -119,6 +119,17 @@ object MueIcons {
         ActivityIcons.SEARCH -> R.drawable.ic_search
         ActivityIcons.SPARKLES -> R.drawable.ic_sparkles
 
+        ActivityIcons.WAVES -> R.drawable.ic_waves
+        ActivityIcons.SAILBOAT -> R.drawable.ic_sailboat
+        ActivityIcons.ORBIT -> R.drawable.ic_orbit
+        ActivityIcons.MOUNTAIN -> R.drawable.ic_mountain
+        ActivityIcons.MOUNTAIN_SNOW -> R.drawable.ic_mountain_snow
+        ActivityIcons.FLOWER -> R.drawable.ic_flower
+        ActivityIcons.MUSIC -> R.drawable.ic_music
+        ActivityIcons.PERSON_STANDING -> R.drawable.ic_person_standing
+        ActivityIcons.MOVE -> R.drawable.ic_move
+        ActivityIcons.VOLLEYBALL -> R.drawable.ic_volleyball
+
         ARROW_LEFT -> R.drawable.ic_arrow_left
         CHEVRON_RIGHT -> R.drawable.ic_chevron_right
         CHEVRON_UP -> R.drawable.ic_chevron_up
@@ -158,6 +169,16 @@ object MueIcons {
         ActivityIcons.COPY_PLUS,
         ActivityIcons.SEARCH,
         ActivityIcons.SPARKLES,
+        ActivityIcons.WAVES,
+        ActivityIcons.SAILBOAT,
+        ActivityIcons.ORBIT,
+        ActivityIcons.MOUNTAIN,
+        ActivityIcons.MOUNTAIN_SNOW,
+        ActivityIcons.FLOWER,
+        ActivityIcons.MUSIC,
+        ActivityIcons.PERSON_STANDING,
+        ActivityIcons.MOVE,
+        ActivityIcons.VOLLEYBALL,
         ARROW_LEFT,
         CHEVRON_RIGHT,
         CHEVRON_UP,
