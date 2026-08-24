@@ -62,8 +62,6 @@ object MueWheelPickerDefaults {
     val RowHeight: Dp = MueWheelPhysics.DP_PER_VALUE.dp
 
     val VisibleRows: Int = MueWheelPhysics.VISIBLE_VALUES
-
-    val Height: Dp = RowHeight * VisibleRows
 }
 
 /** Inset of the centre band from the edges of the wheel, and the radius of its corners. */
@@ -104,7 +102,6 @@ fun MueWheelPicker(
     label: String,
     stateDescriptionOf: (Int) -> String,
     modifier: Modifier = Modifier,
-    formatValue: (Int) -> String = { it.toString() },
     visibleRows: Int = MueWheelPickerDefaults.VisibleRows,
     enabled: Boolean = true,
     onHapticTick: () -> Unit = {},
@@ -206,7 +203,7 @@ fun MueWheelPicker(
                 }
                 if (!enabled) disabled()
             }
-            .wheelRows(state, range, textMeasurer, rowStyle, palette, formatValue),
+            .wheelRows(state, range, textMeasurer, rowStyle, palette),
     )
 }
 
@@ -246,7 +243,6 @@ private fun Modifier.wheelRows(
     textMeasurer: TextMeasurer,
     rowStyle: TextStyle,
     palette: WheelPalette,
-    formatValue: (Int) -> String,
 ): Modifier = drawWithCache {
     val cache = buildWheelCache()
 
@@ -279,7 +275,7 @@ private fun Modifier.wheelRows(
             if (alpha <= 0.01f) continue
 
             val isSelected = row == selected
-            val text = textMeasurer.measure(formatValue(row), rowStyle)
+            val text = textMeasurer.measure(row.toString(), rowStyle)
             drawText(
                 textLayoutResult = text,
                 color = if (isSelected) palette.selected else palette.unselected,
