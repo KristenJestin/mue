@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
@@ -178,8 +180,11 @@ fun MueSetHeaderRow(
  * action ([MueSetListActions]) rather than a second 48 dp column, because two of them push a
  * value column to 56 dp on a 360 dp phone — under the floor a `125.5` needs.
  *
- * [highlighted] is the amber beat PRD 14.2 asks for on a duplicated row. It plays once, on
- * arrival, and not at all when motion is reduced.
+ * [justDuplicated] marks the row `Duplicate last set` has this moment produced, and carries the
+ * two things FR-ACTIVITY-009 and PRD 14.2 ask of that moment: the amber beat, which plays once
+ * on arrival and not at all under reduced motion, and the cursor, which lands on the first
+ * editable value. The focus request is issued here rather than by the caller because only this
+ * composable can know that the requester it holds is attached.
  */
 @Composable
 fun MueSetRow(
@@ -189,7 +194,7 @@ fun MueSetRow(
     deleteIcon: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     emphasised: Boolean = false,
-    highlighted: Boolean = false,
+    justDuplicated: Boolean = false,
     deleteContentDescription: String = "Remove set $number",
 ) {
     val colors = MueTheme.colors
@@ -199,13 +204,20 @@ fun MueSetRow(
     val halo = remember { Animatable(0f) }
     // Hoisted: the effect below is a suspend block and cannot read composition locals.
     val haloSpec = MueMotion.spec<Float>(MueMotion.SetDuplicateHaloMillis, MueMotion.Exit)
-    LaunchedEffect(highlighted, reduceMotion) {
-        if (highlighted && !reduceMotion) {
+    LaunchedEffect(justDuplicated, reduceMotion) {
+        if (justDuplicated && !reduceMotion) {
             halo.snapTo(1f)
             halo.animateTo(0f, haloSpec)
         } else {
             halo.snapTo(0f)
         }
+    }
+
+    val firstField = remember { FocusRequester() }
+    LaunchedEffect(justDuplicated) {
+        // The copy is there to be corrected, so the caret waits in the value most likely to
+        // change rather than making the reader hunt for it (FR-ACTIVITY-009).
+        if (justDuplicated && fields.isNotEmpty()) firstField.requestFocus()
     }
 
     Row(
@@ -230,10 +242,11 @@ fun MueSetRow(
             modifier = Modifier.width(MueSetRowMetrics.NumberColumn),
         )
 
-        fields.forEach { field ->
+        fields.forEachIndexed { index, field ->
             SetValueCell(
                 field = field,
                 setNumber = number,
+                focusRequester = firstField.takeIf { index == 0 },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -323,6 +336,7 @@ private fun SetValueCell(
     field: MueSetField,
     setNumber: Int,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
     val colors = MueTheme.colors
     val shape = MueTheme.shapes.small
@@ -347,6 +361,7 @@ private fun SetValueCell(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = MueTheme.spacing.sm)
+                .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
                 .onFocusChanged { focused = it.isFocused }
                 .semantics {
                     contentDescription = "Set $setNumber, ${field.measure.accessibleName}"
@@ -428,7 +443,7 @@ private fun MueSetRowPreview() {
                         MueSetRow(
                             number = index + 1,
                             emphasised = index == 2,
-                            highlighted = index == 2,
+                            justDuplicated = index == 2,
                             fields = measures.mapIndexed { column, measure ->
                                 MueSetField(
                                     measure = measure,
