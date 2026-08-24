@@ -425,6 +425,21 @@ class StrengthSessionScreenTest {
         assertEquals("15", draft.minutes)
     }
 
+    /**
+     * PRD 12, and the log form's own hint.
+     *
+     * The editor used to draw an unfilled hour as `0`, which reads as a value rather than an
+     * absence — and a screen reader reads it out as one. The two screens edit the same duration,
+     * so they cannot spell an empty one two ways.
+     */
+    @Test
+    fun anUnfilledDurationIsAnAbsenceRatherThanAZero() {
+        setScreen(ActivityDraft(presetId = ActivityPreset.STRENGTH_TRAINING.id, detailed = true))
+
+        composeRule.onAllNodesWithText(EMPTY_NUMBER_HINT).assertCountEquals(3)
+        composeRule.onAllNodesWithText("0").assertCountEquals(0)
+    }
+
     @Test
     fun theSessionEffortStaysOfferedWhateverTheModesBelowIt() {
         setScreen(withOneSquat())

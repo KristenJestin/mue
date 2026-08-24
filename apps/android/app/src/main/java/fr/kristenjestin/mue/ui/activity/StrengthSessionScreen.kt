@@ -88,7 +88,12 @@ internal const val EXERCISE_NOTE_LABEL = "Exercise note"
 internal const val ADD_NOTE_LABEL = "Add a note"
 internal const val TRACKING_MODE_SHEET_TITLE = "How is each set tracked?"
 
-/** PRD 12: a missing optional value is drawn as an absence, never as a zero. */
+/**
+ * PRD 12: a missing value in a set cell is drawn as an absence, never as a zero.
+ *
+ * The session fields above the list use `EMPTY_NUMBER_HINT` instead, because the log form draws
+ * the very same duration and energy and the two views of one draft must not disagree.
+ */
 private const val EMPTY_CELL = "—"
 
 /** Room under the list for the pinned save action, which floats over it. */
@@ -393,7 +398,7 @@ private fun SessionFields(
                 label = "Hours",
                 value = draft.hours,
                 onValueChange = { onEdit(StrengthEdit.SetDurationHours(it)) },
-                placeholder = "0",
+                placeholder = EMPTY_NUMBER_HINT,
                 suffix = "h",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 textStyle = MueTheme.typography.metricMedium,
@@ -405,7 +410,7 @@ private fun SessionFields(
                 label = "Minutes",
                 value = draft.minutes,
                 onValueChange = { onEdit(StrengthEdit.SetDurationMinutes(it)) },
-                placeholder = "0",
+                placeholder = EMPTY_NUMBER_HINT,
                 suffix = "min",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 textStyle = MueTheme.typography.metricMedium,
@@ -420,7 +425,7 @@ private fun SessionFields(
             label = "Estimated energy · optional",
             value = energyInput,
             onValueChange = { onEdit(StrengthEdit.SetEstimatedEnergy(it)) },
-            placeholder = EMPTY_CELL,
+            placeholder = EMPTY_NUMBER_HINT,
             suffix = "kcal",
             errorMessage = energyError,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

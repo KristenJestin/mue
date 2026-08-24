@@ -109,7 +109,7 @@ internal fun ExercisePickerSheet(
     ) {
         MuePickerSectionHeader(
             title = if (typed.isEmpty()) EXERCISE_SECTION_DEFAULT else EXERCISE_SECTION_RESULTS,
-            trailing = "${results.size} exercises",
+            trailing = LogActivityMessages.exerciseCount(results.size),
             modifier = Modifier.padding(top = MueTheme.spacing.md),
         )
         if (results.isEmpty()) {
