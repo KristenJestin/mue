@@ -1,14 +1,23 @@
 package fr.kristenjestin.mue.ui.activity
 
+import fr.kristenjestin.mue.domain.model.ActivityDuration
+import fr.kristenjestin.mue.domain.model.ActivityEnvironment
 import fr.kristenjestin.mue.domain.model.ActivityId
 import fr.kristenjestin.mue.domain.model.ActivitySessionDetail
 import fr.kristenjestin.mue.domain.model.ActivitySummary
 import fr.kristenjestin.mue.domain.model.DateWindow
+import fr.kristenjestin.mue.domain.model.EquipmentType
 import fr.kristenjestin.mue.domain.model.ExerciseDefinitionId
 import fr.kristenjestin.mue.domain.model.LastPerformance
 import fr.kristenjestin.mue.domain.model.Movement
+import fr.kristenjestin.mue.domain.model.SessionEquipment
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
+import fr.kristenjestin.mue.domain.model.TimedActivityDraft
+import fr.kristenjestin.mue.domain.model.TimedDraftId
+import fr.kristenjestin.mue.domain.model.TimedDraftStatus
 import fr.kristenjestin.mue.domain.model.minutesOf
 import fr.kristenjestin.mue.domain.repository.ActivityRepository
+import fr.kristenjestin.mue.ui.timer.FakeTimedActivityRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -253,6 +262,135 @@ class ActivityViewModelTest {
 
     // endregion
 
+    // region the drafts waiting to be reviewed (PRD_ACTIVITY_TIMER FR-TIMER-008)
+
+    @Test
+    fun `no draft means no block`() = activityTest { viewModel ->
+        val state = viewModel.state()
+
+        assertTrue(state.reviewDrafts.isEmpty())
+        assertFalse(state.showReviewDrafts)
+    }
+
+    /** FR-TIMER-008: several may wait at once, most recent first. */
+    @Test
+    fun `the drafts are listed most recent first`() = activityTest(
+        drafts = listOf(
+            draft("2026-08-21", minutes = 30, id = "older"),
+            draft("2026-08-23", minutes = 45, id = "newer"),
+        ),
+    ) { viewModel ->
+        val drafts = viewModel.state().reviewDrafts
+
+        assertEquals(2, drafts.size)
+        assertEquals(listOf("newer", "older"), drafts.map { it.id.value })
+        assertTrue(viewModel.state().showReviewDrafts)
+    }
+
+    /** The block has no ceiling; three is the *screen's* rule, applied where the cards are. */
+    @Test
+    fun `the block carries every draft and caps nothing`() = activityTest(
+        drafts = List(7) { index -> draft("2026-08-2${index % 8}", minutes = 20, id = "d$index") },
+    ) { viewModel ->
+        assertEquals(7, viewModel.state().reviewDrafts.size)
+    }
+
+    /** PRD 16.4 and FR-TIMER-006: the card's words are spelled here, seconds included. */
+    @Test
+    fun `a card names its activity, its day and its measured duration`() = activityTest(
+        drafts = listOf(draft("2026-08-23", minutes = 42, seconds = 18)),
+    ) { viewModel ->
+        val card = viewModel.state().reviewDrafts.single()
+
+        // Composed rather than spelled: the clock reading follows the language, but the minute
+        // it names is the module's rule — `18:32:47` is filed as `18:32` (FR-TIMER-005).
+        val expected = listOf(
+            ActivityFormat.TODAY,
+            ActivityFormat.time(LocalTime.of(18, 32), Locale.US),
+            "42 min 18 sec",
+        ).joinToString(ActivityFormat.FACT_SEPARATOR)
+
+        assertEquals("Treadmill walk", card.label)
+        assertEquals(expected, card.meta)
+        assertEquals(ActivityIcons.FOOTPRINTS, card.iconName)
+    }
+
+    /** PRD 11.1 again: a free name wins over the movement, on a draft as on a session. */
+    @Test
+    fun `a card keeps a custom name`() = activityTest(
+        drafts = listOf(
+            draft(
+                "2026-08-23",
+                minutes = 50,
+                movement = Movement.OTHER,
+                customMovementName = "Padel",
+                equipment = emptyList(),
+            ),
+        ),
+    ) { viewModel ->
+        assertEquals("Padel", viewModel.state().reviewDrafts.single().label)
+    }
+
+    /**
+     * FR-TIMER-008 forbids hiding a measured duration, and a first timer left unfiled has no
+     * session behind it — so the empty history and the review block are true at once.
+     */
+    @Test
+    fun `a draft survives an empty history`() = activityTest(
+        drafts = listOf(draft("2026-08-23", minutes = 12)),
+    ) { viewModel ->
+        val state = viewModel.state()
+
+        assertTrue(state.showEmptyHistory)
+        assertTrue(state.showReviewDrafts)
+    }
+
+    // endregion
+
+    // region `Start again` (PRD_ACTIVITY_TIMER 6.1)
+
+    @Test
+    fun `start again is absent until something has been timed`() = activityTest { viewModel ->
+        val state = viewModel.state()
+
+        assertNull(state.startAgain)
+        assertFalse(state.showStartAgain)
+    }
+
+    /** Contract decision 4: the whole request travels, not just the movement. */
+    @Test
+    fun `start again carries the whole last timed request`() = activityTest(
+        lastTimed = StartTimerRequest(
+            movement = Movement.WALKING,
+            environment = ActivityEnvironment.INDOOR,
+            equipment = listOf(SessionEquipment(EquipmentType.TREADMILL)),
+        ),
+    ) { viewModel ->
+        val shortcut = requireNotNull(viewModel.state().startAgain)
+
+        assertTrue(viewModel.state().showStartAgain)
+        assertEquals("Treadmill walk", shortcut.label)
+        assertEquals(ActivityIcons.FOOTPRINTS, shortcut.iconName)
+        assertEquals(Movement.WALKING, shortcut.request.movement)
+        assertEquals(ActivityEnvironment.INDOOR, shortcut.request.environment)
+        assertEquals(
+            listOf(EquipmentType.TREADMILL),
+            shortcut.request.equipment.map { it.equipmentType },
+        )
+    }
+
+    @Test
+    fun `start again keeps a free name`() = activityTest(
+        lastTimed = StartTimerRequest(
+            movement = Movement.OTHER,
+            customMovementName = "Padel",
+        ),
+    ) { viewModel ->
+        assertEquals("Padel", requireNotNull(viewModel.state().startAgain).label)
+    }
+
+    // endregion
+
     // region the history
 
     /** PRD FR-ACTIVITY-012: grouped by month, most recent first, with no ceiling. */
@@ -303,11 +441,19 @@ class ActivityViewModelTest {
     private fun activityTest(
         sessions: List<ActivitySummary> = emptyList(),
         today: LocalDate = TODAY,
+        drafts: List<TimedActivityDraft> = emptyList(),
+        lastTimed: StartTimerRequest? = null,
         body: suspend TestScope.(ActivityViewModel) -> Unit,
     ) = runTest {
+        val timers = FakeTimedActivityRepository(drafts)
+        timers.setLastTimedStart(lastTimed)
         val viewModel = ActivityViewModel(
             activityRepository = FakeActivityRepository(sessions),
+            timers = timers,
             clock = Clock.fixed(today.atStartOfDay(ZoneOffset.UTC).toInstant(), ZoneOffset.UTC),
+            // Fixed, so the review cards' dates and durations can be asserted character for
+            // character whatever the machine running the suite is set to.
+            locale = { Locale.US },
         )
         backgroundScope.launch { viewModel.uiState.collect {} }
         backgroundScope.launch { viewModel.historyState.collect {} }
@@ -316,6 +462,34 @@ class ActivityViewModelTest {
     }
 
     // endregion
+}
+
+/** One finished draft, waiting to be reviewed (FR-TIMER-008). */
+private fun draft(
+    isoDate: String,
+    minutes: Int,
+    seconds: Int = 0,
+    at: LocalTime = LocalTime.of(18, 32, 47),
+    movement: Movement = Movement.WALKING,
+    customMovementName: String? = null,
+    equipment: List<SessionEquipment> = listOf(SessionEquipment(EquipmentType.TREADMILL)),
+    id: String = "draft-$isoDate-$minutes",
+): TimedActivityDraft {
+    val day = LocalDate.parse(isoDate)
+    return TimedActivityDraft(
+        id = TimedDraftId(id),
+        status = TimedDraftStatus.PENDING_REVIEW,
+        movement = movement,
+        startedAtMillis = day.atTime(at).toInstant(ZoneOffset.UTC).toEpochMilli(),
+        startedOn = day,
+        startedAtLocalTime = at,
+        accumulatedActive = requireNotNull(
+            ActivityDuration.ofSecondsOrNull(minutes * 60 + seconds),
+        ),
+        customMovementName = customMovementName,
+        environment = ActivityEnvironment.INDOOR,
+        equipment = equipment,
+    )
 }
 
 private fun summary(

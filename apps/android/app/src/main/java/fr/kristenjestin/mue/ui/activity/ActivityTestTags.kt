@@ -14,7 +14,13 @@ internal object ActivityTestTags {
     const val WEEKLY_BARS: String = "activity:weeklyBars"
     const val RECENT_LIST: String = "activity:recentList"
     const val SEE_ALL: String = "activity:seeAll"
-    const val LOG_ACTIVITY: String = "activity:logActivity"
+
+    /*
+     * The dashboard's own action has no tag here any more. PRD_ACTIVITY_TIMER 17 replaced the
+     * single `Log activity` with `Start activity` and `Log past activity`, and both of them —
+     * like the review block and the `Start again` shortcut beside them — belong to the timer's
+     * vocabulary and are named in `TimerTestTags`.
+     */
 
     const val HISTORY_LIST: String = "activity:historyList"
 

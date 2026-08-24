@@ -123,6 +123,14 @@ class FakeTimedActivityRepository(
 
     override fun observeLastTimedStart(): Flow<StartTimerRequest?> = lastTimedStart
 
+    /**
+     * What saving a session with `source = timer` leaves behind for the `Start again` shortcut
+     * of PRD 6.1. Set directly, because nothing in this fake writes a session.
+     */
+    fun setLastTimedStart(request: StartTimerRequest?) {
+        lastTimedStart.value = request
+    }
+
     override suspend fun start(
         request: StartTimerRequest,
         now: TimerInstant,

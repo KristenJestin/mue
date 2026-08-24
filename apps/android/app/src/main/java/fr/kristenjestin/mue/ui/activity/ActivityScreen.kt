@@ -32,6 +32,8 @@ import fr.kristenjestin.mue.domain.logic.WeeklyActivitySummary
 import fr.kristenjestin.mue.domain.model.ActivityId
 import fr.kristenjestin.mue.domain.model.ActivitySummary
 import fr.kristenjestin.mue.domain.model.Movement
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueDivider
@@ -40,12 +42,15 @@ import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
+import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueWeekBars
 import fr.kristenjestin.mue.ui.components.MueWeekDay
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.timer.TimerMessages
+import fr.kristenjestin.mue.ui.timer.TimerTestTags
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -56,31 +61,43 @@ internal const val THIS_WEEK_SUFFIX = "this week"
 internal const val ENERGY_LABEL = "Estimated energy"
 internal const val RECENT_TITLE = "Recent activity"
 internal const val SEE_ALL_LABEL = "See all"
-internal const val LOG_ACTIVITY_LABEL = "Log activity"
 
 /** PRD 13.2: the quiet week states what happened and asks for nothing. */
 internal const val QUIET_WEEK_TITLE = "No activity this week."
 
-/** PRD 13.1. */
+/**
+ * PRD 13.1, kept whole by contract decision 2.
+ *
+ * `Log your first activity` is gone with it: PRD_ACTIVITY_TIMER 17 replaces the module's single
+ * action with two permanent ones, and the invitation now offers exactly those two. Never three —
+ * `Start again` cannot exist with no history to repeat.
+ */
 internal const val EMPTY_HISTORY_TITLE = "Ready when you are."
 internal const val EMPTY_HISTORY_BODY =
     "Any activity you have finished can be added here — a walk, a ride, a session at the gym. " +
         "Your week takes shape from the first one."
-internal const val EMPTY_HISTORY_ACTION = "Log your first activity"
 
 /** The prototype's amber glyph tile in the corner of the weekly card. */
 private val RhythmTileSize = 40.dp
 
 /**
- * The Activity tab: the current week and the five most recent sessions (PRD FR-ACTIVITY-001
- * and 002).
+ * The Activity tab: the current week, the drafts waiting to be reviewed, the two actions and
+ * the five most recent sessions (PRD FR-ACTIVITY-001 and 002, PRD_ACTIVITY_TIMER 6.1).
+ *
+ * [onStartActivity] begins a timer now and [onLogPastActivity] opens the manual form — the two
+ * that replace the module's single `Log activity` (PRD_ACTIVITY_TIMER 17). [onStartAgain]
+ * carries the whole request of the last timed session and reopens the *start* screen with it,
+ * never the timer. [onOpenReview] reopens a finished draft in the form it was left in.
  *
  * [onSeeAll] opens the full history and is only wired when there are more than five sessions;
  * [onOpenSession] opens a session in the same editor the history uses.
  */
 @Composable
 fun ActivityScreen(
-    onLogActivity: () -> Unit,
+    onStartActivity: () -> Unit,
+    onLogPastActivity: () -> Unit,
+    onStartAgain: (StartTimerRequest) -> Unit,
+    onOpenReview: (TimedDraftId) -> Unit,
     onSeeAll: () -> Unit,
     onOpenSession: (ActivityId) -> Unit,
     modifier: Modifier = Modifier,
@@ -90,7 +107,10 @@ fun ActivityScreen(
 
     ActivityDashboardContent(
         state = state,
-        onLogActivity = onLogActivity,
+        onStartActivity = onStartActivity,
+        onLogPastActivity = onLogPastActivity,
+        onStartAgain = onStartAgain,
+        onOpenReview = onOpenReview,
         onSeeAll = onSeeAll,
         onOpenSession = onOpenSession,
         modifier = modifier,
@@ -104,7 +124,10 @@ fun ActivityScreen(
 @Composable
 internal fun ActivityDashboardContent(
     state: ActivityUiState,
-    onLogActivity: () -> Unit,
+    onStartActivity: () -> Unit,
+    onLogPastActivity: () -> Unit,
+    onStartAgain: (StartTimerRequest) -> Unit,
+    onOpenReview: (TimedDraftId) -> Unit,
     onSeeAll: () -> Unit,
     onOpenSession: (ActivityId) -> Unit,
     modifier: Modifier = Modifier,
@@ -123,7 +146,10 @@ internal fun ActivityDashboardContent(
             if (state.showEmptyHistory) {
                 item(key = "empty") {
                     EmptyHistory(
-                        onLogActivity = onLogActivity,
+                        state = state,
+                        onStartActivity = onStartActivity,
+                        onLogPastActivity = onLogPastActivity,
+                        onOpenReview = onOpenReview,
                         modifier = Modifier.padding(top = spacing.xl),
                     )
                 }
@@ -137,19 +163,42 @@ internal fun ActivityDashboardContent(
             }
 
             /*
-             * The prototype ends the screen with this button, under a list of two cards. PRD
-             * FR-ACTIVITY-002 made that list five, which pushes the button off the first screen
-             * entirely — and FR-ACTIVITY-003 asks for an action that is immediately reachable.
-             * PRD 15 settles where it goes: title, summary, action, history.
+             * PRD_ACTIVITY_TIMER 6.1 fixes the order from here down: the drafts waiting to be
+             * reviewed, then the two actions, then `Start again`, then the history. Measured
+             * time that has not been filed yet comes before anything that would add more of it.
              */
-            item(key = "logActivity") {
-                MuePrimaryButton(
-                    label = LOG_ACTIVITY_LABEL,
-                    onClick = onLogActivity,
-                    modifier = Modifier
-                        .padding(top = spacing.xl)
-                        .testTag(ActivityTestTags.LOG_ACTIVITY),
+            if (state.showReviewDrafts) {
+                item(key = "review") {
+                    ReviewDraftsBlock(
+                        drafts = state.reviewDrafts,
+                        onOpenReview = onOpenReview,
+                        modifier = Modifier.padding(top = spacing.xl),
+                    )
+                }
+            }
+
+            /*
+             * The prototype ends the screen with a single button, under a list of two cards.
+             * PRD FR-ACTIVITY-002 made that list five, which pushes it off the first screen
+             * entirely — and FR-ACTIVITY-003, as amended, asks for both actions to be
+             * immediately reachable. PRD 15 settles where they go.
+             */
+            item(key = "actions") {
+                DashboardActions(
+                    onStartActivity = onStartActivity,
+                    onLogPastActivity = onLogPastActivity,
+                    modifier = Modifier.padding(top = spacing.xl),
                 )
+            }
+
+            if (state.showStartAgain) {
+                item(key = "startAgain") {
+                    StartAgainCard(
+                        state = requireNotNull(state.startAgain),
+                        onClick = { onStartAgain(requireNotNull(state.startAgain).request) },
+                        modifier = Modifier.padding(top = spacing.md),
+                    )
+                }
             }
 
             item(key = "recentTitle") {
@@ -365,9 +414,52 @@ private fun RecentHeader(
     }
 }
 
-/** PRD 13.1: nothing was ever recorded, so the screen is an invitation and nothing else. */
+/**
+ * The two actions of PRD_ACTIVITY_TIMER 6.1, which replace FR-ACTIVITY-003's single one.
+ *
+ * `Start activity` is the loud one because it is the one with a moment attached: it is pressed
+ * as the activity begins. `Log past activity` is the same form as before, reached quietly,
+ * because nothing about a session that is already over is urgent.
+ */
 @Composable
-private fun EmptyHistory(onLogActivity: () -> Unit, modifier: Modifier = Modifier) {
+private fun DashboardActions(
+    onStartActivity: () -> Unit,
+    onLogPastActivity: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        MuePrimaryButton(
+            label = TimerMessages.START_ACTIVITY,
+            onClick = onStartActivity,
+            modifier = Modifier.testTag(TimerTestTags.START_ACTIVITY),
+        )
+        MueSecondaryButton(
+            label = TimerMessages.LOG_PAST_ACTIVITY,
+            onClick = onLogPastActivity,
+            modifier = Modifier
+                .padding(top = MueTheme.spacing.md)
+                .testTag(TimerTestTags.LOG_PAST_ACTIVITY),
+        )
+    }
+}
+
+/**
+ * PRD 13.1: nothing was ever recorded, so the screen is an invitation and nothing else.
+ *
+ * Contract decision 2 keeps the sentence and its card and gives them both actions — two, never
+ * three, since `Start again` has nothing to repeat. A draft *can* exist here, though: a first
+ * timer finished and left unfiled is measured time with no session behind it yet, and
+ * FR-TIMER-008 forbids hiding it, so the block stands above the actions exactly as it does on
+ * the populated dashboard.
+ */
+@Composable
+private fun EmptyHistory(
+    state: ActivityUiState,
+    onStartActivity: () -> Unit,
+    onLogPastActivity: () -> Unit,
+    onOpenReview: (TimedDraftId) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val spacing = MueTheme.spacing
     Column(modifier = modifier.fillMaxWidth()) {
         MueScreenTitle(title = EMPTY_HISTORY_TITLE)
@@ -378,12 +470,17 @@ private fun EmptyHistory(onLogActivity: () -> Unit, modifier: Modifier = Modifie
                 color = MueTheme.colors.textSecondary,
             )
         }
-        MuePrimaryButton(
-            label = EMPTY_HISTORY_ACTION,
-            onClick = onLogActivity,
-            modifier = Modifier
-                .padding(top = spacing.xl)
-                .testTag(ActivityTestTags.LOG_ACTIVITY),
+        if (state.showReviewDrafts) {
+            ReviewDraftsBlock(
+                drafts = state.reviewDrafts,
+                onOpenReview = onOpenReview,
+                modifier = Modifier.padding(top = spacing.xl),
+            )
+        }
+        DashboardActions(
+            onStartActivity = onStartActivity,
+            onLogPastActivity = onLogPastActivity,
+            modifier = Modifier.padding(top = spacing.xl),
         )
     }
 }
@@ -397,6 +494,8 @@ internal fun previewDashboardState(
     weekSummaries: List<ActivitySummary> = recent,
     totalSessionCount: Int = recent.size,
     today: LocalDate = PreviewDay,
+    reviewDrafts: List<ReviewDraftUiState> = emptyList(),
+    startAgain: StartAgainUiState? = null,
 ): ActivityUiState {
     val week = WeeklyActivitySummary.of(weekSummaries, today)
     val monday = requireNotNull(week.week.start)
@@ -411,6 +510,8 @@ internal fun previewDashboardState(
         },
         recent = recent.take(ActivityViewModel.RECENT_LIMIT),
         totalSessionCount = totalSessionCount,
+        reviewDrafts = reviewDrafts,
+        startAgain = startAgain,
     )
 }
 
@@ -435,47 +536,50 @@ private fun previewSessions() = listOf(
     ),
 )
 
-@Preview(name = "Activity — populated", showBackground = true, heightDp = 900, widthDp = 390)
 @Composable
-private fun ActivityPopulatedPreview() {
+private fun DashboardPreview(state: ActivityUiState) {
     MueTheme {
         ActivityDashboardContent(
-            state = previewDashboardState(previewSessions(), totalSessionCount = 9),
-            onLogActivity = {},
+            state = state,
+            onStartActivity = {},
+            onLogPastActivity = {},
+            onStartAgain = {},
+            onOpenReview = {},
             onSeeAll = {},
             onOpenSession = {},
         )
     }
+}
+
+@Preview(name = "Activity — populated", showBackground = true, heightDp = 1100, widthDp = 390)
+@Composable
+private fun ActivityPopulatedPreview() {
+    DashboardPreview(
+        previewDashboardState(
+            recent = previewSessions(),
+            totalSessionCount = 9,
+            reviewDrafts = previewReviewDrafts(5),
+            startAgain = previewStartAgain(),
+        ),
+    )
 }
 
 @Preview(name = "Activity — quiet week", showBackground = true, heightDp = 900, widthDp = 390)
 @Composable
 private fun ActivityQuietWeekPreview() {
-    MueTheme {
-        ActivityDashboardContent(
-            state = previewDashboardState(
-                recent = listOf(previewSummary(daysAgo = 20, estimatedEnergyKcal = null)),
-                weekSummaries = emptyList(),
-                totalSessionCount = 1,
-            ),
-            onLogActivity = {},
-            onSeeAll = {},
-            onOpenSession = {},
-        )
-    }
+    DashboardPreview(
+        previewDashboardState(
+            recent = listOf(previewSummary(daysAgo = 20, estimatedEnergyKcal = null)),
+            weekSummaries = emptyList(),
+            totalSessionCount = 1,
+        ),
+    )
 }
 
 @Preview(name = "Activity — empty", showBackground = true, heightDp = 900, widthDp = 390)
 @Composable
 private fun ActivityEmptyPreview() {
-    MueTheme {
-        ActivityDashboardContent(
-            state = previewDashboardState(recent = emptyList()),
-            onLogActivity = {},
-            onSeeAll = {},
-            onOpenSession = {},
-        )
-    }
+    DashboardPreview(previewDashboardState(recent = emptyList()))
 }
 
 // endregion

@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import fr.kristenjestin.mue.domain.logic.WeeklyActivitySummary
 import fr.kristenjestin.mue.domain.model.ActivityDuration
 import fr.kristenjestin.mue.domain.model.ActivitySummary
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -28,9 +30,34 @@ data class ActivityUiState(
     val recent: List<ActivitySummary>,
     /** Every session ever recorded; what hides `See all` at five or fewer. */
     val totalSessionCount: Int,
+    /**
+     * PRD_ACTIVITY_TIMER FR-TIMER-008: the timed drafts waiting to be reviewed, most recent
+     * first and with no ceiling — the screen shows three and rolls the rest out in place.
+     */
+    val reviewDrafts: List<ReviewDraftUiState> = emptyList(),
+    /** PRD_ACTIVITY_TIMER 6.1: the last timed session, ready to be started again. */
+    val startAgain: StartAgainUiState? = null,
 ) {
-    /** PRD 13.1: an empty history replaces the whole dashboard with an invitation. */
+    /**
+     * PRD 13.1: an empty history replaces the whole dashboard with an invitation.
+     *
+     * A measured draft is not a session, so it does not clear this — but it is still measured
+     * time, and hiding it would be exactly what FR-TIMER-008 forbids. The invitation therefore
+     * keeps the review block above its two actions rather than swallowing it.
+     */
     val showEmptyHistory: Boolean get() = !isLoading && !hasAnyActivity
+
+    /** FR-TIMER-008: the block exists exactly while a draft is waiting. */
+    val showReviewDrafts: Boolean get() = reviewDrafts.isNotEmpty()
+
+    /**
+     * PRD_ACTIVITY_TIMER 6.1: the shortcut appears once something has been timed.
+     *
+     * Contract decision 2 is why this is asked separately from [showEmptyHistory]: with no
+     * history there is nothing to start again, so the invitation carries two actions and never
+     * three.
+     */
+    val showStartAgain: Boolean get() = startAgain != null
 
     /** PRD FR-ACTIVITY-002: nothing to see beyond what is already on screen. */
     val showSeeAll: Boolean get() = totalSessionCount > ActivityViewModel.RECENT_LIMIT
@@ -41,6 +68,36 @@ data class ActivityUiState(
     /** PRD 13.2: the quiet week drops the cumulative duration from the editorial title. */
     val showWeeklyDuration: Boolean get() = week.hasActivity
 }
+
+/**
+ * One timed draft waiting on the dashboard (PRD_ACTIVITY_TIMER FR-TIMER-008).
+ *
+ * Every string is already spelled: PRD 16.4 keeps aggregation and formatting out of
+ * composition, and a card that formatted its own date would do it again on every frame of the
+ * list's expansion.
+ */
+@Immutable
+data class ReviewDraftUiState(
+    val id: TimedDraftId,
+    val label: String,
+    /** The day, the start time and the measured duration on one line. */
+    val meta: String,
+    val iconName: String,
+)
+
+/**
+ * The `Start again` shortcut (PRD_ACTIVITY_TIMER 6.1).
+ *
+ * It carries the whole [request] because that is what contract decision 4 copies — movement,
+ * custom name, environment and equipment — and PRD 16 has it open the prefilled start screen
+ * rather than start anything.
+ */
+@Immutable
+data class StartAgainUiState(
+    val request: StartTimerRequest,
+    val label: String,
+    val iconName: String,
+)
 
 /** One rail of the weekly visualisation (PRD FR-ACTIVITY-001). */
 @Immutable

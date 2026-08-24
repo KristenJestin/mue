@@ -14,7 +14,11 @@ import fr.kristenjestin.mue.domain.model.ActivityDuration
 import fr.kristenjestin.mue.domain.model.ActivityId
 import fr.kristenjestin.mue.domain.model.ActivitySummary
 import fr.kristenjestin.mue.domain.model.Movement
+import fr.kristenjestin.mue.domain.model.StartTimerRequest
+import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.timer.TimerMessages
+import fr.kristenjestin.mue.ui.timer.TimerTestTags
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -42,26 +46,50 @@ class ActivityScreenTest {
 
     // region the dashboard
 
-    /** PRD 13.1: nothing recorded yet, so the screen is an invitation and nothing else. */
+    /**
+     * PRD 13.1 as contract decision 2 amends it: the sentence and its card are kept, and the
+     * invitation now carries the module's two permanent actions — two, never three.
+     */
     @Test
     fun anEmptyHistoryInvitesAFirstActivity() {
         setDashboard(dashboardState(emptyList()))
 
         compose.onNodeWithText(EMPTY_HISTORY_TITLE).assertIsDisplayed()
-        compose.onNodeWithText(EMPTY_HISTORY_ACTION).assertIsDisplayed()
+        compose.onNodeWithTag(TimerTestTags.START_ACTIVITY).assertIsDisplayed()
+        compose.onNodeWithTag(TimerTestTags.LOG_PAST_ACTIVITY).assertIsDisplayed()
+        compose.onNodeWithTag(TimerTestTags.START_AGAIN).assertDoesNotExist()
         compose.onNodeWithText(RECENT_TITLE).assertDoesNotExist()
         compose.onNodeWithTag(ActivityTestTags.WEEKLY_BARS).assertDoesNotExist()
         compose.onNodeWithText(SEE_ALL_LABEL).assertDoesNotExist()
     }
 
     @Test
-    fun theEmptyStateActionOpensTheForm() {
-        var opened = 0
-        setDashboard(dashboardState(emptyList()), onLogActivity = { opened++ })
+    fun theEmptyStateOffersBothWaysIn() {
+        var timed = 0
+        var manual = 0
+        setDashboard(
+            dashboardState(emptyList()),
+            onStartActivity = { timed++ },
+            onLogPastActivity = { manual++ },
+        )
 
-        compose.onNodeWithText(EMPTY_HISTORY_ACTION).performClick()
+        compose.onNodeWithTag(TimerTestTags.START_ACTIVITY).performClick()
+        compose.onNodeWithTag(TimerTestTags.LOG_PAST_ACTIVITY).performClick()
 
-        assertEquals(1, opened)
+        assertEquals(1, timed)
+        assertEquals(1, manual)
+    }
+
+    /**
+     * FR-TIMER-008: a first timer finished and left unfiled has no session behind it, and
+     * hiding it would be exactly what the requirement forbids.
+     */
+    @Test
+    fun anEmptyHistoryStillShowsADraftWaitingToBeReviewed() {
+        setDashboard(dashboardState(emptyList(), reviewDrafts = previewReviewDrafts(1)))
+
+        compose.onNodeWithText(EMPTY_HISTORY_TITLE).assertIsDisplayed()
+        compose.onNodeWithTag(TimerTestTags.REVIEW_LIST).assertIsDisplayed()
     }
 
     /** PRD FR-ACTIVITY-001: the week's range, its title, its count and its energy. */
@@ -191,33 +219,132 @@ class ActivityScreenTest {
         assertEquals(ActivityId("strength"), opened)
     }
 
-    /** PRD FR-ACTIVITY-003: the action is always one tap away. */
+    /**
+     * PRD FR-ACTIVITY-003, as PRD_ACTIVITY_TIMER 17 amends it: one action became two, and both
+     * are always one tap away.
+     */
     @Test
-    fun logActivityIsAlwaysOffered() {
-        var opened = 0
-        setDashboard(dashboardState(week()), onLogActivity = { opened++ })
+    fun bothActionsAreAlwaysOffered() {
+        var timed = 0
+        var manual = 0
+        setDashboard(
+            dashboardState(week()),
+            onStartActivity = { timed++ },
+            onLogPastActivity = { manual++ },
+        )
 
-        compose.onNodeWithTag(ActivityTestTags.LOG_ACTIVITY).assertIsDisplayed()
-        compose.onNodeWithTag(ActivityTestTags.LOG_ACTIVITY).performClick()
+        compose.onNodeWithText(TimerMessages.START_ACTIVITY).assertIsDisplayed()
+        compose.onNodeWithText(TimerMessages.LOG_PAST_ACTIVITY).assertIsDisplayed()
+        compose.onNodeWithTag(TimerTestTags.START_ACTIVITY).performClick()
+        compose.onNodeWithTag(TimerTestTags.LOG_PAST_ACTIVITY).performClick()
 
-        assertEquals(1, opened)
+        assertEquals(1, timed)
+        assertEquals(1, manual)
     }
 
     /**
-     * PRD 15's reading order — title, summary, action, history — which is also what keeps the
-     * action reachable now that the list below it holds five cards rather than the prototype's
-     * two (PRD FR-ACTIVITY-002 and 003).
+     * PRD_ACTIVITY_TIMER 6.1 fixes the vertical order: the week, the drafts waiting to be
+     * reviewed, the two actions, `Start again`, then the history.
      */
     @Test
-    fun theActionComesBeforeTheHistory() {
+    fun theDashboardIsInThePrdsOrder() {
+        setDashboard(
+            dashboardState(
+                week(),
+                reviewDrafts = previewReviewDrafts(1),
+                startAgain = previewStartAgain(),
+            ),
+        )
+
+        assertAbove(ActivityTestTags.WEEKLY_BARS, TimerTestTags.REVIEW_LIST)
+        assertAbove(TimerTestTags.REVIEW_LIST, TimerTestTags.START_ACTIVITY)
+        assertAbove(TimerTestTags.START_ACTIVITY, TimerTestTags.LOG_PAST_ACTIVITY)
+        assertAbove(TimerTestTags.LOG_PAST_ACTIVITY, TimerTestTags.START_AGAIN)
+        assertAbove(TimerTestTags.START_AGAIN, ActivityTestTags.RECENT_LIST)
+    }
+
+    // endregion
+
+    // region the timer's two blocks (PRD_ACTIVITY_TIMER 6.1 and FR-TIMER-008)
+
+    /** FR-TIMER-008: three cards at most, then one line that rolls the rest out in place. */
+    @Test
+    fun atMostThreeDraftsAreShownAndTheRestExpandInPlace() {
+        setDashboard(dashboardState(week(), reviewDrafts = previewReviewDrafts(5)))
+
+        compose.onNodeWithTag(ActivityTestTags.DASHBOARD)
+            .performScrollToNode(hasTestTag(TimerTestTags.REVIEW_LIST))
+
+        repeat(3) { index ->
+            compose.onNodeWithTag(TimerTestTags.reviewCard("draft-$index")).assertExists()
+        }
+        compose.onNodeWithTag(TimerTestTags.reviewCard("draft-3")).assertDoesNotExist()
+        compose.onNodeWithText(TimerMessages.moreToReview(2)).assertExists()
+
+        compose.onNodeWithTag(TimerTestTags.MORE_TO_REVIEW).performClick()
+
+        compose.onNodeWithTag(TimerTestTags.reviewCard("draft-3")).assertExists()
+        compose.onNodeWithTag(TimerTestTags.reviewCard("draft-4")).assertExists()
+        compose.onNodeWithTag(TimerTestTags.MORE_TO_REVIEW).assertDoesNotExist()
+    }
+
+    /** Three drafts is three cards and no line at all. */
+    @Test
+    fun threeDraftsNeedNoExpansion() {
+        setDashboard(dashboardState(week(), reviewDrafts = previewReviewDrafts(3)))
+
+        compose.onNodeWithTag(ActivityTestTags.DASHBOARD)
+            .performScrollToNode(hasTestTag(TimerTestTags.REVIEW_LIST))
+
+        compose.onNodeWithTag(TimerTestTags.MORE_TO_REVIEW).assertDoesNotExist()
+        compose.onNodeWithTag(TimerTestTags.reviewCard("draft-2")).assertExists()
+    }
+
+    @Test
+    fun aDraftCardReopensThatDraft() {
+        var opened: TimedDraftId? = null
+        setDashboard(
+            dashboardState(week(), reviewDrafts = previewReviewDrafts(1)),
+            onOpenReview = { opened = it },
+        )
+
+        compose.onNodeWithTag(ActivityTestTags.DASHBOARD)
+            .performScrollToNode(hasTestTag(TimerTestTags.reviewCard("draft-0")))
+        compose.onNodeWithTag(TimerTestTags.reviewCard("draft-0")).performClick()
+
+        assertEquals(TimedDraftId("draft-0"), opened)
+    }
+
+    @Test
+    fun noDraftMeansNoBlock() {
         setDashboard(dashboardState(week()))
 
-        val action = compose.onNodeWithTag(ActivityTestTags.LOG_ACTIVITY)
-            .getUnclippedBoundsInRoot()
-        val history = compose.onNodeWithTag(ActivityTestTags.RECENT_LIST)
-            .getUnclippedBoundsInRoot()
+        compose.onNodeWithTag(TimerTestTags.REVIEW_LIST).assertDoesNotExist()
+        compose.onNodeWithText(TimerMessages.READY_TO_REVIEW).assertDoesNotExist()
+    }
 
-        assertTrue("the action should sit above the history", action.top < history.top)
+    /** PRD 16: `Start again` opens the prefilled start screen and starts nothing. */
+    @Test
+    fun startAgainHandsBackTheWholeRequest() {
+        var request: StartTimerRequest? = null
+        val shortcut = previewStartAgain()
+        setDashboard(
+            dashboardState(week(), startAgain = shortcut),
+            onStartAgain = { request = it },
+        )
+
+        compose.onNodeWithTag(ActivityTestTags.DASHBOARD)
+            .performScrollToNode(hasTestTag(TimerTestTags.START_AGAIN))
+        compose.onNodeWithTag(TimerTestTags.START_AGAIN).performClick()
+
+        assertEquals(shortcut.request, request)
+    }
+
+    @Test
+    fun startAgainIsAbsentUntilSomethingHasBeenTimed() {
+        setDashboard(dashboardState(week()))
+
+        compose.onNodeWithTag(TimerTestTags.START_AGAIN).assertDoesNotExist()
     }
 
     // endregion
@@ -285,7 +412,10 @@ class ActivityScreenTest {
 
     private fun setDashboard(
         state: ActivityUiState,
-        onLogActivity: () -> Unit = {},
+        onStartActivity: () -> Unit = {},
+        onLogPastActivity: () -> Unit = {},
+        onStartAgain: (StartTimerRequest) -> Unit = {},
+        onOpenReview: (TimedDraftId) -> Unit = {},
         onSeeAll: () -> Unit = {},
         onOpenSession: (ActivityId) -> Unit = {},
     ) {
@@ -293,7 +423,10 @@ class ActivityScreenTest {
             MueTheme {
                 ActivityDashboardContent(
                     state = state,
-                    onLogActivity = onLogActivity,
+                    onStartActivity = onStartActivity,
+                    onLogPastActivity = onLogPastActivity,
+                    onStartAgain = onStartAgain,
+                    onOpenReview = onOpenReview,
                     onSeeAll = onSeeAll,
                     onOpenSession = onOpenSession,
                 )
@@ -321,12 +454,33 @@ class ActivityScreenTest {
         recent: List<ActivitySummary>,
         weekSummaries: List<ActivitySummary> = recent,
         totalSessionCount: Int = recent.size,
+        reviewDrafts: List<ReviewDraftUiState> = emptyList(),
+        startAgain: StartAgainUiState? = null,
     ): ActivityUiState = previewDashboardState(
         recent = recent,
         weekSummaries = weekSummaries,
         totalSessionCount = totalSessionCount,
         today = TODAY,
+        reviewDrafts = reviewDrafts,
+        startAgain = startAgain,
     )
+
+    /** Where a block starts, so the order of PRD 6.1 can be asserted rather than eyeballed. */
+    private fun top(tag: String) =
+        compose.onNodeWithTag(tag).getUnclippedBoundsInRoot().top
+
+    /**
+     * Two neighbouring blocks, compared once the lower one is on screen.
+     *
+     * The dashboard is a `LazyColumn`, so nothing far below the fold is composed at all and the
+     * whole order cannot be read in one pass. Adjacent pairs can: scrolling the lower one into
+     * view keeps the one immediately above it composed.
+     */
+    private fun assertAbove(upper: String, lower: String) {
+        compose.onNodeWithTag(ActivityTestTags.DASHBOARD)
+            .performScrollToNode(hasTestTag(lower))
+        assertTrue("$upper should sit above $lower", top(upper) < top(lower))
+    }
 
     private fun historyState(sessions: List<ActivitySummary>): ActivityHistoryUiState =
         previewHistoryState(sessions, today = TODAY)
