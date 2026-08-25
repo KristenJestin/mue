@@ -14,3 +14,6 @@ dist/
 coverage/
 
 # Vite+ keeps its task cache in node_modules/.vite/task-cache, already covered above.
+
+# copies de travail
+*.bak
