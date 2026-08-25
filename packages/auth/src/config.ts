@@ -1,3 +1,15 @@
+/**
+ * Everything the identity layer reads from the environment.
+ *
+ * | Variable | Required | Meaning |
+ * | --- | --- | --- |
+ * | `BETTER_AUTH_SECRET` | yes | Master secret, at least 32 characters. No client ever receives it (section 15.1). |
+ * | `BETTER_AUTH_URL` | yes | Public origin and OAuth issuer. HTTPS outside loopback (section 16). |
+ * | `MUE_TRUSTED_ORIGINS` | no | Comma-separated origins allowed to call the auth endpoints. Defaults to the base URL alone. |
+ * | `MUE_MCP_RESOURCE` | no | RFC 8707 protected-resource identifier. Defaults to `<base>/mcp`. |
+ * | `MUE_LOGIN_PAGE` | no | Defaults to `/sign-in`. |
+ * | `MUE_CONSENT_PAGE` | no | Defaults to `/consent`. |
+ */
 export type Env = Readonly<Record<string, string | undefined>>;
 
 export interface AuthConfig {
@@ -22,7 +34,7 @@ export interface AuthConfig {
 function required(env: Env, name: string): string {
   const value = env[name];
   if (value === undefined || value.trim() === "") {
-    throw new Error(`${name} is not set. See .env.example.`);
+    throw new Error(`${name} is not set. The table on Env above says what it is for.`);
   }
   return value;
 }

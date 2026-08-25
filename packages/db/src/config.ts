@@ -28,7 +28,9 @@ export type Env = Readonly<Record<string, string | undefined>>;
 function required(env: Env, name: string): string {
   const value = env[name];
   if (value === undefined || value.trim() === "") {
-    throw new Error(`${name} is not set. See .env.example and infra/README.md.`);
+    throw new Error(
+      `${name} is not set. DATABASE_URL carries the limited Mue role; see infra/README.md.`,
+    );
   }
   return value;
 }
