@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mue — Food · Coach & journal</title>
+  <title>Mue — Food · Journal</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -29,11 +29,8 @@
   <main class="phone relative flex flex-col overflow-hidden bg-[#101012] shadow-2xl sm:rounded-[2.7rem]" x-data="foodApp()" x-init="init()">
     <div class="pointer-events-none absolute inset-x-0 top-0 h-72 opacity-20" style="background:radial-gradient(circle at 74% 0,#efb45f,transparent 64%)"></div>
 
-    <header class="relative flex items-center justify-between px-7 pb-3 pt-7">
+    <header class="relative flex items-center justify-center px-7 pb-3 pt-7">
       <a href="../index.html" class="text-sm font-black tracking-[.2em]">MUE</a>
-      <button @click="prefsOpen=true" class="flex items-center gap-2 rounded-full border border-white/8 bg-white/[.04] px-3 py-2 text-[10px] font-bold text-white/48 transition hover:text-white" aria-label="Open food preferences">
-        <i data-lucide="sliders-horizontal" class="h-3.5 w-3.5"></i><span>Preferences</span>
-      </button>
     </header>
 
     <div class="relative mx-7 grid grid-cols-4 rounded-2xl bg-white/[.045] p-1 text-[9px] font-bold text-white/35">
@@ -48,7 +45,7 @@
       <!-- ================= DAY ================= -->
       <div x-show="view==='day'" x-cloak>
         <div class="appear flex items-center justify-between gap-3">
-          <button @click="stepDay(-1)" :disabled="day===0" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/[.05] text-white/45 transition disabled:opacity-20" aria-label="Previous day"><i data-lucide="chevron-left" class="h-4 w-4"></i></button>
+          <button @click="stepDay(-1)" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/[.05] text-white/45 transition" aria-label="Previous day"><i data-lucide="chevron-left" class="h-4 w-4"></i></button>
           <p class="flex-1 text-center text-sm text-white/42" x-text="dayLabel"></p>
           <button @click="stepDay(1)" :disabled="isToday" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/[.05] text-white/45 transition disabled:opacity-20" aria-label="Next day"><i data-lucide="chevron-right" class="h-4 w-4"></i></button>
         </div>
@@ -61,7 +58,7 @@
             <section>
               <div class="mb-2 flex items-center justify-between px-1">
                 <h2 class="flex items-center gap-1.5 text-[9px] font-bold tracking-[.12em] text-white/32 uppercase"><i :data-lucide="slot.icon" class="h-3 w-3"></i><span x-text="slot.label"></span></h2>
-                <span class="tnum text-[8px] text-white/28" x-show="showEnergy && slotKcal(slot.id)>0" x-text="'≈ '+slotKcal(slot.id)+' kcal'"></span>
+                <span class="tnum text-[8px] text-white/28" x-show="showEnergy && logsFor(slot.id).length" x-text="formatEnergy(slotKcal(slot.id))"></span>
               </div>
 
               <!-- Repas prévu, pas encore confirmé -->
@@ -70,9 +67,9 @@
                   <div class="flex items-center gap-3 p-3">
                     <span class="meal-photo h-11 w-11 shrink-0 rounded-xl opacity-80" :style="`background-image:url('${recipeById(planFor(slot.id).recipeId)?.image}')`"></span>
                     <span class="min-w-0 flex-1">
-                      <span class="flex items-center gap-1 text-[7px] font-bold tracking-[.1em] text-[#efb45f] uppercase"><i :data-lucide="planFor(slot.id).author==='coach'?'sparkles':'user-round'" class="h-2.5 w-2.5"></i><span x-text="planFor(slot.id).author==='coach'?'Suggested by your coach':'Suggested by you'"></span></span>
+                      <span class="flex items-center gap-1 text-[7px] font-bold tracking-[.1em] text-[#efb45f] uppercase"><i data-lucide="sparkles" class="h-2.5 w-2.5"></i><span>Suggested</span></span>
                       <strong class="mt-0.5 block truncate text-[10px]" x-text="recipeById(planFor(slot.id).recipeId)?.name"></strong>
-                      <span class="mt-0.5 block text-[8px] text-white/30"><span x-text="planFor(slot.id).servings"></span> serving<span x-show="planFor(slot.id).servings>1">s</span><span x-show="showEnergy" x-text="' · ≈ '+Math.round(perServing(recipeById(planFor(slot.id).recipeId)).kcal*planFor(slot.id).servings)+' kcal'"></span></span>
+                      <span class="mt-0.5 block text-[8px] text-white/30"><span x-text="planFor(slot.id).servings"></span> serving<span x-show="planFor(slot.id).servings>1">s</span><span x-show="showEnergy" x-text="' · '+formatEnergy(scaleMetric(perServing(recipeById(planFor(slot.id).recipeId)).kcal,planFor(slot.id).servings))"></span></span>
                     </span>
                   </div>
                   <div class="grid grid-cols-3 border-t border-[#efb45f]/15 text-[9px] font-bold">
@@ -93,8 +90,8 @@
                       <span class="mt-1 flex items-center gap-1.5 text-[8px] text-white/28"><span class="tnum" x-text="entry.at"></span><span class="h-0.5 w-0.5 rounded-full bg-white/20"></span><span class="truncate" x-text="entry.amount"></span></span>
                     </span>
                     <span x-show="showEnergy" class="text-right">
-                      <strong class="tnum block text-[10px]" x-text="'≈ '+Math.round(entry.kcal)"></strong>
-                      <span class="tnum mt-1 block text-[8px] text-white/28" x-text="'≈ '+entry.protein.toFixed(1)+'g P'"></span>
+                      <strong class="tnum block text-[10px]" x-text="formatNumber(entry.kcal,0)"></strong>
+                      <span class="tnum mt-1 block text-[8px] text-white/28" x-text="isKnown(entry.protein)?formatNumber(entry.protein,1)+'g P':'—'"></span>
                     </span>
                     <button @click="editLog(entry.id)" class="grid h-7 w-7 place-items-center rounded-lg text-white/18 transition hover:bg-white/5 hover:text-white" aria-label="Edit entry"><i data-lucide="pencil" class="h-3 w-3"></i></button>
                     <button @click="removeLog(entry.id)" class="grid h-7 w-7 place-items-center rounded-lg text-white/18 transition hover:bg-white/5 hover:text-white" aria-label="Remove entry"><i data-lucide="x" class="h-3 w-3"></i></button>
@@ -119,11 +116,11 @@
         <div class="appear mt-5 rounded-[1.5rem] border border-white/8 bg-white/[.03] p-4" style="animation-delay:.05s">
           <div class="flex items-end justify-between gap-1.5" style="height:132px">
             <template x-for="(d,index) in days" :key="d.short">
-              <button @click="day=index;view='day';refresh()" class="group flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+              <button @click="selectedDate=d.iso;view='day';refresh()" class="group flex h-full flex-1 flex-col items-center justify-end gap-1.5">
                 <span class="relative flex w-full flex-1 items-end justify-center">
-                  <span class="w-full rounded-t-md transition-all" :class="index===day?'bg-[#efb45f]':'bg-[#efb45f]/35 group-hover:bg-[#efb45f]/60'" :style="`height:${barHeight(dayKcal(index))}%`"></span>
+                  <span class="w-full rounded-t-md transition-all" :class="d.iso===selectedDate?'bg-[#efb45f]':'bg-[#efb45f]/35 group-hover:bg-[#efb45f]/60'" :style="`height:${barHeight(dayKcal(d.iso))}%`"></span>
                 </span>
-                <span class="text-[7px] font-bold" :class="index===day?'text-[#efb45f]':'text-white/28'" x-text="d.short"></span>
+                <span class="text-[7px] font-bold" :class="d.iso===selectedDate?'text-[#efb45f]':'text-white/28'" x-text="d.short"></span>
               </button>
             </template>
           </div>
@@ -141,13 +138,13 @@
         <h2 class="mt-6 text-[9px] font-bold tracking-[.14em] text-[#efb45f] uppercase">History</h2>
         <div class="mt-2 divide-y divide-white/7">
           <template x-for="(d,index) in days" :key="'h'+d.short">
-            <button @click="day=index;view='day';refresh()" class="flex w-full items-center gap-3 py-3 text-left">
+            <button @click="selectedDate=d.iso;view='day';refresh()" class="flex w-full items-center gap-3 py-3 text-left">
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#2d261d] text-[9px] font-bold text-[#efb45f]" x-text="d.date"></span>
               <span class="min-w-0 flex-1">
                 <strong class="block text-[10px]" x-text="d.long"></strong>
-                <span class="mt-0.5 block text-[8px] text-white/28" x-text="entriesOn(index)+' entr'+(entriesOn(index)===1?'y':'ies')"></span>
+                <span class="mt-0.5 block text-[8px] text-white/28" x-text="entriesOn(d.iso)+' entr'+(entriesOn(d.iso)===1?'y':'ies')"></span>
               </span>
-              <span x-show="showEnergy" class="tnum text-right text-[9px] text-white/45" x-text="dayKcal(index)?'≈ '+dayKcal(index)+' kcal':'—'"></span>
+              <span x-show="showEnergy" class="tnum text-right text-[9px] text-white/45" x-text="entriesOn(d.iso)?formatEnergy(dayKcal(d.iso)):'—'"></span>
               <i data-lucide="chevron-right" class="h-3.5 w-3.5 text-white/18"></i>
             </button>
           </template>
@@ -157,14 +154,14 @@
       <!-- ================= RECIPES ================= -->
       <div x-show="view==='recipes'" x-cloak>
         <div class="appear flex items-end justify-between">
-          <div><p class="text-sm text-white/42">Yours and your coach's</p><h1 class="mt-1 text-[1.75rem] font-semibold tracking-[-.05em]">Recipes.</h1></div>
+          <div><p class="text-sm text-white/42">Saved preparations</p><h1 class="mt-1 text-[1.75rem] font-semibold tracking-[-.05em]">Recipes.</h1></div>
           <button @click="openRecipeEditor()" class="grid h-11 w-11 place-items-center rounded-2xl bg-[#efb45f] text-[#1d160d] shadow-[0_10px_26px_rgba(239,180,95,.16)]" aria-label="Create a recipe"><i data-lucide="plus" class="h-5 w-5"></i></button>
         </div>
 
         <label class="mt-5 flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[.035] px-4 py-3 focus-within:border-[#efb45f]/40"><i data-lucide="search" class="h-4 w-4 text-white/25"></i><input x-model="recipeSearch" type="search" placeholder="Search recipes" class="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-white/20"></label>
 
         <div class="mt-3 flex gap-2 text-[8px] font-bold">
-          <template x-for="f in ['all','coach','you','favourites']" :key="f">
+          <template x-for="f in ['all','favourites']" :key="f">
             <button @click="recipeFilter=f" class="rounded-full px-3 py-2 capitalize transition" :class="recipeFilter===f?'bg-[#efb45f] text-[#1d160d]':'bg-white/[.05] text-white/35'" x-text="f"></button>
           </template>
         </div>
@@ -174,9 +171,8 @@
             <button @click="openRecipe(r.id)" class="appear flex w-full items-center gap-3 rounded-[1.25rem] border border-white/8 bg-white/[.035] p-3 text-left transition hover:border-[#efb45f]/30">
               <span class="meal-photo h-14 w-14 shrink-0 rounded-2xl" :style="`background-image:url('${r.image}')`"></span>
               <span class="min-w-0 flex-1">
-                <span class="flex items-center gap-1 text-[7px] font-bold tracking-[.1em] uppercase" :class="r.author==='coach'?'text-[#efb45f]':'text-white/30'"><i :data-lucide="r.author==='coach'?'sparkles':'user-round'" class="h-2.5 w-2.5"></i><span x-text="r.author==='coach'?'Coach':'You'"></span></span>
                 <strong class="mt-1 block truncate text-[11px]" x-text="r.name"></strong>
-                <span class="mt-1 block text-[8px] text-white/30"><span x-text="r.time+' min · '+r.ingredients.length+' ingredients'"></span><span x-show="showEnergy" x-text="' · ≈ '+Math.round(perServing(r).kcal)+' kcal/serving'"></span></span>
+                <span class="mt-1 block text-[8px] text-white/30"><span x-text="r.time+' min · '+r.ingredients.length+' ingredients'"></span><span x-show="showEnergy" x-text="' · '+formatEnergy(perServing(r).kcal)+'/serving'"></span></span>
               </span>
               <i :data-lucide="r.favourite?'heart':'chevron-right'" class="h-4 w-4" :class="r.favourite?'text-[#efb45f]':'text-white/18'"></i>
             </button>
@@ -207,7 +203,7 @@
               <span class="min-w-0 flex-1">
                 <strong class="block truncate text-[11px]" x-text="f.name"></strong>
                 <span class="mt-1 block text-[8px] text-white/28" x-text="(f.brand||f.source)+' · per 100 '+f.unit"></span>
-                <span class="tnum mt-1 block text-[8px] text-white/42" x-text="f.kcal+' kcal · '+f.protein+'g P · '+f.carbs+'g C · '+f.fat+'g F'"></span>
+                <span class="tnum mt-1 block text-[8px] text-white/42" x-text="(isKnown(f.kcal)?formatNumber(f.kcal,0)+' kcal':'—')+' · '+(isKnown(f.protein)?formatNumber(f.protein,1)+'g P':'—')+' · '+(isKnown(f.carbs)?formatNumber(f.carbs,1)+'g C':'—')+' · '+(isKnown(f.fat)?formatNumber(f.fat,1)+'g F':'—')"></span>
               </span>
               <i :data-lucide="f.source==='Custom'?'pencil':'eye'" class="h-3.5 w-3.5 text-white/18"></i>
             </button>
@@ -242,7 +238,7 @@
           <div class="mt-6 grid grid-cols-2 gap-3">
             <button @click="addStage='scan';refresh()" class="rounded-[1.45rem] border border-white/8 bg-white/[.035] p-4 text-left transition hover:border-[#efb45f]/35"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#efb45f] text-[#1d160d]"><i data-lucide="scan-line" class="h-5 w-5"></i></span><strong class="mt-5 block text-xs">Scan product</strong><span class="mt-1.5 block text-[8px] leading-4 text-white/30">Barcode and nutrition label</span></button>
             <button @click="addStage='search';refresh()" class="rounded-[1.45rem] border border-white/8 bg-white/[.035] p-4 text-left transition hover:border-[#efb45f]/35"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#2d261d] text-[#efb45f]"><i data-lucide="search" class="h-5 w-5"></i></span><strong class="mt-5 block text-xs">Search food</strong><span class="mt-1.5 block text-[8px] leading-4 text-white/30">Generic or packaged</span></button>
-            <button @click="addStage='recipe';refresh()" class="rounded-[1.45rem] border border-white/8 bg-white/[.035] p-4 text-left transition hover:border-[#efb45f]/35"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#2d261d] text-[#efb45f]"><i data-lucide="chef-hat" class="h-5 w-5"></i></span><strong class="mt-5 block text-xs">Use a recipe</strong><span class="mt-1.5 block text-[8px] leading-4 text-white/30">Yours or your coach's</span></button>
+            <button @click="addStage='recipe';refresh()" class="rounded-[1.45rem] border border-white/8 bg-white/[.035] p-4 text-left transition hover:border-[#efb45f]/35"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#2d261d] text-[#efb45f]"><i data-lucide="chef-hat" class="h-5 w-5"></i></span><strong class="mt-5 block text-xs">Use a recipe</strong><span class="mt-1.5 block text-[8px] leading-4 text-white/30">Any saved preparation</span></button>
             <button @click="addStage='quick';refresh()" class="rounded-[1.45rem] border border-white/8 bg-white/[.035] p-4 text-left transition hover:border-[#efb45f]/35"><span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#2d261d] text-[#efb45f]"><i data-lucide="zap" class="h-5 w-5"></i></span><strong class="mt-5 block text-xs">Quick add</strong><span class="mt-1.5 block text-[8px] leading-4 text-white/30">Just a name and calories</span></button>
           </div>
           <p class="mt-5 rounded-2xl bg-[#2d261d]/65 p-4 text-[8px] leading-4 text-white/30"><strong class="text-[#efb45f]">Adding here means “I ate this”.</strong> Planning a meal does not.</p>
@@ -283,11 +279,11 @@
         </div>
 
         <div x-show="addStage==='recipe'" x-cloak>
-          <p class="text-sm text-white/42">Homemade or coached</p><h2 class="mt-1 text-xl font-semibold tracking-[-.04em]">Choose a recipe.</h2>
+          <p class="text-sm text-white/42">Saved preparations</p><h2 class="mt-1 text-xl font-semibold tracking-[-.04em]">Choose a recipe.</h2>
           <label class="mt-5 flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[.035] px-4 py-3"><i data-lucide="search" class="h-4 w-4 text-white/25"></i><input x-model="pickSearch" type="search" placeholder="Search recipes" class="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-white/20"></label>
           <div class="mt-5 space-y-2">
             <template x-for="r in pickRecipes" :key="r.id">
-              <button @click="pickRecipe(r.id)" class="flex w-full items-center gap-3 rounded-[1.2rem] border border-white/8 bg-white/[.035] p-3 text-left"><span class="meal-photo h-14 w-14 shrink-0 rounded-2xl" :style="`background-image:url('${r.image}')`"></span><span class="min-w-0 flex-1"><strong class="block truncate text-[11px]" x-text="r.name"></strong><span class="tnum mt-1.5 block text-[8px] text-white/30" x-text="Math.round(perServing(r).kcal)+' kcal · '+perServing(r).protein.toFixed(0)+'g protein / serving'"></span></span><i data-lucide="chevron-right" class="h-4 w-4 text-white/18"></i></button>
+              <button @click="pickRecipe(r.id)" class="flex w-full items-center gap-3 rounded-[1.2rem] border border-white/8 bg-white/[.035] p-3 text-left"><span class="meal-photo h-14 w-14 shrink-0 rounded-2xl" :style="`background-image:url('${r.image}')`"></span><span class="min-w-0 flex-1"><strong class="block truncate text-[11px]" x-text="r.name"></strong><span class="tnum mt-1.5 block text-[8px] text-white/30" x-text="formatEnergy(perServing(r).kcal)+' · '+(isKnown(perServing(r).protein)?formatNumber(perServing(r).protein,0)+'g protein':'— protein')+' / serving'"></span></span><i data-lucide="chevron-right" class="h-4 w-4 text-white/18"></i></button>
             </template>
           </div>
         </div>
@@ -308,7 +304,7 @@
             <div class="flex items-center gap-3">
               <span class="grid h-11 w-11 place-items-center rounded-2xl bg-[#efb45f] text-[#1d160d]"><i :data-lucide="selectionIcon" class="h-5 w-5"></i></span>
               <span class="min-w-0 flex-1"><span class="text-[8px] font-bold tracking-[.11em] text-[#efb45f] uppercase" x-text="selectionKind"></span><strong class="mt-1 block truncate text-xs" x-text="selectionTitle"></strong></span>
-              <span class="text-right"><strong class="tnum block text-xs" x-text="'≈ '+Math.round(preview.kcal)+' kcal'"></strong><span class="tnum mt-1 block text-[8px] text-white/30" x-text="'≈ '+preview.protein.toFixed(1)+'g P'"></span></span>
+              <span class="text-right"><strong class="tnum block text-xs" x-text="formatEnergy(preview.kcal)"></strong><span class="tnum mt-1 block text-[8px] text-white/30" x-text="isKnown(preview.protein)?formatNumber(preview.protein,1)+'g P':'—'"></span></span>
             </div>
           </div>
           <div x-show="selected?.type==='food'" class="mt-5 space-y-2">
@@ -338,10 +334,11 @@
               <label class="flex items-baseline gap-1 rounded-xl bg-white/[.055] px-3 py-2"><input x-model.number="quantity" @input="portions=null" type="number" min="1" class="tnum w-14 bg-transparent text-right text-sm font-semibold outline-none"><span class="text-[9px] text-white/30" x-text="selected?.item?.unit"></span></label>
             </div>
           </div>
-          <div x-show="selected?.type==='recipe'" class="mt-5 flex items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4"><span><strong class="block text-xs">Servings eaten</strong><span class="mt-1 block text-[8px] text-white/30">Half portions are fine</span></span><div class="flex items-center rounded-xl bg-white/[.05] p-1"><button @click="servings=Math.max(.5,servings-.5)" class="grid h-8 w-8 place-items-center text-white/40" aria-label="Fewer servings"><i data-lucide="minus" class="h-3 w-3"></i></button><strong class="tnum min-w-10 text-center text-[10px]" x-text="servings+'×'"></strong><button @click="servings=Math.min(4,servings+.5)" class="grid h-8 w-8 place-items-center rounded-lg bg-[#efb45f] text-[#1d160d]" aria-label="More servings"><i data-lucide="plus" class="h-3 w-3"></i></button></div></div>
+          <div x-show="selected?.type==='recipe'" class="mt-5 flex items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4"><span><strong class="block text-xs">Servings eaten</strong><span class="mt-1 block text-[8px] text-white/30">Quarter portions are supported</span></span><div class="flex items-center rounded-xl bg-white/[.05] p-1"><button @click="servings=Math.max(.25,servings-.25)" class="grid h-10 w-10 place-items-center text-white/40" aria-label="Fewer servings"><i data-lucide="minus" class="h-3 w-3"></i></button><strong class="tnum min-w-10 text-center text-[10px]" x-text="servings+'×'"></strong><button @click="servings=Math.min(10,servings+.25)" class="grid h-10 w-10 place-items-center rounded-lg bg-[#efb45f] text-[#1d160d]" aria-label="More servings"><i data-lucide="plus" class="h-3 w-3"></i></button></div></div>
           <h3 class="mt-6 text-xs font-bold">Meal</h3>
-          <div class="mt-3 grid grid-cols-2 gap-2"><template x-for="s in slots" :key="s.id"><button @click="targetSlot=s.id" class="flex items-center gap-2 rounded-2xl border p-3 text-left" :class="targetSlot===s.id?'border-[#efb45f] bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.03] text-white/38'"><i :data-lucide="s.icon" class="h-4 w-4"></i><span class="text-[9px] font-bold" x-text="s.label"></span></button></template></div>
-          <button @click="commitLog()" class="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#efb45f] py-4 text-xs font-bold text-[#1d160d]"><i data-lucide="check" class="h-4 w-4"></i><span x-text="editingId?'Save changes':(isToday?'Add to today':'Add to '+days[day].short)"></span></button>
+          <div class="mt-3 grid grid-cols-2 gap-2"><template x-for="s in slots" :key="s.id"><button @click="targetSlot=s.id;if(!isToday)consumedAt=defaultTime(s.id)" class="flex min-h-12 items-center gap-2 rounded-2xl border p-3 text-left" :class="targetSlot===s.id?'border-[#efb45f] bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.03] text-white/38'"><i :data-lucide="s.icon" class="h-4 w-4"></i><span class="text-[9px] font-bold" x-text="s.label"></span></button></template></div>
+          <label class="mt-3 flex min-h-14 items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4"><span><strong class="block text-xs">Time eaten</strong><span class="mt-1 block text-[8px] text-white/30" x-text="isToday?'Current time by default':'Editable for past entries'"></span></span><input x-model="consumedAt" type="time" class="tnum rounded-xl bg-white/[.055] px-3 py-2 text-xs outline-none [color-scheme:dark]"></label>
+          <button @click="commitLog()" class="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#efb45f] py-4 text-xs font-bold text-[#1d160d]"><i data-lucide="check" class="h-4 w-4"></i><span x-text="editingId?'Save changes':(isToday?'Add to today':'Add to '+selectedShort)"></span></button>
         </div>
       </section>
     </div>
@@ -352,7 +349,7 @@
         <div class="mx-auto h-1 w-11 rounded-full bg-white/12"></div>
         <div class="mt-4 flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <span class="flex items-center gap-1 text-[7px] font-bold tracking-[.1em] uppercase" :class="detail?.author==='coach'?'text-[#efb45f]':'text-white/30'"><i :data-lucide="detail?.author==='coach'?'sparkles':'user-round'" class="h-2.5 w-2.5"></i><span x-text="detail?.author==='coach'?'Written by your coach':'Written by you'"></span></span>
+            <span class="flex items-center gap-1 text-[7px] font-bold tracking-[.1em] text-white/30 uppercase"><i data-lucide="book-open" class="h-2.5 w-2.5"></i><span>Saved recipe</span></span>
             <h2 class="mt-2 text-[1.4rem] font-semibold leading-7 tracking-[-.045em]" x-text="detail?.name"></h2>
             <p class="mt-2 text-[10px] leading-5 text-white/42" x-text="detail?.description"></p>
           </div>
@@ -362,8 +359,8 @@
         <div x-show="showEnergy && detail" class="mt-4 rounded-[1.35rem] border border-[#efb45f]/20 bg-[#2d261d] p-4">
           <div class="flex items-center justify-between"><p class="text-[8px] font-bold tracking-[.12em] text-[#efb45f] uppercase">Per serving</p><span class="text-[8px] text-white/28"><span x-text="detailServings"></span> serving<span x-show="detailServings>1">s</span> shown</span></div>
           <div class="mt-3 grid grid-cols-4 gap-2 text-center">
-            <div><strong class="tnum block text-sm" x-text="detail?Math.round(perServing(detail).kcal):0"></strong><span class="text-[8px] text-white/28">kcal</span></div>
-            <template x-for="macro in macroFields" :key="'d'+macro.key"><div><strong class="tnum block text-sm" x-text="detail?perServing(detail)[macro.key].toFixed(1):0"></strong><span class="text-[8px] text-white/28" x-text="macro.label"></span></div></template>
+            <div><strong class="tnum block text-sm" x-text="detail?formatNumber(perServing(detail).kcal,0):'—'"></strong><span class="text-[8px] text-white/28">kcal</span></div>
+            <template x-for="macro in macroFields" :key="'d'+macro.key"><div><strong class="tnum block text-sm" x-text="detail?formatNumber(perServing(detail)[macro.key],1):'—'"></strong><span class="text-[8px] text-white/28" x-text="macro.label"></span></div></template>
           </div>
           <p class="mt-3 border-t border-white/7 pt-3 text-[8px] leading-4 text-white/25">Computed from the ingredients below. Change a quantity and this changes with it.</p>
         </div>
@@ -409,7 +406,7 @@
         <div class="mt-5 flex items-start justify-between"><div><p class="text-[10px] text-white/35">Same slot, different meal</p><h2 class="mt-1 text-xl font-semibold tracking-[-.04em]">Swap <span x-text="slotLabel(swapSlot).toLowerCase()"></span></h2></div><button @click="swapOpen=false" class="grid h-9 w-9 place-items-center rounded-full bg-white/[.05] text-white/45" aria-label="Close"><i data-lucide="x" class="h-4 w-4"></i></button></div>
         <div class="mt-5 space-y-2">
           <template x-for="r in swapCandidates" :key="r.id">
-            <button @click="chooseSwap(r.id)" class="flex w-full items-center gap-3 rounded-[1.2rem] border border-white/8 bg-white/[.035] p-3 text-left transition hover:border-[#efb45f]/35"><span class="meal-photo h-12 w-12 shrink-0 rounded-xl" :style="`background-image:url('${r.image}')`"></span><span class="min-w-0 flex-1"><strong class="block truncate text-[10px]" x-text="r.name"></strong><span class="tnum mt-1 block text-[8px] text-white/30" x-text="Math.round(perServing(r).kcal)+' kcal / serving'"></span></span><i data-lucide="chevron-right" class="h-4 w-4 text-white/18"></i></button>
+            <button @click="chooseSwap(r.id)" class="flex w-full items-center gap-3 rounded-[1.2rem] border border-white/8 bg-white/[.035] p-3 text-left transition hover:border-[#efb45f]/35"><span class="meal-photo h-12 w-12 shrink-0 rounded-xl" :style="`background-image:url('${r.image}')`"></span><span class="min-w-0 flex-1"><strong class="block truncate text-[10px]" x-text="r.name"></strong><span class="tnum mt-1 block text-[8px] text-white/30" x-text="formatEnergy(perServing(r).kcal)+' / serving'"></span></span><i data-lucide="chevron-right" class="h-4 w-4 text-white/18"></i></button>
           </template>
         </div>
       </section>
@@ -438,7 +435,7 @@
           <template x-for="(ing,index) in draft.ingredients" :key="index">
             <div class="flex items-center gap-2 rounded-2xl border border-white/8 bg-white/[.035] p-3">
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#2d261d] text-[#efb45f]"><i :data-lucide="foodById(ing.foodId)?.icon" class="h-4 w-4"></i></span>
-              <span class="min-w-0 flex-1"><strong class="block truncate text-[10px]" x-text="foodById(ing.foodId)?.name"></strong><span class="tnum mt-0.5 block text-[8px] text-white/30" x-text="'≈ '+Math.round(ingredientKcal(ing))+' kcal'"></span></span>
+              <span class="min-w-0 flex-1"><strong class="block truncate text-[10px]" x-text="foodById(ing.foodId)?.name"></strong><span class="tnum mt-0.5 block text-[8px] text-white/30" x-text="formatEnergy(ingredientKcal(ing))"></span></span>
               <label class="flex items-baseline gap-1 rounded-lg bg-white/[.055] px-2 py-1.5"><input x-model.number="ing.qty" type="number" min="1" class="tnum w-12 bg-transparent text-right text-xs font-semibold outline-none"><span class="text-[8px] text-white/28" x-text="foodById(ing.foodId)?.unit"></span></label>
               <button type="button" @click="draft.ingredients.splice(index,1)" class="grid h-7 w-7 place-items-center rounded-lg text-white/20 hover:text-white" aria-label="Remove ingredient"><i data-lucide="x" class="h-3 w-3"></i></button>
             </div>
@@ -449,8 +446,8 @@
         <div class="mt-6 rounded-[1.4rem] border border-[#efb45f]/20 bg-[#2d261d] p-4">
           <div class="flex items-start justify-between"><div><p class="text-[8px] font-bold tracking-[.12em] text-[#efb45f] uppercase">Calculated automatically</p><h3 class="mt-1.5 text-sm font-bold">Per serving</h3></div><span class="tnum text-[9px] text-white/28"><span x-text="draft.baseServings"></span> servings</span></div>
           <div class="mt-4 grid grid-cols-4 gap-2 text-center">
-            <div><strong class="tnum block text-sm" x-text="Math.round(draftPerServing.kcal)"></strong><span class="text-[8px] text-white/28">kcal</span></div>
-            <template x-for="macro in macroFields" :key="'e'+macro.key"><div><strong class="tnum block text-sm" x-text="draftPerServing[macro.key].toFixed(1)"></strong><span class="text-[8px] text-white/28" x-text="macro.label"></span></div></template>
+            <div><strong class="tnum block text-sm" x-text="formatNumber(draftPerServing.kcal,0)"></strong><span class="text-[8px] text-white/28">kcal</span></div>
+            <template x-for="macro in macroFields" :key="'e'+macro.key"><div><strong class="tnum block text-sm" x-text="formatNumber(draftPerServing[macro.key],1)"></strong><span class="text-[8px] text-white/28" x-text="macro.label"></span></div></template>
           </div>
         </div>
 
@@ -486,7 +483,7 @@
         <strong class="text-sm" x-text="foodDraft.id?(foodDraft.readOnly?'Ingredient':'Edit ingredient'):'New ingredient'"></strong><span class="w-10"></span>
       </header>
       <form @submit.prevent="saveFood()" class="flex-1 overflow-y-auto px-7 pb-8 pt-3 scrollbar-none">
-        <p x-show="foodDraft.readOnly" class="mb-4 rounded-2xl bg-[#2d261d]/65 p-4 text-[8px] leading-4 text-white/32">Catalogue entries are read-only: they come from a reference table shared by everyone. Duplicate it to adjust the values.</p>
+        <p x-show="foodDraft.readOnly" class="mb-4 rounded-2xl bg-[#2d261d]/65 p-4 text-[8px] leading-4 text-white/32">Generic catalogue entries are read-only. Duplicate this reference to adjust its values. Scanned products stay editable.</p>
         <label class="block rounded-2xl border border-white/8 bg-white/[.035] px-4 py-3"><span class="text-[9px] text-white/30">Ingredient name</span><input x-model="foodDraft.name" :readonly="foodDraft.readOnly" required placeholder="e.g. Local granola" class="mt-1 w-full bg-transparent text-sm font-semibold outline-none placeholder:text-white/18"></label>
         <div class="mt-3 grid grid-cols-2 gap-3">
           <label class="block rounded-2xl border border-white/8 bg-white/[.035] px-4 py-3"><span class="text-[9px] text-white/30">Brand <span class="text-white/15">· optional</span></span><input x-model="foodDraft.brand" :readonly="foodDraft.readOnly" class="mt-1 w-full bg-transparent text-xs outline-none"></label>
@@ -494,7 +491,7 @@
         </div>
         <div class="mt-5 grid grid-cols-2 gap-2">
           <template x-for="field in nutritionFields" :key="field.key">
-            <label class="rounded-2xl border border-white/8 bg-white/[.035] p-3"><span class="text-[8px] text-white/30" x-text="field.label"></span><span class="mt-1 flex items-baseline gap-1"><input x-model.number="foodDraft[field.key]" :readonly="foodDraft.readOnly" :required="field.key==='kcal'" type="number" min="0" step="0.1" class="tnum w-full min-w-0 bg-transparent text-sm font-semibold outline-none"><span class="text-[8px] text-white/25" x-text="field.unit"></span></span></label>
+            <label class="rounded-2xl border border-white/8 bg-white/[.035] p-3"><span class="text-[8px] text-white/30" x-text="field.label"></span><span class="mt-1 flex items-baseline gap-1"><input :value="foodDraft[field.key]??''" @input="foodDraft[field.key]=$event.target.value===''?null:Number($event.target.value)" :readonly="foodDraft.readOnly" :required="field.key==='kcal' && foodDraft.source!=='Packaged'" type="number" min="0" step="0.1" class="tnum w-full min-w-0 bg-transparent text-sm font-semibold outline-none"><span class="text-[8px] text-white/25" x-text="field.unit"></span><button x-show="!foodDraft.readOnly&&field.key!=='kcal'&&isKnown(foodDraft[field.key])" type="button" @click.prevent="foodDraft[field.key]=null" class="ml-1 text-[8px] text-white/25 hover:text-[#efb45f]" :aria-label="'Clear '+field.label">×</button></span></label>
           </template>
         </div>
         <div x-show="!foodDraft.readOnly" class="mt-6 space-y-2">
@@ -505,17 +502,17 @@
       </form>
     </div>
 
-    <!-- ================= PREFERENCES ================= -->
-    <div x-show="prefsOpen" x-cloak class="absolute inset-0 z-[99] flex items-end bg-black/65 fade" @click.self="prefsOpen=false">
-      <section class="sheet w-full rounded-t-[2rem] border-t border-white/10 bg-[#151517] px-6 pb-8 pt-3">
-        <div class="mx-auto h-1 w-11 rounded-full bg-white/12"></div>
-        <div class="mt-5 flex items-start justify-between"><div><p class="text-[10px] text-white/35">Food preferences</p><h2 class="mt-1 text-xl font-semibold tracking-[-.04em]">Make it yours</h2></div><button @click="prefsOpen=false" class="grid h-9 w-9 place-items-center rounded-full bg-white/[.05] text-white/45" aria-label="Close"><i data-lucide="x" class="h-4 w-4"></i></button></div>
-        <div class="mt-6 space-y-3">
-          <button @click="showEnergy=!showEnergy" class="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4 text-left"><span><strong class="block text-xs">Show energy</strong><span class="mt-1 block text-[9px] text-white/32">Everything keeps working without numbers</span></span><span class="relative h-6 w-11 rounded-full transition" :class="showEnergy?'bg-[#efb45f]':'bg-white/12'"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-all" :class="showEnergy?'left-6':'left-1'"></span></span></button>
-          <button @click="coachPlans=!coachPlans;applyCoach()" class="flex w-full items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4 text-left"><span><strong class="block text-xs">Let the coach plan my days</strong><span class="mt-1 block text-[9px] text-white/32">Turn it off to see the app without any agent</span></span><span class="relative h-6 w-11 rounded-full transition" :class="coachPlans?'bg-[#efb45f]':'bg-white/12'"><span class="absolute top-1 h-4 w-4 rounded-full bg-white transition-all" :class="coachPlans?'left-6':'left-1'"></span></span></button>
-        </div>
-        <p class="mt-5 rounded-2xl bg-[#2d261d]/65 p-4 text-[8px] leading-4 text-white/30">The second switch is the honest test: with the coach off, the app must still be usable on its own.</p>
-        <button @click="prefsOpen=false" class="mt-6 w-full rounded-2xl bg-[#efb45f] py-4 text-xs font-bold text-[#1d160d]">Done</button>
+    <!-- ================= PLAN RECIPE ================= -->
+    <div x-show="planOpen" x-cloak class="absolute inset-0 z-[99] flex flex-col bg-[#101012] fade">
+      <header class="flex items-center justify-between px-6 pb-3 pt-7"><button @click="planOpen=false" class="grid h-10 w-10 place-items-center rounded-full border border-white/8 bg-white/[.035] text-white/55" aria-label="Close"><i data-lucide="x" class="h-4 w-4"></i></button><strong class="text-sm">Plan recipe</strong><span class="w-10"></span></header>
+      <section class="flex-1 overflow-y-auto px-7 pb-8 pt-4 scrollbar-none">
+        <p class="text-sm text-white/42">Choose the moment</p><h2 class="mt-1 text-[1.75rem] font-semibold tracking-[-.05em]">When do you<br><span class="text-[#efb45f]">want it suggested?</span></h2>
+        <div class="mt-5 flex items-center gap-3 rounded-[1.35rem] border border-[#efb45f]/20 bg-[#2d261d] p-3"><span class="meal-photo h-14 w-14 shrink-0 rounded-2xl" :style="planRecipe?`background-image:url('${planRecipe.image}')`:''"></span><span class="min-w-0 flex-1"><span class="text-[8px] font-bold tracking-[.11em] text-[#efb45f] uppercase">Recipe</span><strong class="mt-1 block truncate text-[11px]" x-text="planRecipe?.name"></strong></span></div>
+        <h3 class="mt-6 text-xs font-bold">Day</h3><div class="mt-3 flex gap-2 overflow-x-auto pb-1 scrollbar-none"><template x-for="d in planDays" :key="d.iso"><button @click="planDate=d.iso" class="flex min-w-14 flex-col items-center rounded-2xl border px-3 py-3" :class="planDate===d.iso?'border-[#efb45f] bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.03] text-white/35'"><span class="text-[8px] font-bold" x-text="d.short"></span><strong class="mt-1 text-sm" x-text="d.date"></strong></button></template></div>
+        <h3 class="mt-6 text-xs font-bold">Moment</h3><div class="mt-3 grid grid-cols-2 gap-2"><template x-for="slot in slots" :key="slot.id"><button @click="planSlot=slot.id" class="flex min-h-12 items-center gap-2 rounded-2xl border p-3 text-left" :class="planSlot===slot.id?'border-[#efb45f] bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.03] text-white/38'"><i :data-lucide="slot.icon" class="h-4 w-4"></i><span class="text-[9px] font-bold" x-text="slot.label"></span></button></template></div>
+        <div class="mt-6 flex min-h-14 items-center justify-between rounded-2xl border border-white/8 bg-white/[.035] p-4"><span><strong class="block text-xs">Planned servings</strong><span class="mt-1 block text-[8px] text-white/30">Adjust before confirming</span></span><div class="flex items-center rounded-xl bg-white/[.05] p-1"><button @click="planServings=Math.max(.25,planServings-.25)" class="grid h-10 w-10 place-items-center text-white/40" aria-label="Fewer planned servings"><i data-lucide="minus" class="h-3 w-3"></i></button><strong class="tnum min-w-12 text-center text-[10px]" x-text="planServings+'×'"></strong><button @click="planServings=Math.min(10,planServings+.25)" class="grid h-10 w-10 place-items-center rounded-lg bg-[#efb45f] text-[#1d160d]" aria-label="More planned servings"><i data-lucide="plus" class="h-3 w-3"></i></button></div></div>
+        <p x-show="planExisting" class="mt-4 rounded-2xl border border-[#efb45f]/20 bg-[#2d261d]/60 p-3 text-[8px] leading-4 text-white/40"><strong class="text-[#efb45f]">Replace existing suggestion?</strong><br><span x-text="planExisting?.name+' is already planned for this moment.'"></span></p>
+        <button @click="confirmManualPlan()" class="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#efb45f] py-4 text-xs font-bold text-[#1d160d]"><i data-lucide="calendar-check" class="h-4 w-4"></i><span x-text="planExisting?'Replace suggestion':'Add suggestion'"></span></button>
       </section>
     </div>
   </main>
@@ -551,57 +548,52 @@
       ]
 
       const recipes = [
-        {id:'r-oats',author:'coach',favourite:true,type:'breakfast',name:'Berry oat & skyr bowl',time:6,baseServings:1,image:covers[0],description:'Creamy skyr, slow oats and berries. Filling for the whole morning.',ingredients:[{foodId:'f-skyr',qty:200},{foodId:'f-oats',qty:35},{foodId:'f-berries',qty:120},{foodId:'f-almond',qty:10}],steps:['Fold the oats into the skyr.','Top with berries and chopped almonds.','Eat now, or chill overnight.']},
-        {id:'r-chicken',author:'coach',favourite:false,type:'main',name:'Golden chicken grain bowl',time:25,baseServings:2,image:covers[0],description:'Spiced chicken, roasted courgette and quinoa.',ingredients:[{foodId:'f-chicken',qty:260},{foodId:'f-quinoa',qty:280},{foodId:'f-courgette',qty:240},{foodId:'f-oil',qty:10}],steps:['Season the chicken and vegetables.','Roast until golden.','Layer with quinoa and lemon.']},
-        {id:'r-curry',author:'coach',favourite:true,type:'main',name:'Creamy red lentil curry',time:28,baseServings:3,image:covers[1],description:'One pan, big flavour, gentle energy density.',ingredients:[{foodId:'f-lentils',qty:240},{foodId:'f-tomato',qty:600},{foodId:'f-spinach',qty:300},{foodId:'f-oil',qty:15}],steps:['Simmer lentils, tomatoes and spices for 18 minutes.','Fold the spinach through.','Serve with lime.']},
-        {id:'r-salmon',author:'you',favourite:false,type:'main',name:'Lemon salmon & greens',time:24,baseServings:2,image:covers[2],description:'Flaky salmon, tender potatoes, green beans.',ingredients:[{foodId:'f-salmon',qty:300},{foodId:'f-potato',qty:480},{foodId:'f-beans',qty:360},{foodId:'f-oil',qty:10}],steps:['Boil the potatoes, add beans at the end.','Sear the salmon.','Finish with lemon and dill.']},
-        {id:'r-snack',author:'coach',favourite:false,type:'snack',name:'Yoghurt & almonds',time:3,baseServings:1,image:covers[1],description:'Sweet, creamy, enough protein to bridge the afternoon.',ingredients:[{foodId:'f-yoghurt',qty:150},{foodId:'f-almond',qty:15}],steps:['Spoon the yoghurt.','Crush the almonds over it.']},
+        {id:'r-oats',favourite:true,type:'breakfast',name:'Berry oat & skyr bowl',time:6,baseServings:1,image:covers[0],description:'Creamy skyr, slow oats and berries. Filling for the whole morning.',ingredients:[{foodId:'f-skyr',qty:200},{foodId:'f-oats',qty:35},{foodId:'f-berries',qty:120},{foodId:'f-almond',qty:10}],steps:['Fold the oats into the skyr.','Top with berries and chopped almonds.','Eat now, or chill overnight.']},
+        {id:'r-chicken',favourite:false,type:'main',name:'Golden chicken grain bowl',time:25,baseServings:2,image:covers[0],description:'Spiced chicken, roasted courgette and quinoa.',ingredients:[{foodId:'f-chicken',qty:260},{foodId:'f-quinoa',qty:280},{foodId:'f-courgette',qty:240},{foodId:'f-oil',qty:10}],steps:['Season the chicken and vegetables.','Roast until golden.','Layer with quinoa and lemon.']},
+        {id:'r-curry',favourite:true,type:'main',name:'Creamy red lentil curry',time:28,baseServings:3,image:covers[1],description:'One pan, big flavour, gentle energy density.',ingredients:[{foodId:'f-lentils',qty:240},{foodId:'f-tomato',qty:600},{foodId:'f-spinach',qty:300},{foodId:'f-oil',qty:15}],steps:['Simmer lentils, tomatoes and spices for 18 minutes.','Fold the spinach through.','Serve with lime.']},
+        {id:'r-salmon',favourite:false,type:'main',name:'Lemon salmon & greens',time:24,baseServings:2,image:covers[2],description:'Flaky salmon, tender potatoes, green beans.',ingredients:[{foodId:'f-salmon',qty:300},{foodId:'f-potato',qty:480},{foodId:'f-beans',qty:360},{foodId:'f-oil',qty:10}],steps:['Boil the potatoes, add beans at the end.','Sear the salmon.','Finish with lemon and dill.']},
+        {id:'r-snack',favourite:false,type:'snack',name:'Yoghurt & almonds',time:3,baseServings:1,image:covers[1],description:'Sweet, creamy, enough protein to bridge the afternoon.',ingredients:[{foodId:'f-yoghurt',qty:150},{foodId:'f-almond',qty:15}],steps:['Spoon the yoghurt.','Crush the almonds over it.']},
       ]
 
-      const days = [
-        {short:'Mon',date:24,long:'Monday, August 24'},
-        {short:'Tue',date:25,long:'Tuesday, August 25'},
-        {short:'Wed',date:26,long:'Wednesday, August 26'},
-        {short:'Thu',date:27,long:'Thursday, August 27'},
-        {short:'Fri',date:28,long:'Friday, August 28'},
-        {short:'Sat',date:29,long:'Saturday, August 29'},
-        {short:'Sun',date:30,long:'Sunday, August 30'},
-      ]
-
-      const coachPlan = () => ({
-        '0:breakfast': {recipeId:'r-oats',servings:1,author:'coach',eatenLogId:'seed-1'},
-        '0:lunch': {recipeId:'r-chicken',servings:1,author:'coach',eatenLogId:'seed-2'},
-        '0:dinner': {recipeId:'r-curry',servings:1,author:'coach',eatenLogId:null},
-        '1:breakfast': {recipeId:'r-oats',servings:1,author:'coach',eatenLogId:'seed-3'},
-        '1:lunch': {recipeId:'r-chicken',servings:1,author:'coach',eatenLogId:null},
-        '1:snack': {recipeId:'r-snack',servings:1,author:'coach',eatenLogId:null},
-        '1:dinner': {recipeId:'r-salmon',servings:1,author:'coach',eatenLogId:null},
-        '2:breakfast': {recipeId:'r-oats',servings:1,author:'coach',eatenLogId:null},
-        '2:dinner': {recipeId:'r-curry',servings:1,author:'coach',eatenLogId:null},
-      })
+      const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+      const dateAt = offset => { const d = new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset); return d }
+      const dayData = offset => { const d=dateAt(offset); return {iso:iso(d),short:d.toLocaleDateString('en-US',{weekday:'short'}),date:d.getDate(),long:d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})} }
+      const todayIso = iso(dateAt(0))
+      const days = Array.from({length:7},(_,i)=>dayData(i-6))
+      const planDays = Array.from({length:7},(_,i)=>dayData(i))
+      const yesterdayIso = iso(dateAt(-1))
+      const initialPlans = {
+        [yesterdayIso+':breakfast']:{recipeId:'r-oats',servings:1,eatenLogId:'seed-1'},
+        [yesterdayIso+':lunch']:{recipeId:'r-chicken',servings:1,eatenLogId:'seed-2'},
+        [yesterdayIso+':dinner']:{recipeId:'r-curry',servings:1,eatenLogId:null},
+        [todayIso+':breakfast']:{recipeId:'r-oats',servings:1,eatenLogId:'seed-3'},
+        [todayIso+':lunch']:{recipeId:'r-chicken',servings:1,eatenLogId:null},
+        [todayIso+':snack']:{recipeId:'r-snack',servings:1,eatenLogId:null},
+        [todayIso+':dinner']:{recipeId:'r-salmon',servings:1,eatenLogId:null},
+      }
 
       return {
-        foods, recipes, covers, days,
+        foods, recipes, covers, days, planDays, todayIso,
         macroFields: [{key:'protein',label:'protein'},{key:'carbs',label:'carbs'},{key:'fat',label:'fat'}],
         nutritionFields: [{key:'kcal',label:'Energy',unit:'kcal'},{key:'protein',label:'Protein',unit:'g'},{key:'carbs',label:'Carbohydrates',unit:'g'},{key:'fat',label:'Fat',unit:'g'},{key:'fibre',label:'Fibre',unit:'g'}],
         slots: [{id:'breakfast',label:'Breakfast',icon:'sunrise'},{id:'lunch',label:'Lunch',icon:'sun'},{id:'snack',label:'Snack',icon:'apple'},{id:'dinner',label:'Dinner',icon:'moon'}],
-        view: 'day', day: 1, showEnergy: true, coachPlans: true, notice: '',
-        plans: coachPlan(),
+        view: 'day', selectedDate: todayIso, showEnergy: true, notice: '',
+        plans: initialPlans,
         logs: [
-          {id:'seed-1',day:0,slot:'breakfast',at:'07:40',title:'Berry oat & skyr bowl',kind:'Recipe',amount:'1 serving',kcal:369.5,protein:29.1,carbs:38.8,fat:8.6,icon:'chef-hat',ref:{type:'recipe',id:'r-oats'},servings:1,planKey:'0:breakfast'},
-          {id:'seed-2',day:0,slot:'lunch',at:'12:30',title:'Golden chicken grain bowl',kind:'Recipe',amount:'1 serving',kcal:389.4,protein:36.9,carbs:31.8,fat:11.4,icon:'chef-hat',ref:{type:'recipe',id:'r-chicken'},servings:1,planKey:'0:lunch'},
-          {id:'seed-3',day:1,slot:'breakfast',at:'07:55',title:'Berry oat & skyr bowl',kind:'Recipe',amount:'1 serving',kcal:369.5,protein:29.1,carbs:38.8,fat:8.6,icon:'chef-hat',ref:{type:'recipe',id:'r-oats'},servings:1,planKey:'1:breakfast'},
+          {id:'seed-1',consumedOn:yesterdayIso,slot:'breakfast',at:'07:40',title:'Berry oat & skyr bowl',kind:'Recipe',amount:'1 serving',kcal:369.5,protein:29.1,carbs:38.8,fat:8.6,icon:'chef-hat',ref:{type:'recipe',id:'r-oats'},servings:1,planKey:yesterdayIso+':breakfast'},
+          {id:'seed-2',consumedOn:yesterdayIso,slot:'lunch',at:'12:30',title:'Golden chicken grain bowl',kind:'Recipe',amount:'1 serving',kcal:389.4,protein:36.9,carbs:31.8,fat:11.4,icon:'chef-hat',ref:{type:'recipe',id:'r-chicken'},servings:1,planKey:yesterdayIso+':lunch'},
+          {id:'seed-3',consumedOn:todayIso,slot:'breakfast',at:'07:55',title:'Berry oat & skyr bowl',kind:'Recipe',amount:'1 serving',kcal:369.5,protein:29.1,carbs:38.8,fat:8.6,icon:'chef-hat',ref:{type:'recipe',id:'r-oats'},servings:1,planKey:todayIso+':breakfast'},
         ],
 
         addOpen: false, addStage: 'choice', editingId: null, targetSlot: 'lunch',
-        selected: null, quantity: 100, servings: 1, portions: null, weighedCooked: false, quick: {name:'',kcal:null,protein:null},
+        selected: null, quantity: 100, servings: 1, portions: null, weighedCooked: false, consumedAt:'', quick: {name:'',kcal:null,protein:null},
         scanning: false, scanned: null, pickSearch: '', pickerOpen: false, pickerTarget: 'add',
         detailOpen: false, detail: null, detailServings: 1,
         swapOpen: false, swapSlot: null,
         recipeEditorOpen: false, draft: {id:null,name:'',type:'main',time:20,baseServings:2,steps:'',image:covers[0],ingredients:[]},
         foodEditorOpen: false, foodDraft: {}, foodReturn: 'foods',
         recipeSearch: '', recipeFilter: 'all', foodSearch: '', foodFilter: 'all',
-        prefsOpen: false,
+        planOpen:false, planRecipeId:null, planDate:todayIso, planSlot:'dinner', planServings:1,
 
         init() { this.refresh() },
         clock() { const d = new Date(); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') },
@@ -619,27 +611,34 @@
         foodById(id) { return this.foods.find(f => f.id === id) },
         recipeById(id) { return this.recipes.find(r => r.id === id) },
         slotLabel(slot) { return (this.slots.find(s => s.id === slot) || {}).label || '' },
+        isKnown(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) },
+        formatNumber(value, decimals=0) { return this.isKnown(value) ? '≈ '+Number(value).toFixed(decimals) : '—' },
+        formatEnergy(value) { return this.isKnown(value) ? '≈ '+Math.round(Number(value))+' kcal' : '—' },
+        scaleMetric(value, factor) { return this.isKnown(value) ? Number(value) * Number(factor) : null },
+        strictSum(items, key) { return items.some(item => !this.isKnown(item[key])) ? null : items.reduce((sum,item)=>sum+Number(item[key]),0) },
 
         /* ---- calcul nutritionnel : toujours dérivé, jamais stocké ---- */
         recipeTotals(recipe) {
           const out = {kcal:0, protein:0, carbs:0, fat:0, fibre:0}
-          if (!recipe) return out
+          if (!recipe) return {kcal:null,protein:null,carbs:null,fat:null,fibre:null}
           for (const ing of recipe.ingredients) {
             const food = this.foodById(ing.foodId)
-            if (!food) continue
-            for (const key of Object.keys(out)) out[key] += (Number(food[key]) || 0) * (Number(ing.qty) || 0) / 100
+            for (const key of Object.keys(out)) {
+              if (!food || !this.isKnown(food[key]) || out[key] === null) out[key] = null
+              else out[key] += Number(food[key]) * (Number(ing.qty) || 0) / 100
+            }
           }
           return out
         },
         perServing(recipe) {
           const total = this.recipeTotals(recipe)
           const servings = Math.max(1, Number(recipe?.baseServings) || 1)
-          for (const key of Object.keys(total)) total[key] /= servings
+          for (const key of Object.keys(total)) if (total[key] !== null) total[key] /= servings
           return total
         },
         ingredientKcal(ing) {
           const food = this.foodById(ing.foodId)
-          return food ? (Number(food.kcal) || 0) * (Number(ing.qty) || 0) / 100 : 0
+          return food && this.isKnown(food.kcal) ? Number(food.kcal) * (Number(ing.qty) || 0) / 100 : null
         },
         scaledQty(ing) {
           const factor = this.detailServings / Math.max(1, Number(this.detail?.baseServings) || 1)
@@ -648,21 +647,19 @@
         },
 
         /* ---- la journée ---- */
-        get isToday() { return this.day === 1 },
-        get dayLabel() { return this.day === 1 ? 'Today' : this.days[this.day].long },
-        stepDay(delta) { const next = this.day + delta; if (next < 0 || next > 1) return; this.day = next; this.notice = ''; this.refresh() },
-        planKey(slot, day) { return (day ?? this.day) + ':' + slot },
+        get isToday() { return this.selectedDate === this.todayIso },
+        get dayLabel() { if(this.isToday)return 'Today';const d=new Date(this.selectedDate+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) },
+        get selectedShort(){return new Date(this.selectedDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short'})},
+        stepDay(delta) { const d=new Date(this.selectedDate+'T12:00:00');d.setDate(d.getDate()+delta);const next=iso(d);if(next>this.todayIso)return;this.selectedDate=next;this.notice='';this.refresh() },
+        planKey(slot, date) { return (date ?? this.selectedDate) + ':' + slot },
         planFor(slot) { return this.plans[this.planKey(slot)] || null },
-        logsFor(slot) { return this.logs.filter(l => l.day === this.day && l.slot === slot).sort((a, b) => (a.at || '').localeCompare(b.at || '')) },
-        slotKcal(slot) { return Math.round(this.logsFor(slot).reduce((sum, l) => sum + l.kcal, 0)) },
-        entriesOn(day) { return this.logs.filter(l => l.day === day).length },
-        dayKcal(day) { return Math.round(this.logs.filter(l => l.day === day).reduce((s, l) => s + l.kcal, 0)) },
+        logsFor(slot) { return this.logs.filter(l => l.consumedOn === this.selectedDate && l.slot === slot).sort((a, b) => (a.at || '').localeCompare(b.at || '')) },
+        slotKcal(slot) { return this.strictSum(this.logsFor(slot),'kcal') },
+        entriesOn(date) { return this.logs.filter(l => l.consumedOn === date).length },
+        dayKcal(date) { const rows=this.logs.filter(l=>l.consumedOn===date);return rows.length?this.strictSum(rows,'kcal'):null },
         get totals() {
-          const out = {kcal:0, protein:0, carbs:0, fat:0}
-          for (const log of this.logs.filter(l => l.day === this.day)) {
-            for (const key of Object.keys(out)) out[key] += Number(log[key]) || 0
-          }
-          return out
+          const rows=this.logs.filter(l=>l.consumedOn===this.selectedDate)
+          return {kcal:this.strictSum(rows,'kcal'),protein:this.strictSum(rows,'protein'),carbs:this.strictSum(rows,'carbs'),fat:this.strictSum(rows,'fat')}
         },
         get plannedCount() { return this.slots.filter(s => this.planFor(s.id) && !this.planFor(s.id).eatenLogId).length },
 
@@ -675,10 +672,10 @@
           const per = this.perServing(recipe)
           const id = 'log-' + key + '-' + this.logs.length
           this.logs.push({
-            id, day: this.day, slot, at: this.clock(), title: recipe.name, kind: 'Planned recipe',
+            id, consumedOn: this.selectedDate, slot, at: this.isToday?this.clock():this.defaultTime(slot), title: recipe.name, kind: 'Planned recipe',
             amount: plan.servings + ' serving' + (plan.servings === 1 ? '' : 's'),
-            kcal: per.kcal * plan.servings, protein: per.protein * plan.servings,
-            carbs: per.carbs * plan.servings, fat: per.fat * plan.servings,
+            kcal: this.scaleMetric(per.kcal,plan.servings), protein: this.scaleMetric(per.protein,plan.servings),
+            carbs: this.scaleMetric(per.carbs,plan.servings), fat: this.scaleMetric(per.fat,plan.servings),
             icon: 'chef-hat', ref: {type:'recipe', id: recipe.id}, servings: plan.servings, planKey: key,
           })
           plan.eatenLogId = id
@@ -702,21 +699,18 @@
         },
         chooseSwap(id) {
           const plan = this.plans[this.planKey(this.swapSlot)]
-          if (plan) { plan.recipeId = id; plan.author = 'you' }
+          if (plan) plan.recipeId = id
           this.swapOpen = false
           this.notice = this.recipeById(id).name + ' now planned for ' + this.slotLabel(this.swapSlot).toLowerCase() + '.'
           this.refresh()
         },
-        applyCoach() {
-          if (this.coachPlans) { this.plans = coachPlan(); this.notice = 'Coach plans restored.' }
-          else { this.plans = {}; this.notice = 'Coach off. The app still records everything you add.' }
-          this.refresh()
-        },
+        defaultTime(slot){return {breakfast:'08:00',lunch:'13:00',snack:'16:30',dinner:'20:00'}[slot]||'12:00'},
 
         /* ---- ajout manuel ---- */
         openAdd(slot) {
           this.editingId = null; this.addStage = 'choice'; this.targetSlot = slot || this.slotFromClock()
           this.selected = null; this.quantity = 100; this.servings = 1
+          this.consumedAt = this.isToday ? this.clock() : this.defaultTime(this.targetSlot)
           this.pickSearch = ''; this.scanning = false; this.scanned = null
           this.quick = {name:'', kcal:null, protein:null}
           this.addOpen = true; this.refresh()
@@ -752,13 +746,13 @@
         stepPortion(delta) {
           const serving = this.selected?.item?.serving
           if (!serving) return
-          this.portions = Math.max(.5, Number(((this.portions || 1) + delta).toFixed(2)))
+          this.portions = Math.min(20,Math.max(.5, Number(((this.portions || 1) + delta).toFixed(2))))
           this.quantity = Math.round(this.portions * serving.grams)
         },
         pickRecipe(id) { this.selected = {type:'recipe', item: this.recipeById(id)}; this.servings = 1; this.addStage = 'confirm'; this.refresh() },
         prepareQuick() {
           if (!this.quick.name.trim() || this.quick.kcal === null || this.quick.kcal === '') return
-          this.selected = {type:'quick', item: {name: this.quick.name.trim(), kcal: Number(this.quick.kcal) || 0, protein: Number(this.quick.protein) || 0, carbs: 0, fat: 0}}
+          this.selected = {type:'quick', item: {name:this.quick.name.trim(),kcal:Number(this.quick.kcal),protein:this.isKnown(this.quick.protein)?Number(this.quick.protein):null,carbs:null,fat:null}}
           this.addStage = 'confirm'; this.refresh()
         },
         get selectionTitle() { return this.selected?.item?.name || '' },
@@ -777,12 +771,12 @@
             const weighed = Number(this.quantity) || 0
             const ratio = this.weighedCooked && sel.item.cookedRatio ? sel.item.cookedRatio : 1
             const q = weighed / ratio
-            for (const key of Object.keys(out)) out[key] = (Number(sel.item[key]) || 0) * q / 100
+            for (const key of Object.keys(out)) out[key] = this.isKnown(sel.item[key]) ? Number(sel.item[key]) * q / 100 : null
           } else if (sel.type === 'recipe') {
             const per = this.perServing(sel.item)
-            for (const key of Object.keys(out)) out[key] = per[key] * (Number(this.servings) || 0)
+            for (const key of Object.keys(out)) out[key] = this.scaleMetric(per[key],Number(this.servings)||0)
           } else {
-            for (const key of Object.keys(out)) out[key] = Number(sel.item[key]) || 0
+            for (const key of Object.keys(out)) out[key] = this.isKnown(sel.item[key]) ? Number(sel.item[key]) : null
           }
           return out
         },
@@ -799,7 +793,7 @@
             : 'Quick estimate'
           const entry = {
             id: this.editingId || ('log-' + this.logs.length + '-' + this.targetSlot),
-            day: this.day, slot: this.targetSlot, at: this.editingId ? (this.logs.find(l => l.id === this.editingId)?.at || this.clock()) : this.clock(),
+            consumedOn:this.selectedDate,slot:this.targetSlot,at:this.consumedAt||this.defaultTime(this.targetSlot),
             title: this.selectionTitle, kind: this.selectionKind,
             amount, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat, icon: this.selectionIcon,
             ref: sel.type === 'quick' ? null : {type: sel.type, id: sel.item.id},
@@ -820,14 +814,14 @@
         editLog(id) {
           const entry = this.logs.find(l => l.id === id)
           if (!entry) return
-          this.editingId = id; this.targetSlot = entry.slot
+          this.editingId = id; this.targetSlot = entry.slot; this.consumedAt=entry.at||this.defaultTime(entry.slot)
           this.quantity = entry.quantity || 100; this.servings = entry.servings || 1
           this.portions = entry.portions ?? null; this.weighedCooked = !!entry.weighedCooked
           const food = entry.ref?.type === 'food' ? this.foodById(entry.ref.id) : null
           const recipe = entry.ref?.type === 'recipe' ? this.recipeById(entry.ref.id) : null
           this.selected = food ? {type:'food', item: food}
             : recipe ? {type:'recipe', item: recipe}
-            : {type:'quick', item: entry.quick || {name: entry.title, kcal: entry.kcal, protein: entry.protein, carbs: 0, fat: 0}}
+            : {type:'quick', item: entry.quick || {name:entry.title,kcal:entry.kcal,protein:entry.protein,carbs:null,fat:null}}
           this.addStage = 'confirm'; this.addOpen = true; this.refresh()
         },
         removeLog(id) {
@@ -842,22 +836,19 @@
         get filteredRecipes() {
           const q = this.recipeSearch.trim().toLowerCase()
           return this.recipes.filter(r => {
-            if (this.recipeFilter === 'coach' && r.author !== 'coach') return false
-            if (this.recipeFilter === 'you' && r.author !== 'you') return false
             if (this.recipeFilter === 'favourites' && !r.favourite) return false
             return !q || r.name.toLowerCase().includes(q)
           })
         },
         openRecipe(id) { this.detail = this.recipeById(id); this.detailServings = this.detail.baseServings; this.detailOpen = true; this.refresh() },
         toggleFavourite(id) { const r = this.recipeById(id); if (r) r.favourite = !r.favourite; this.refresh() },
+        get planRecipe(){return this.recipeById(this.planRecipeId)},
+        get planExisting(){const entry=this.plans[this.planKey(this.planSlot,this.planDate)];return entry?this.recipeById(entry.recipeId):null},
         planFromRecipe(id) {
           const recipe = this.recipeById(id)
-          const slot = recipe.type === 'breakfast' ? 'breakfast' : recipe.type === 'snack' ? 'snack' : 'dinner'
-          this.plans[this.planKey(slot)] = {recipeId: id, servings: 1, author: 'you', eatenLogId: null}
-          this.detailOpen = false; this.view = 'day'
-          this.notice = recipe.name + ' planned for ' + this.slotLabel(slot).toLowerCase() + '.'
-          this.refresh()
+          this.planRecipeId=id;this.planDate=this.todayIso;this.planSlot=recipe.type==='breakfast'?'breakfast':recipe.type==='snack'?'snack':'lunch';this.planServings=1;this.detailOpen=false;this.planOpen=true;this.refresh()
         },
+        confirmManualPlan(){const recipe=this.planRecipe,key=this.planKey(this.planSlot,this.planDate),replacing=!!this.plans[key];this.plans[key]={recipeId:recipe.id,servings:this.planServings,eatenLogId:null};this.planOpen=false;this.view='day';this.selectedDate=this.todayIso;const dateLabel=this.planDate===this.todayIso?'today':new Date(this.planDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});this.notice=recipe.name+(replacing?' replaced the existing suggestion':' planned')+' for '+this.slotLabel(this.planSlot).toLowerCase()+' on '+dateLabel+'.';this.refresh()},
         eatFromRecipe(id) {
           const recipe = this.recipeById(id)
           this.detailOpen = false
@@ -886,7 +877,7 @@
             Object.assign(recipe, payload)
             this.notice = recipe.name + ' updated. Past entries keep their old values.'
           } else {
-            this.recipes.push({id: 'r-' + this.recipes.length + '-' + payload.name.length, author: 'you', favourite: false, description: 'Written by you.', ...payload})
+            this.recipes.push({id:'r-'+this.recipes.length+'-'+payload.name.length,favourite:false,description:'Saved recipe.',...payload})
             this.notice = payload.name + ' saved.'
           }
           this.recipeEditorOpen = false; this.view = 'recipes'; this.refresh()
@@ -909,17 +900,17 @@
           const food = id ? this.foodById(id) : null
           this.foodReturn = back || 'foods'
           this.foodDraft = food
-            ? {...food, readOnly: food.source !== 'Custom'}
-            : {id: null, name: prefill || '', brand: '', unit: 'g', kcal: null, protein: null, carbs: null, fat: null, fibre: null, readOnly: false}
+            ? {...food, readOnly: food.source === 'Generic'}
+            : {id:null,name:prefill||'',brand:'',source:'Custom',barcode:null,unit:'g',kcal:null,protein:null,carbs:null,fat:null,fibre:null,readOnly:false}
           this.foodEditorOpen = true; this.refresh()
         },
         saveFood() {
-          if (!this.foodDraft.name.trim() || this.foodDraft.kcal === null || this.foodDraft.kcal === '') return
+          if (!this.foodDraft.name.trim() || (this.foodDraft.source!=='Packaged'&&!this.isKnown(this.foodDraft.kcal))) return
           const values = {
             name: this.foodDraft.name.trim(), brand: this.foodDraft.brand?.trim() || null,
-            source: 'Custom', barcode: null, unit: this.foodDraft.unit, icon: 'circle-dashed',
-            kcal: Number(this.foodDraft.kcal) || 0, protein: Number(this.foodDraft.protein) || 0,
-            carbs: Number(this.foodDraft.carbs) || 0, fat: Number(this.foodDraft.fat) || 0, fibre: Number(this.foodDraft.fibre) || 0,
+            source:this.foodDraft.id?this.foodDraft.source:'Custom',barcode:this.foodDraft.barcode||null,unit:this.foodDraft.unit,icon:this.foodDraft.icon||'circle-dashed',
+            kcal:this.isKnown(this.foodDraft.kcal)?Number(this.foodDraft.kcal):null,protein:this.isKnown(this.foodDraft.protein)?Number(this.foodDraft.protein):null,
+            carbs:this.isKnown(this.foodDraft.carbs)?Number(this.foodDraft.carbs):null,fat:this.isKnown(this.foodDraft.fat)?Number(this.foodDraft.fat):null,fibre:this.isKnown(this.foodDraft.fibre)?Number(this.foodDraft.fibre):null,
           }
           let id = this.foodDraft.id
           if (id) { Object.assign(this.foodById(id), values) }
@@ -946,14 +937,15 @@
 
         /* ---- tendances ---- */
         barHeight(value) {
-          const peak = Math.max(1, ...this.days.map((d, i) => this.dayKcal(i)))
-          return Math.round((value / peak) * 100)
+          if(!this.isKnown(value))return 0
+          const known=this.days.map(d=>this.dayKcal(d.iso)).filter(v=>this.isKnown(v));const peak=Math.max(1,...known)
+          return Math.round((Number(value)/peak)*100)
         },
         get averageEaten() {
-          const logged = this.days.map((d, i) => this.dayKcal(i)).filter(v => v > 0)
+          const logged = this.days.map(d=>this.dayKcal(d.iso)).filter(v=>this.isKnown(v)&&v>0)
           return logged.length ? Math.round(logged.reduce((a, b) => a + b, 0) / logged.length) : 0
         },
-        get loggedDays() { return this.days.filter((d, i) => this.entriesOn(i) > 0).length },
+        get loggedDays() { return this.days.filter(d=>this.entriesOn(d.iso)>0).length },
       }
     }
   </script>

@@ -28,7 +28,7 @@ Son écran principal est un **journal**, organisé en quatre moments de la journ
 
 Une ligne est toujours l'une de trois choses : un aliment avec sa quantité, une portion de recette, ou une estimation libre lorsqu'on ne dispose que d'un ordre de grandeur.
 
-Un agent connecté par MCP — le coach — peut préparer les journées à l'avance, écrire des recettes et les faire évoluer. Ses repas apparaissent comme des **propositions** que l'utilisateur confirme en un geste. Ce n'est jamais une dépendance : sans agent, l'application reste entièrement utilisable et l'utilisateur crée lui-même ses aliments, ses recettes et son planning.
+Un client connecté par MCP peut préparer les journées à l'avance, écrire des recettes et modifier les mêmes données que l'application. Le module ne connaît cependant aucune notion de « coach » : MCP est un canal d'accès aux données, pas un rôle produit. Les propositions apparaissent comme des données ordinaires que l'utilisateur confirme en un geste. Sans client MCP, l'application reste entièrement utilisable et l'utilisateur crée lui-même ses aliments, ses recettes et son planning.
 
 Les données restent locales. Le module fonctionne hors ligne, à l'exception du scan de code-barres qui interroge un service externe et dégrade proprement en création manuelle.
 
@@ -40,7 +40,7 @@ La première est le **compteur de calories façon tableur** : une immense base d
 
 La seconde est l'**application de préparation de repas** : recettes, menus, liste de courses. Elle oblige à créer une recette pour enregistrer un yaourt et suppose que l'on cuisine toujours ce que l'on mange.
 
-Le module tient la position intermédiaire : un journal, dont la friction est levée par un agent qui prépare la journée quand il en a l'occasion.
+Le module tient la position intermédiaire : un journal, dont la friction peut être levée par des propositions écrites manuellement ou via MCP.
 
 Une troisième difficulté est propre au domaine : **une journée vide ne se remplit jamais toute seule**. Sans amorce, l'utilisateur ne revient pas saisir ce qu'il a mangé. C'est la raison d'être des propositions décrites en section 12 — pas la planification pour elle-même.
 
@@ -57,14 +57,14 @@ Les repères nutritionnels retenus sont ceux de [Manger Bouger](https://www.mang
 - Accepter la pesée exacte comme l'absence de pesée.
 - Conserver une trace fidèle de ce qui a été mangé, y compris quand la recette d'origine change.
 - Permettre de créer, modifier et supprimer aliments et recettes à la main.
-- Rester entièrement utilisable sans agent, sans compte et sans réseau.
+- Rester entièrement utilisable sans client MCP, sans compte et sans réseau.
 
 ### 4.2 Critères de réussite qualitatifs
 
 - Un yaourt scanné est enregistré sans passer par une recette.
 - Une pomme à dix heures trouve sa place sans qu'on se demande où.
 - Une journée entière peut être saisie sans jamais ouvrir un formulaire de recette.
-- Couper le coach ne casse aucun parcours.
+- L'absence de client MCP ne casse aucun parcours.
 - Aucune valeur affichée ne laisse croire à une précision au gramme près.
 - Ajouter une nouvelle source d'aliments ne modifie ni le journal ni les recettes.
 
@@ -73,7 +73,7 @@ Les repères nutritionnels retenus sont ceux de [Manger Bouger](https://www.mang
 - Objectif calorique personnalisé et tout indicateur de dépassement.
 - **Rapprochement entre énergie ingérée et énergie dépensée.** Food enregistre ce qui entre et s'arrête là. La mise en regard des deux séries relève de `Progress` et sera cadrée séparément ; elle n'apparaît nulle part dans ce module.
 - Menus hebdomadaires générés automatiquement et liste de courses agrégée.
-- Moteur de recommandation embarqué : les suggestions viennent de l'agent, pas d'un algorithme local.
+- Moteur de recommandation embarqué : les propositions sont des données écrites manuellement ou via MCP, pas le résultat d'un algorithme local.
 - Micronutriments, vitamines, minéraux, index glycémique et Nutri-Score.
 - Photographie d'un plat analysée pour en déduire son contenu.
 - Import de recettes depuis une URL ou un fichier.
@@ -87,7 +87,7 @@ Les repères nutritionnels retenus sont ceux de [Manger Bouger](https://www.mang
 1. **Le moment est un contenant, pas un repas.** Il accueille autant de lignes que la réalité en produit.
 2. **Confirmer avant de saisir.** Le geste le plus fréquent est de valider une proposition, pas de remplir un formulaire.
 3. **Prévu n'est pas mangé.** Aucun total ne bouge tant que l'utilisateur n'a pas confirmé.
-4. **L'agent aide, il ne conditionne rien.** Toute fonction reste atteignable à la main.
+4. **MCP est un accès, pas un mode.** Toute fonction reste atteignable à la main et aucune interface ne change selon l'origine d'une écriture.
 5. **Les estimations restent des estimations.** Toute valeur calculée ou externe s'affiche précédée de `≈` et conserve sa provenance.
 6. **Factuel, jamais culpabilisant.** Aucun seuil, aucune couleur d'alerte, aucun verdict sur une journée.
 7. **Rien de permanent à l'écran pour un réglage occasionnel.** Les options vivent dans les préférences.
@@ -113,7 +113,7 @@ Le module contient quatre vues et un jeu de feuilles modales :
 |---|---|
 | `Day` | Journal du jour, quatre moments, chacun avec ses lignes et son total. |
 | `Trends` | Sept jours de ce qui a été enregistré, et l'historique. |
-| `Recipes` | Recettes, les siennes et celles du coach. Création, édition, suppression. |
+| `Recipes` | Recettes enregistrées. Création, édition, suppression. |
 | `Foods` | Catalogue d'ingrédients. Création, édition, suppression des aliments personnels. |
 
 | Feuille | Rôle |
@@ -155,11 +155,11 @@ Food
 - sourceId
 - sourceVersion
 - referenceUnit: GRAM | MILLILITRE
-- caloriesPer100
-- proteinPer100
-- carbsPer100
-- fatPer100
-- fibrePer100
+- caloriesPer100        nullable
+- proteinPer100         nullable
+- carbsPer100           nullable
+- fatPer100             nullable
+- fibrePer100           nullable
 - servingLabel          portion usuelle, facultatif : « pot », « apple », « handful »
 - servingGrams          poids de cette portion
 - cookedRatio           facultatif, voir 8.6
@@ -179,7 +179,6 @@ Recipe
 - id
 - name
 - description
-- author: USER | AGENT
 - type: BREAKFAST | MAIN | SNACK
 - baseServings
 - prepTimeMinutes
@@ -202,7 +201,7 @@ Une recette **ne stocke aucune valeur nutritionnelle** : elle est recalculée à
 
 Les quantités des ingrédients sont exprimées pour la recette entière, jamais par portion.
 
-`author` distingue ce que l'utilisateur a écrit de ce que l'agent a écrit. C'est une information d'affichage, pas une permission : la section 21 précise que l'agent peut modifier les deux.
+L'origine d'une écriture ne fait pas partie de la recette. Elle relève exclusivement de l'audit des mutations décrit par le PRD serveur. L'interface ne badge, ne filtre et ne protège jamais une recette selon l'outil qui l'a créée.
 
 ### 8.4 Ligne de journal
 
@@ -220,11 +219,11 @@ FoodLogEntry
 - quantityUnit: GRAM | MILLILITRE | SERVING
 - portions              nombre de portions usuelles saisies, facultatif
 - weighedCooked         vrai si la quantité a été pesée à l'état cuit
-- calories
-- protein
-- carbs
-- fat
-- fibre
+- calories              nullable
+- protein               nullable
+- carbs                 nullable
+- fat                   nullable
+- fibre                 nullable
 - estimation: MEASURED | APPROXIMATE
 - fromPlanEntryId
 - createdAt
@@ -243,15 +242,13 @@ MealPlanEntry
 - plannedOn             date locale
 - slot: BREAKFAST | LUNCH | SNACK | DINNER
 - recipeId
-- foodId
 - plannedServings
-- author: USER | AGENT
 - consumedLogEntryId
 - createdAt
 - updatedAt
 ```
 
-Un moment ne porte **au maximum qu'une proposition**, à la différence du journal qui accepte autant de lignes que voulu. Proposer sur un moment déjà pourvu remplace la proposition précédente.
+Un moment ne porte **au maximum qu'une proposition**, à la différence du journal qui accepte autant de lignes que voulu. Une proposition référence toujours une recette ; un aliment simple se journalise directement et n'est pas planifié. Proposer sur un moment déjà pourvu demande une confirmation dans l'interface, puis remplace la proposition précédente.
 
 `consumedLogEntryId` est renseigné lorsque l'utilisateur confirme ; l'annulation le vide et supprime la ligne de journal correspondante.
 
@@ -298,8 +295,8 @@ Le scan d'un code-barres interroge Open Food Facts, dont l'API v3.6 est recomman
 
 - Le décodage est **local** : la caméra lit le numéro avec ML Kit, aucune image ne quitte le téléphone. [Documentation Android ML Kit](https://developers.google.com/ml-kit/vision/barcode-scanning/android)
 - Seul le numéro est transmis, pour récupérer nom, marque, image et nutriments pour 100 g.
-- Le produit est **copié** dans le catalogue local au moment de l'ajout. Une modification ultérieure de la fiche distante ne change rien.
-- Une fiche incomplète est acceptée : les valeurs manquantes restent vides et saisissables, jamais devinées.
+- Le produit est **copié** dans le catalogue local au moment de l'ajout. Il devient alors un aliment personnel éditable et supprimable, tout en conservant `source = OPEN_FOOD_FACTS`, son code-barres et son identifiant de source. Une modification ultérieure de la fiche distante ne change rien.
+- Une fiche incomplète est acceptée : les valeurs manquantes restent `null`, sont saisissables dans la copie locale et ne sont jamais devinées. Les modifier ne transforme pas la provenance en `CUSTOM`.
 - Un produit introuvable bascule sur la création manuelle, pré-remplie du code-barres.
 - Open Food Facts est publié sous licence ODbL : l'attribution et les obligations de réutilisation sont respectées et affichées dans `Profile`, section `About`. [Conditions de licence](https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/license-be-on-the-legal-side/)
 
@@ -317,6 +314,8 @@ Le scan d'un code-barres interroge Open Food Facts, dont l'API v3.6 est recomman
 - Les aliments récemment utilisés apparaissent en tête lorsque la recherche est vide.
 - La recherche est insensible à la casse et aux accents, et fonctionne hors ligne.
 - Une recherche sans résultat propose la création d'un aliment pré-rempli du terme saisi.
+
+Les entrées Ciqual sont les seules entrées en lecture seule. Les produits copiés depuis Open Food Facts et les aliments `CUSTOM` appartiennent au catalogue local de l'utilisateur et partagent le même cycle de vie : modification, suppression et synchronisation.
 
 ### 9.5 Granularité du catalogue
 
@@ -337,7 +336,7 @@ Séparation injustifiée :
 - marques d'un même produit générique — c'est le rôle du code-barres ;
 - provenances et labels.
 
-Trois raisons à cette règle. Elle évite une précision de façade dans un module qui affiche tout avec `≈`. Elle garde la recherche praticable. Et surtout elle garde le **choix de l'agent déterministe** : entre huit variétés de pomme, un agent en prend une arbitrairement, et deux recettes équivalentes cessent de donner les mêmes chiffres.
+Trois raisons à cette règle. Elle évite une précision de façade dans un module qui affiche tout avec `≈`. Elle garde la recherche praticable. Et surtout elle garde le **choix d'un client MCP déterministe** : entre huit variétés de pomme, un client en prend une arbitrairement, et deux recettes équivalentes cessent de donner les mêmes chiffres.
 
 Rien n'enferme l'utilisateur : le scan apporte les valeurs exactes d'un produit précis, et l'aliment personnalisé couvre les cas où la finesse compte réellement.
 
@@ -346,6 +345,7 @@ Rien n'enferme l'utilisateur : le scan apporte les valeurs exactes d'un produit 
 ### 10.1 L'écran `Day`
 
 - Ouvre sur la date du jour ; une navigation par date permet de consulter et de compléter les jours passés.
+- La date sélectionnée est une vraie date locale (`LocalDate`), jamais un index dans une semaine. Le changement de semaine, de mois, d'année et de fuseau ne modifie donc pas l'identité d'une journée.
 - Quatre moments dans l'ordre `Breakfast`, `Lunch`, `Snack`, `Dinner`.
 - Chaque moment affiche, dans cet ordre : la proposition non confirmée s'il y en a une, puis ses lignes triées par heure, puis un bouton d'ajout toujours présent.
 - Chaque moment affiche **son propre total** lorsqu'il contient au moins une ligne. C'est une addition locale, pas un cumul de journée.
@@ -364,6 +364,8 @@ Un même moment peut mélanger les trois. Un yaourt et une banane au petit-déje
 ### 10.3 L'heure et le choix du moment
 
 Chaque ligne porte l'heure locale à laquelle elle a été enregistrée. Elle sert à ordonner les lignes d'un même moment et prépare une vue chronologique ultérieure sans redessiner le modèle.
+
+Lors d'une saisie rétroactive, l'heure reste modifiable sur l'écran de confirmation. Sa valeur par défaut est le milieu du moment choisi — `08:00`, `13:00`, `16:30` ou `20:00` — et non l'heure actuelle, qui donnerait une chronologie trompeuse. Pour aujourd'hui, l'heure actuelle reste la valeur par défaut.
 
 Le moment est **présélectionné d'après cette heure**, et reste modifiable en un geste :
 
@@ -392,31 +394,31 @@ Aucune autre série n'y figure. La mise en regard avec l'activité relève de `P
 
 ## 11. Recettes
 
-- Une recette est une préparation réutilisable, créée depuis `Recipes`, depuis le journal, ou par l'agent.
+- Une recette est une préparation réutilisable, créée depuis `Recipes`, depuis le journal, manuellement ou via MCP.
 - Le formulaire comprend nom, type de moment, temps de préparation, nombre de portions, ingrédients, étapes et couverture.
 - Les ingrédients sont ajoutés par un sélecteur commun : recherche, scan, création.
 - Chaque ingrédient affiche sa contribution énergétique dès que sa quantité est saisie.
 - Le bloc `Per serving` recalcule en direct énergie, protéines, glucides et lipides.
 - Les étapes sont saisies une par ligne.
-- Une recette peut être mise en favori, recherchée par nom, filtrée par auteur.
+- Une recette peut être mise en favori et recherchée par nom. Elle n'est ni badgée ni filtrée selon l'origine de son écriture.
 - La fiche permet de faire varier le nombre de portions affichées ; les quantités d'ingrédients suivent proportionnellement.
 - Modifier une recette n'a **aucun effet rétroactif** sur le journal.
 - Supprimer une recette n'affecte ni le journal ni les repas déjà consommés ; les propositions qui la référencent sont libérées.
-- La création manuelle reste obligatoire même si la majorité des recettes viennent de l'agent.
+- La création manuelle reste obligatoire même si des recettes sont aussi écrites via MCP.
 
 ## 12. Propositions et planification
 
 La planification n'est pas une fonction de prévision : c'est **l'amorce qui rend le journal possible**. Une journée vide ne se remplit pas ; une journée proposée se confirme.
 
-- Une proposition est posée par l'agent ou par l'utilisateur, sur une date et un moment.
-- Elle s'affiche dans le moment concerné comme une carte visiblement distincte des lignes réelles, marquée de son auteur.
+- Une proposition est posée manuellement ou via MCP, sur une date et un moment. Dans l'application, l'ajout manuel demande toujours la date, le moment et le nombre de portions avant validation.
+- Elle s'affiche dans le moment concerné comme une carte visiblement distincte des lignes réelles, sans badge d'auteur ni vocabulaire de « coach ».
 - Elle porte trois actions : `I ate this`, `Swap`, `Dismiss`.
 - `I ate this` crée la ligne de journal correspondante et lie les deux objets.
 - Supprimer cette ligne de journal remet la proposition en attente.
-- `Swap` remplace la recette proposée et **bascule l'auteur sur l'utilisateur** : Mue ne s'attribue jamais un choix qui n'est pas le sien.
+- `Swap` remplace la recette proposée. L'origine de la mutation reste disponible dans l'audit MCP, sans effet sur l'affichage.
 - `Dismiss` retire la proposition, laisse le moment libre, et ne touche ni la recette ni le journal.
 - Une proposition n'entre dans aucun total tant qu'elle n'est pas confirmée.
-- Une préférence permet de couper entièrement les propositions de l'agent, afin de vérifier que le module reste utilisable seul.
+- Il n'existe aucun interrupteur MCP, agent ou coach dans Food. Un client MCP écrit les mêmes objets que l'application ; son absence ne nécessite aucun état particulier.
 
 ## 13. Calculs nutritionnels
 
@@ -426,23 +428,37 @@ La planification n'est pas une fonction de prévision : c'est **l'amorce qui ren
 poids de référence      = poids pesé / cookedRatio si pesé cuit, sinon poids pesé
 contribution d'un aliment = poids de référence × valeurPour100 / 100
 
-total d'une recette     = somme des contributions de ses ingrédients
+total d'une recette     = somme stricte des contributions de ses ingrédients
 valeur par portion      = total de la recette / baseServings
 
 ligne FOOD              = contribution de l'aliment
 ligne RECIPE            = valeur par portion × portions consommées
 ligne QUICK             = valeurs saisies
 
-total d'un moment       = somme de ses lignes
+total d'un moment       = somme stricte de ses lignes
+
+somme stricte           = null dès qu'une contribution vaut null, sinon l'addition
 ```
 
 Aucune valeur nutritionnelle n'est stockée ailleurs que dans les lignes de journal, où elle est figée.
+
+Chaque nutriment est nullable indépendamment des autres. `null` signifie « inconnu » ; zéro signifie une valeur connue égale à zéro. Aucune conversion `null → 0` n'est autorisée.
+
+La propagation est stricte, métrique par métrique :
+
+- si toutes les contributions d'une recette ou d'un moment sont connues pour une métrique, elles sont additionnées normalement ;
+- si une seule contribution est inconnue pour cette métrique, le total de cette métrique vaut `null` et s'affiche `—` ;
+- une énergie connue peut donc coexister avec des protéines inconnues ;
+- l'ajout rapide stocke les protéines à `null` lorsqu'elles ne sont pas renseignées ;
+- corriger plus tard un aliment ne complète jamais rétroactivement une ligne de journal déjà figée.
+
+Cette règle privilégie une absence explicite de précision à un total faussement exact. Dans les listes, une ligne ou une journée dont l'énergie est inconnue reste enregistrée mais n'alimente ni la hauteur d'une barre ni une moyenne énergétique.
 
 ### 13.2 Affichage
 
 - L'énergie est arrondie à l'unité, les macronutriments au dixième de gramme.
 - Toute valeur issue d'un calcul ou d'une source externe est précédée de `≈`.
-- Une valeur inconnue est affichée `—`, jamais `0`.
+- Une valeur inconnue est affichée `—`, jamais `0`. Cette règle vaut aussi pour les agrégats conformément à la propagation ci-dessus.
 - Les nombres utilisent `font-variant-numeric: tabular-nums`.
 - Le libellé d'une quantité conserve les deux lectures quand elles existent : `1.5 × apple (225 g)`, `150 g cooked`.
 - Une préférence `Show energy` masque toutes les valeurs énergétiques et de macronutriments du module. Elle vit dans les préférences et n'a aucun raccourci permanent à l'écran.
@@ -486,8 +502,9 @@ RecipeImage
 | Champ | Règle |
 |---|---|
 | Nom d'aliment ou de recette | 1 à 80 caractères après nettoyage des espaces. |
-| Énergie pour 100 | 0 à 900 kcal. |
-| Macronutriment pour 100 | 0 à 100 g. La somme protéines + glucides + lipides ne peut dépasser 100 g. |
+| Énergie pour 100 | 0 à 900 kcal, ou inconnue. Un champ vide est enregistré `null`, jamais `0`. |
+| Macronutriment pour 100 | 0 à 100 g, ou inconnu. La somme des valeurs **connues** parmi protéines, glucides et lipides ne peut dépasser 100 g ; les inconnues sont ignorées par ce contrôle. |
+| Aliment sans aucune valeur | Accepté. Une fiche Open Food Facts incomplète est le cas nominal, pas une erreur de saisie. |
 | `cookedRatio` | Strictement positif, de 0,3 à 5. |
 | Portion usuelle | 1 à 2 000 g ou ml. |
 | Nombre de portions usuelles saisi | 0,5 à 20, par pas de 0,5. |
@@ -565,9 +582,9 @@ Le formulaire affiche en direct les valeurs par portion, recalculées à chaque 
 
 La fiche permet de faire varier le nombre de portions affichées ; les quantités d'ingrédients suivent.
 
-#### FR-RECIPE-005 — Favoris, recherche et auteur
+#### FR-RECIPE-005 — Favoris et recherche
 
-Une recette peut être mise en favori, retrouvée par son nom, et filtrée selon qu'elle vient de l'utilisateur ou de l'agent.
+Une recette peut être mise en favori et retrouvée par son nom. L'origine de son écriture n'apparaît pas dans Food.
 
 #### FR-RECIPE-006 — Modification et suppression
 
@@ -599,19 +616,19 @@ Le découpage du catalogue respecte la règle de la section 9.5.
 
 #### FR-PLAN-001 — Proposer
 
-Une proposition est posée par l'agent ou l'utilisateur sur une date et un moment. Un moment déjà pourvu voit sa proposition remplacée.
+Une proposition est posée manuellement ou via MCP sur une date, un moment et un nombre de portions. L'ajout manuel présente ces trois choix. Un moment déjà pourvu demande confirmation avant de remplacer sa proposition.
 
 #### FR-PLAN-002 — Remplacer et retirer
 
-`Swap` remplace la recette et bascule l'auteur sur l'utilisateur. `Dismiss` libère le moment sans toucher au reste.
+`Swap` remplace la recette sans modifier son comportement d'affichage. `Dismiss` libère le moment sans toucher au reste. L'origine des mutations reste dans l'audit, pas dans l'objet métier.
 
 #### FR-PLAN-003 — Confirmer
 
 `I ate this` crée la ligne de journal correspondante. Supprimer cette ligne remet la proposition en attente.
 
-#### FR-PLAN-004 — Fonctionnement sans agent
+#### FR-PLAN-004 — MCP sans mode produit
 
-Une préférence coupe toutes les propositions. Dans cet état, chaque fonction du module reste atteignable manuellement.
+Il n'existe aucun mode, badge ou interrupteur lié à MCP. Connecté ou non, chaque fonction du module reste atteignable manuellement et l'interface présente les mêmes objets de la même manière.
 
 ## 17. États vides et erreurs
 
@@ -641,7 +658,7 @@ Une préférence coupe toutes les propositions. Dans cet état, chaque fonction 
 - L'ajout d'une ligne annonce le résultat sans voler le focus.
 - Le contraste respecte les seuils du design system, y compris pour l'ambre sur fond sombre.
 - Le scanner propose une alternative complète à la caméra : la saisie manuelle du code-barres.
-- Aucune information n'est portée par la seule couleur : une proposition se distingue aussi par son libellé d'auteur et son contour en pointillés.
+- Aucune information n'est portée par la seule couleur : une proposition se distingue aussi par le libellé `Suggested` et son contour en pointillés.
 - Les animations respectent la réduction de mouvement du système.
 
 ## 19. Design, icônes et mouvement
@@ -660,7 +677,7 @@ Une préférence coupe toutes les propositions. Dans cet état, chaque fonction 
 - Les migrations sont additives et explicites. `fallbackToDestructiveMigration` reste interdit.
 - Le sous-ensemble Ciqual est livré comme ressource et inséré au premier démarrage, avec sa version ; une mise à jour ne modifie jamais un aliment personnalisé ni une ligne de journal.
 - Les index couvrent au minimum `food_log_entry(consumedOn, slot, consumedAt)`, `meal_plan_entry(plannedOn, slot)` en unicité, `recipe_ingredient(recipeId)` et la recherche par nom d'aliment.
-- Les préférences du module — affichage de l'énergie, propositions de l'agent — vivent dans DataStore et ne sont pas synchronisées.
+- La préférence d'affichage de l'énergie vit dans DataStore et n'est pas synchronisée. Il n'existe aucune préférence liée à MCP ou à l'origine des données.
 - Le calcul nutritionnel est une fonction pure du domaine, testée indépendamment de l'interface et réutilisable par le serveur.
 - Le scan utilise ML Kit en décodage local ; l'appel réseau à Open Food Facts est isolé derrière une interface remplaçable et n'est jamais requis par un autre parcours.
 - L'accès réseau du module se limite à Open Food Facts et aux images de produits. Il partage la permission `android.permission.INTERNET` introduite par le module serveur, et impose la même mise à jour de la politique de confidentialité et de la fiche Play Store.
@@ -672,7 +689,7 @@ Cette section fournit ce qui manquait à la section 17 de [`PRD_SERVER_SYNC_MCP.
 
 ### 21.1 Domaines synchronisés
 
-| Domaine | Synchronisé | Accessible par MCP | Écriture agent | Règle |
+| Domaine | Synchronisé | Accessible par MCP | Écriture MCP | Règle |
 |---|---:|---:|---:|---|
 | Aliments personnalisés | Oui | Oui | Oui | Agrégat autonome, identifiant stable. |
 | Produits copiés depuis Open Food Facts | Oui | Oui | Oui | Copie locale synchronisée, jamais re-téléchargée par le serveur. |
@@ -698,23 +715,23 @@ Une recette peut référencer un aliment que le client n'a pas encore reçu. Le 
 - `Food` personnalisé : dernière mutation acceptée.
 - `MealPlanEntry` : la clé métier est `(date, moment)`. Deux propositions concurrentes sur le même moment se résolvent par la dernière mutation acceptée ; la précédente est remplacée, jamais dupliquée.
 
-### 21.4 Périmètre de l'agent
+### 21.4 Périmètre des écritures MCP
 
-L'agent dispose du **même pouvoir que l'utilisateur**, sans restriction de périmètre. Il crée des données finales, jamais des brouillons, conformément à la décision 7 du PRD serveur.
+Tout client autorisé à écrire via MCP dispose du **même pouvoir que l'application**, sans restriction de périmètre. MCP ne crée ni rôle « coach », ni catégorie de contenu, ni mode d'interface. Il crée des données finales, jamais des brouillons, conformément à la décision 7 du PRD serveur.
 
-Il peut donc :
+Un client MCP peut donc :
 
 - créer, modifier et supprimer des aliments personnalisés ;
 - créer, modifier et supprimer des recettes, **y compris celles écrites par l'utilisateur** ;
 - poser, remplacer et retirer des propositions ;
 - créer, **modifier** et supprimer des lignes de journal, y compris rétroactivement.
 
-Ce choix est assumé : l'utilisateur a explicitement demandé que le coach puisse tout faire. Sa contrepartie est que l'historique peut changer sans action de l'utilisateur. Deux garanties compensent :
+Ce choix est assumé : un client MCP autorisé peut tout modifier. Sa contrepartie est que l'historique peut changer sans action dans l'application. Deux garanties compensent :
 
-- toute écriture d'agent est auditée selon la section 14.7 du PRD serveur — identité, outil, instant, agrégats, résultat ;
+- toute écriture MCP est auditée selon la section 14.7 du PRD serveur — identité du client, outil, instant, agrégats, résultat ;
 - l'écran `Data & sync` doit permettre de consulter cet audit, afin qu'une valeur modifiée soit toujours explicable.
 
-Seule limite conservée : l'agent ne peut ni modifier ni supprimer une entrée du catalogue Ciqual, qui n'est pas une donnée personnelle.
+Seule limite conservée : aucun client MCP ne peut modifier ni supprimer une entrée du catalogue Ciqual, qui n'est pas une donnée personnelle.
 
 ### 21.5 Outils MCP
 
@@ -724,7 +741,7 @@ Lecture :
 - `get_daily_nutrition` — totaux d'une journée, avec le détail des lignes et la mention d'approximation.
 - `search_foods` — recherche dans les aliments accessibles à l'utilisateur.
 - `get_recipe` — recette complète avec ingrédients et valeurs par portion.
-- `list_recipes` — recettes enregistrées, filtrables par type, auteur et favoris.
+- `list_recipes` — recettes enregistrées, filtrables par type et favoris.
 - `list_meal_plan` — propositions sur une période.
 
 Écriture :
@@ -779,16 +796,16 @@ Règles communes :
 - [ ] Faire varier les portions sur la fiche recalcule les quantités d'ingrédients.
 - [ ] Modifier une recette ne modifie aucune ligne de journal antérieure.
 - [ ] Supprimer une recette libère les propositions et laisse le journal intact.
-- [ ] Une recette peut être créée entièrement à la main, sans agent.
+- [ ] Une recette peut être créée entièrement à la main, sans client MCP.
 
 ### Propositions
 
 - [ ] Une proposition est visuellement distincte d'une ligne réelle sans lire son texte.
 - [ ] Un moment ne porte jamais deux propositions.
 - [ ] `I ate this` crée la ligne et sa suppression remet la proposition en attente.
-- [ ] `Swap` remplace la proposition et l'attribue à l'utilisateur.
+- [ ] `Swap` remplace la proposition sans introduire de notion d'auteur dans Food.
 - [ ] Une proposition n'entre dans aucun total avant confirmation.
-- [ ] Propositions coupées, chaque fonction du module reste atteignable.
+- [ ] Aucun écran, filtre ou réglage Food ne dépend de l'origine MCP d'une donnée.
 
 ### Expérience et accessibilité
 
@@ -796,6 +813,8 @@ Règles communes :
 - [ ] Masquer l'énergie depuis les préférences retire tous les chiffres nutritionnels sans casser un parcours.
 - [ ] Toute valeur calculée est affichée avec `≈`.
 - [ ] Une valeur inconnue s'affiche `—` et jamais `0`.
+- [ ] Un aliment dont l'énergie est inconnue rend inconnu le total de son moment, sans rendre inconnues les autres métriques de ce moment.
+- [ ] Une journée dont l'énergie est inconnue n'entre ni dans une barre de `Trends` ni dans une moyenne.
 - [ ] Le module est entièrement utilisable sans caméra et sans réseau, hors scan.
 
 ### Technique
@@ -806,7 +825,7 @@ Règles communes :
 - [ ] La suppression d'une recette utilisateur supprime ses fichiers image.
 - [ ] Le décodage du code-barres est local et seul le numéro est transmis.
 - [ ] L'attribution Open Food Facts et la Licence Ouverte Ciqual sont affichées dans l'application.
-- [ ] Une écriture d'agent sur une ligne de journal existante est visible dans l'audit.
+- [ ] Une écriture MCP sur une ligne de journal existante est visible dans l'audit.
 
 ## 23. Décisions arrêtées
 
@@ -819,10 +838,10 @@ Règles communes :
 | Formes possibles d'une ligne | Aliment + quantité, portion de recette, estimation libre. |
 | Rôle de la planification | Amorcer le journal, pas prévoir. Une proposition par moment. |
 | Une proposition compte-t-elle dans les totaux ? | Non, jamais avant confirmation. |
-| L'application dépend-elle de l'agent ? | Non. Une préférence coupe les propositions et tout reste atteignable. |
-| Périmètre de l'agent | Total : aliments, recettes, propositions et lignes de journal, en création, modification et suppression. |
-| Contrepartie du périmètre de l'agent | L'audit MCP est consultable depuis l'application. |
-| Création manuelle d'aliments et de recettes | Obligatoire, même si l'agent en produit la majorité. |
+| Existe-t-il une notion de coach ou d'agent dans Food ? | Non. MCP est un accès aux données, sans badge, filtre, préférence ni comportement spécial. |
+| Périmètre des écritures MCP | Total : aliments, recettes, propositions et lignes de journal, en création, modification et suppression. |
+| Contrepartie des écritures MCP | L'audit MCP est consultable depuis l'application. |
+| Création manuelle d'aliments et de recettes | Obligatoire, indépendamment de MCP. |
 | Les ingrédients sont-ils du texte libre ? | Non. Toujours un aliment structuré. |
 | Une recette stocke-t-elle ses calories ? | Non. Toujours recalculées depuis ses ingrédients. |
 | Une modification de recette est-elle rétroactive ? | Non. Le journal conserve un instantané. |
@@ -843,7 +862,7 @@ Règles communes :
 | Décodage du code-barres | Local, ML Kit. Seul le numéro est transmis. |
 | Les valeurs externes sont-elles relues à chaque affichage ? | Non. Copiées localement à l'ajout. |
 | Suppression d'un aliment utilisé | Refusée, avec la liste des recettes concernées. |
-| Auteur après un `Swap` | Bascule sur l'utilisateur. |
+| Origine après un `Swap` | Conservée uniquement dans l'audit de mutation ; absente de l'objet métier et de Food. |
 | Stockage des images | Système de fichiers, jamais en BLOB dans Room. |
 | Précision affichée | Ordre de grandeur, toujours précédé de `≈`. |
 | Fonctionnement hors ligne | Total, sauf le scan. |
@@ -854,7 +873,7 @@ Règles communes :
 
 ### 24.1 Produit
 
-- **Les restes.** Une recette de trois portions dont une seule est consommée : les deux autres sont-elles des restes à reproposer les jours suivants, ou mangées par quelqu'un d'autre ? La réponse change ce que l'agent doit proposer le lendemain.
+- **Les restes.** Une recette de trois portions dont une seule est consommée : les deux autres sont-elles des restes à reproposer les jours suivants, ou mangées par quelqu'un d'autre ? La réponse change ce qu'un client MCP peut proposer le lendemain.
 - **Le scan.** Retenu dans le périmètre complet, mais c'est le chemin d'ajout le plus coûteux : permission caméra, dépendance réseau, licence ODbL dans une application jusqu'ici sans permission réseau. Sa valeur réelle dépend de la part de produits emballés dans l'alimentation quotidienne, à mesurer après quelques semaines d'usage.
 - **Le masquage de l'énergie.** L'option survit dans les préférences mais n'a jamais été demandée. À supprimer si elle ne sert pas.
 - **Une vue chronologique.** L'heure est enregistrée sur chaque ligne ; reste à décider si une vue par heure remplace un jour le regroupement en quatre moments.
@@ -867,4 +886,4 @@ Règles communes :
 - Comportement souhaité pour un même aliment consommé plusieurs fois dans la journée : lignes distinctes ou regroupement à l'affichage.
 - Politique de purge du cache d'images distantes.
 - Volume réel du catalogue et performance de la recherche sur un appareil d'entrée de gamme.
-- Forme de la consultation de l'audit des écritures d'agent dans `Data & sync`.
+- Forme de la consultation de l'audit des écritures MCP dans `Data & sync`.
