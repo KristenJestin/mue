@@ -1,4 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts"]
+  // The generator script lives at the repository root, where no workspace owns a
+  // tsconfig. It is included here so the one file that writes the committed contract
+  // is checked by the same settings as the schemas it writes.
+  "include": ["src/**/*.ts", "../../scripts/gen-openapi.ts"]
 }

@@ -12,7 +12,11 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "vp lint src",
     "format": "vp fmt src",
-    "format:check": "vp fmt --check src"
+    "format:check": "vp fmt --check src",
+    "test": "bun test src",
+    "openapi": "bun run ../../scripts/gen-openapi.ts",
+    "openapi:check": "bun run ../../scripts/gen-openapi.ts --check",
+    "fixtures": "bun run src/fixtures.ts"
   },
   "dependencies": {
     "zod": "catalog:"
