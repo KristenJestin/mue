@@ -1,4 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts"]
+  // `scripts/admin.ts` is the local administration command section 15.3 asks
+  // for. It is the CLI surface of this package, so it is typechecked with it
+  // rather than left out of every project.
+  "include": ["src/**/*.ts", "../../scripts/admin.ts"]
 }
