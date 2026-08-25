@@ -9,3 +9,4 @@ export {
   type PinnedFetchOptions,
 } from "./cimd-transport";
 export { classifyAddress, isPubliclyRoutable, type AddressVerdict } from "./ssrf";
+export { listSessions, listAgents, revokeSession, revokeAgent } from "./administration";
