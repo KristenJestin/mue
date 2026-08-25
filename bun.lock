@@ -35,7 +35,9 @@
       "dependencies": {
         "@better-auth/cimd": "catalog:",
         "@better-auth/mcp": "catalog:",
+        "@mue/db": "workspace:*",
         "better-auth": "catalog:",
+        "drizzle-orm": "catalog:",
       },
     },
     "packages/contracts": {

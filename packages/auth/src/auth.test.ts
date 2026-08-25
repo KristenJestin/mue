@@ -1,0 +1,192 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createTestDatabase, migrate, type DatabaseHandle } from "@mue/db";
+import { listSessions, revokeSession } from "./administration";
+import { createAuth, type AuthHandle } from "./auth";
+import type { AuthConfig } from "./config";
+import { MUE_SCOPES } from "./scopes";
+
+/**
+ * Better Auth against the real development PostgreSQL, through the real
+ * Drizzle adapter, with the tables in `mue_auth`. Nothing is mocked: if the
+ * adapter could not address a `pgSchema`-scoped table set, sign-up would fail
+ * here with `relation "user" does not exist`.
+ */
+
+const BASE_URL = "http://localhost:3000";
+const CONFIG: AuthConfig = {
+  secret: "test-secret-that-is-long-enough-32+",
+  baseUrl: BASE_URL,
+  trustedOrigins: [BASE_URL],
+  mcpResource: `${BASE_URL}/mcp`,
+  loginPage: "/sign-in",
+  consentPage: "/consent",
+  secureCookies: false,
+};
+
+let database: DatabaseHandle;
+let handle: AuthHandle;
+const email = `bearer-${Date.now()}@mue.test`;
+const password = "correct-horse-battery";
+
+const call = (path: string, init?: RequestInit) =>
+  handle.auth.handler(new Request(`${BASE_URL}${path}`, init));
+
+beforeAll(async () => {
+  database = createTestDatabase();
+  await migrate(database);
+  handle = createAuth({ config: CONFIG, database });
+});
+
+afterAll(async () => {
+  await database.close();
+});
+
+describe("the Drizzle adapter against mue_auth", () => {
+  test("creates an account", async () => {
+    const response = await call("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password, name: "Bearer Test" }),
+    });
+    expect(response.status).toBe(200);
+
+    const rows = await database.sql<{ id: string }[]>`
+      select id from mue_auth."user" where email = ${email}
+    `;
+    expect(rows).toHaveLength(1);
+  });
+
+  test("refuses a second account with the same email", async () => {
+    const response = await call("/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password, name: "Bearer Test" }),
+    });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe("the Android bearer session", () => {
+  let token: string;
+  let sessionId: string;
+
+  test("sign-in returns the token in set-auth-token", async () => {
+    const response = await call("/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password }),
+    });
+    expect(response.status).toBe(200);
+
+    const header = response.headers.get("set-auth-token");
+    expect(header).toBeTruthy();
+    token = header as string;
+  });
+
+  test("the token authenticates a request", async () => {
+    const response = await call("/api/auth/get-session", {
+      headers: { authorization: `Bearer ${token}`, origin: BASE_URL },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { session: { id: string }; user: { email: string } };
+    expect(body.user.email).toBe(email);
+    sessionId = body.session.id;
+  });
+
+  test("the session is one row, so it is one revocable device", async () => {
+    // Sign-up already opened a session of its own, which is the point: each
+    // sign-in is a separate row and revoking one leaves the others alone.
+    const mine = (await listSessions(database)).filter((item) => item.userEmail === email);
+    expect(mine.length).toBeGreaterThanOrEqual(2);
+    expect(mine.map((item) => item.id)).toContain(sessionId);
+  });
+
+  test("revoking it makes the next call fail, and reveals nothing", async () => {
+    expect(await revokeSession(database, sessionId)).toBe(true);
+
+    const response = await call("/api/auth/get-session", {
+      headers: { authorization: `Bearer ${token}`, origin: BASE_URL },
+    });
+    // Better Auth answers an unknown token as "no session" rather than
+    // explaining that one was revoked: section 15.3, no data revealed.
+    const body = await response.text();
+    expect(body === "null" || body === "" || response.status === 401).toBe(true);
+    expect(body).not.toContain(email);
+  });
+
+  test("a second device gets its own session and is unaffected", async () => {
+    const before = (await listSessions(database)).filter((item) => item.userEmail === email).length;
+    const first = await call("/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password }),
+    });
+    const second = await call("/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password }),
+    });
+    const firstToken = first.headers.get("set-auth-token") as string;
+    const secondToken = second.headers.get("set-auth-token") as string;
+    expect(firstToken).not.toBe(secondToken);
+
+    const sessions = (await listSessions(database)).filter((item) => item.userEmail === email);
+    expect(sessions).toHaveLength(before + 2);
+
+    const target = sessions[0] as { id: string };
+    await revokeSession(database, target.id);
+    const remaining = (await listSessions(database)).filter((item) => item.userEmail === email);
+    expect(remaining).toHaveLength(before + 1);
+    expect(remaining.map((item) => item.id)).not.toContain(target.id);
+  });
+});
+
+describe("the Web cookie", () => {
+  test("is HttpOnly, SameSite and, off loopback, Secure", async () => {
+    const response = await call("/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE_URL },
+      body: JSON.stringify({ email, password }),
+    });
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie.toLowerCase()).toContain("samesite");
+
+    // The loopback config under test deliberately says Secure=false; a config
+    // built for any other origin must not be able to.
+    const secured = createAuth({
+      config: { ...CONFIG, baseUrl: "https://mue.example", secureCookies: true },
+      database,
+    });
+    const overHttps = await secured.auth.handler(
+      new Request("https://mue.example/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://mue.example" },
+        body: JSON.stringify({ email, password }),
+      }),
+    );
+    expect(overHttps.headers.get("set-cookie") ?? "").toContain("Secure");
+  });
+});
+
+describe("the MCP authorization server", () => {
+  test("advertises PKCE and the section 15.2 scopes", async () => {
+    const response = await call("/api/auth/.well-known/oauth-authorization-server");
+    expect(response.status).toBe(200);
+    const metadata = (await response.json()) as {
+      code_challenge_methods_supported: string[];
+      scopes_supported: string[];
+    };
+    expect(metadata.code_challenge_methods_supported).toContain("S256");
+    for (const scope of MUE_SCOPES) expect(metadata.scopes_supported).toContain(scope);
+  });
+
+  test("publishes the protected resource metadata for /mcp", async () => {
+    // RFC 9728 puts this at the site root, not under the auth base path: the
+    // MCP plugin serves it from an onRequest hook rather than an endpoint.
+    const response = await call("/.well-known/oauth-protected-resource");
+    expect(response.status).toBe(200);
+    const metadata = (await response.json()) as { resource: string };
+    expect(metadata.resource).toBe(`${BASE_URL}/mcp`);
+  });
+});
