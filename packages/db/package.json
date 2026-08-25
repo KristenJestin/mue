@@ -5,14 +5,20 @@
   "type": "module",
   "description": "Drizzle schema and versioned migrations",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
   },
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "lint": "vp lint src",
-    "format": "vp fmt src",
-    "format:check": "vp fmt --check src"
+    "lint": "vp lint src tools",
+    "format": "vp fmt src tools",
+    "format:check": "vp fmt --check src tools",
+    "test": "bun --env-file=../../.env test",
+    "generate": "drizzle-kit generate && bun run tools/strip-create-schema.ts && bun run tools/verify-migrations.ts",
+    "verify:sql": "bun run tools/verify-migrations.ts",
+    "migrate": "bun --env-file=../../.env run src/migrate.ts",
+    "purge": "bun --env-file=../../.env run tools/purge.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
