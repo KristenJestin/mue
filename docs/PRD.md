@@ -11,7 +11,7 @@
 | Plateforme | Android natif, téléphone, portrait |
 | Langue de l'application | Anglais uniquement |
 | Source de cadrage | [`CADRAGE.md`](./CADRAGE.md) |
-| Référence visuelle | [`proto/fusion/saisie.html`](./proto/fusion/saisie.html) |
+| Référence visuelle | [`proto/fusion/saisie.html`](../proto/fusion/saisie.html) |
 
 ## 2. Résumé
 
@@ -163,7 +163,7 @@ Ces contrôles n'apparaissent pas dans le prototype de référence : leur intég
 - Confirmer l'enregistrement pendant environ une seconde par la décharge lumineuse décrite ci-dessous, aussi bien pour une création que pour un remplacement.
 - Produire une vibration courte de confirmation lorsque les vibrations sont activées.
 
-**Confirmation d'enregistrement** — le bouton décharge sa lumière puis se tait. Aucun pictogramme ni caractère de police n'intervient. Référence approuvée : la variante `Éclat + repos` de [`proto/fusion/confirmation.html`](./proto/fusion/confirmation.html).
+**Confirmation d'enregistrement** — le bouton décharge sa lumière puis se tait. Aucun pictogramme ni caractère de police n'intervient. Référence approuvée : la variante `Éclat + repos` de [`proto/fusion/confirmation.html`](../proto/fusion/confirmation.html).
 
 - Le bouton se contracte au toucher.
 - Le libellé s'estompe puis revient sous la forme du mot `Saved`.
@@ -448,10 +448,10 @@ Le réglage de réduction des animations vient du système Android et n'est pas 
 
 ### 12.2 Prototypes approuvés
 
-- [`Entry`](./proto/fusion/saisie.html)
-- [`Progress`](./proto/fusion/evolution.html)
-- [`Profile`](./proto/fusion/profil.html)
-- [`Confirmation d'enregistrement`](./proto/fusion/confirmation.html)
+- [`Entry`](../proto/fusion/saisie.html)
+- [`Progress`](../proto/fusion/evolution.html)
+- [`Profile`](../proto/fusion/profil.html)
+- [`Confirmation d'enregistrement`](../proto/fusion/confirmation.html)
 
 Les prototypes fixent la hiérarchie, l'ambiance et les interactions principales. Ils ne constituent pas du code de production ni une mesure exacte des dimensions Android.
 
@@ -464,7 +464,7 @@ Les prototypes fixent la hiérarchie, l'ambiance et les interactions principales
 
 **Divergences assumées** — l'implémentation s'écarte volontairement des prototypes d'écran sur deux points :
 
-- la confirmation d'enregistrement remplace le `Saved ✓` de `saisie.html` et le `Profile saved ✓` de `profil.html` par la décharge lumineuse du bouton (FR-ENTRY-006, FR-PROFILE-003). La référence approuvée est la variante `Éclat + repos` de [`proto/fusion/confirmation.html`](./proto/fusion/confirmation.html) ;
+- la confirmation d'enregistrement remplace le `Saved ✓` de `saisie.html` et le `Profile saved ✓` de `profil.html` par la décharge lumineuse du bouton (FR-ENTRY-006, FR-PROFILE-003). La référence approuvée est la variante `Éclat + repos` de [`proto/fusion/confirmation.html`](../proto/fusion/confirmation.html) ;
 - la carte IMC de `profil.html` passe à l'écran Progress, où elle remplace la carte `Current BMI` de `evolution.html` et où `Average pace` perd son remplissage ambre ; l'écran Profile n'en garde qu'un affichage compact sous le champ de taille (FR-PROGRESS-003, FR-PROFILE-001).
 
 Le formatage des nombres visible dans les prototypes, qui utilise la virgule décimale, illustre un rendu en français et ne préjuge pas du rendu réel, lequel suit la langue du téléphone.

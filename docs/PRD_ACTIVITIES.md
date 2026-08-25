@@ -12,7 +12,7 @@
 | Plateforme | Android natif, téléphone, portrait |
 | Langue de l'application | Anglais uniquement |
 | PRD du socle actuel | [`PRD.md`](./PRD.md) |
-| Référence visuelle | [`activity`](./proto/fusion/activity.html), [`log-activity`](./proto/fusion/log-activity.html), [`strength-session`](./proto/fusion/strength-session.html) |
+| Référence visuelle | [`activity`](../proto/fusion/activity.html), [`log-activity`](../proto/fusion/log-activity.html), [`strength-session`](../proto/fusion/strength-session.html) |
 
 Ce document décrit un module ajouté à une application dont le socle est déjà développé. Il ne redéfinit ni les écrans, ni le design system, ni les décisions techniques du socle : il les prolonge. En cas de divergence sur la navigation, la section 7 du présent document fait autorité ; en cas de divergence avec les prototypes, la section 14.3.
 

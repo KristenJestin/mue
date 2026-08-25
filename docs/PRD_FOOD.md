@@ -14,7 +14,7 @@
 | PRD du socle | [`PRD.md`](./PRD.md) |
 | Modules voisins | [`PRD_ACTIVITIES.md`](./PRD_ACTIVITIES.md), [`PRD_ACTIVITY_TIMER.md`](./PRD_ACTIVITY_TIMER.md) |
 | Dépendance serveur | [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) |
-| Référence visuelle | [`meals`](./proto/fusion/meals.html) |
+| Référence visuelle | [`meals`](../proto/fusion/meals.html) |
 
 Ce document décrit un module ajouté à une application dont le socle poids et le module activité sont déjà développés. Il ne redéfinit ni le design system, ni la navigation générale, ni les décisions techniques du socle : il les prolonge. En cas de divergence sur la navigation, la section 7 fait autorité ; en cas de divergence avec le prototype, la section 19.
 
@@ -552,7 +552,7 @@ Un repas est planifié en choisissant une recette ou un aliment, une date, un cr
 ## 19. Design, icônes et mouvement
 
 - Le module reprend intégralement la direction `Fusion` : fond très sombre, accent ambre, Sora, cartes tactiles, rayons généreux.
-- Le prototype de référence est [`meals.html`](./proto/fusion/meals.html). En cas de divergence entre ce document et le prototype, ce document fait autorité pour le modèle et les règles ; le prototype fait autorité pour la mise en page et le rythme visuel.
+- Le prototype de référence est [`meals.html`](../proto/fusion/meals.html). En cas de divergence entre ce document et le prototype, ce document fait autorité pour le modèle et les règles ; le prototype fait autorité pour la mise en page et le rythme visuel.
 - Les icônes proviennent du jeu déjà utilisé par Mue et distinguent les créneaux : lever de soleil, soleil, fruit, lune.
 - Chaque source d'aliment possède une icône stable : catalogue générique, produit emballé, aliment personnalisé, recette, estimation rapide.
 - Le mouvement reste fonctionnel : apparition d'une entrée ajoutée, recalcul visible du total, feuille modale glissante. Aucune animation ne retarde une saisie.
