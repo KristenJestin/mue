@@ -1,0 +1,34 @@
+{
+  // Shared compiler settings for every TypeScript workspace. Packages extend this
+  // and only add their own `include` (plus `lib`/`jsx` where the DOM is involved).
+  //
+  // Internal packages are consumed as TypeScript source: each one points `exports`
+  // and `types` at `src/index.ts`. Bun and Vite+ read TS directly, so there is no
+  // build step to run before `typecheck`, and no project references to keep in sync.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // `verbatimModuleSyntax` forces `import type` at every type-only import, which
+    // is what lets Bun and Vite+ strip types without a resolver round-trip.
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    // Nothing here emits: `typecheck` is a pure check and the bundlers own emit.
+    "noEmit": true,
+    "types": ["bun"]
+  }
+}

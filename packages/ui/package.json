@@ -4,5 +4,21 @@
   "private": true,
   "type": "module",
   "description": "Shared UI primitives, future shadcn foundation",
-  "scripts": {}
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "vp lint src",
+    "format": "vp fmt src",
+    "format:check": "vp fmt --check src"
+  },
+  "dependencies": {
+    "@mue/design-tokens": "workspace:*",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:"
+  }
 }

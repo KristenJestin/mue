@@ -6,3 +6,11 @@ node_modules/
 *.log
 .DS_Store
 .claude/
+
+# Build outputs. Internal packages are consumed as TypeScript source, so these
+# only appear once an app or a published package actually emits.
+dist/
+*.tsbuildinfo
+coverage/
+
+# Vite+ keeps its task cache in node_modules/.vite/task-cache, already covered above.

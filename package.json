@@ -9,7 +9,49 @@
       "apps/*",
       "packages/*"
     ],
-    "catalog": {}
+    "catalog": {
+      "@better-auth/cimd": "1.7.1",
+      "@better-auth/mcp": "1.7.1",
+      "@hono/mcp": "0.3.2",
+      "@modelcontextprotocol/sdk": "1.30.0",
+      "@tanstack/react-start": "1.168.49",
+      "@types/bun": "1.4.0",
+      "@types/react": "19.2.18",
+      "@types/react-dom": "19.2.5",
+      "better-auth": "1.7.1",
+      "drizzle-kit": "0.31.10",
+      "drizzle-orm": "0.45.2",
+      "hono": "4.13.4",
+      "postgres": "3.4.9",
+      "react": "19.2.8",
+      "react-dom": "19.2.8",
+      "typescript": "7.0.2",
+      "vite-plus": "0.3.0",
+      "zod": "4.4.3"
+    }
   },
-  "scripts": {}
+  "scripts": {
+    "typecheck": "vp run --filter '!android' typecheck",
+    "lint": "vp run --filter '!android' lint",
+    "format": "vp run --filter '!android' format",
+    "format:check": "vp run --filter '!android' format:check",
+    "check": "bun run format:check && bun run lint && bun run typecheck",
+    "android:assemble": "bun run --filter android assemble",
+    "android:assemble:release": "bun run --filter android assemble:release",
+    "android:test": "bun run --filter android test",
+    "android:lint": "bun run --filter android lint",
+    "android:clean": "bun run --filter android clean"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "1.4.0",
+      "onFail": "download"
+    }
+  }
 }

@@ -1,0 +1,14 @@
+{
+  "name": "android",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Mue Android application. Gradle owns this module graph; these scripts only delegate to the wrapper.",
+  "scripts": {
+    "gradle": "bun -e \"const{spawnSync}=require('node:child_process');const{resolve}=require('node:path');const a=process.argv.slice(1);const win=process.platform==='win32';const r=win?spawnSync('cmd.exe',['/c',resolve('gradlew.bat'),...a],{stdio:'inherit'}):spawnSync(resolve('gradlew'),a,{stdio:'inherit'});process.exit(r.status??1)\"",
+    "assemble": "bun run gradle assembleDebug --max-workers=8",
+    "assemble:release": "bun run gradle assembleRelease --max-workers=8",
+    "test": "bun run gradle testDebugUnitTest --max-workers=8",
+    "lint": "bun run gradle lintDebug --max-workers=8",
+    "clean": "bun run gradle clean --max-workers=8"
+  }
+}

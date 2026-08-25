@@ -4,5 +4,19 @@
   "private": true,
   "type": "module",
   "description": "Better Auth configuration and adapters",
-  "scripts": {}
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "vp lint src",
+    "format": "vp fmt src",
+    "format:check": "vp fmt --check src"
+  },
+  "dependencies": {
+    "@better-auth/cimd": "catalog:",
+    "@better-auth/mcp": "catalog:",
+    "better-auth": "catalog:"
+  }
 }
