@@ -1,0 +1,95 @@
+{
+  "fixtures": [
+    {
+      "description": "A typical weight measurement payload.",
+      "file": "measurement-v1-valid.json",
+      "kind": "valid",
+      "schema": "MeasurementPayloadV1"
+    },
+    {
+      "description": "The minimum legal weight, recorded on a leap day.",
+      "file": "measurement-v1-edge.json",
+      "kind": "edge",
+      "schema": "MeasurementPayloadV1"
+    },
+    {
+      "description": "An upsert, carrying the full aggregate.",
+      "file": "mutation-upsert-measurement-v1.json",
+      "kind": "valid",
+      "schema": "MutationEnvelope"
+    },
+    {
+      "description": "A delete: null payload, and a baseRevision that must still be honoured.",
+      "file": "mutation-delete-measurement.json",
+      "kind": "edge",
+      "schema": "MutationEnvelope"
+    },
+    {
+      "description": "Metadata for a live aggregate, deletedAt null.",
+      "file": "aggregate-meta-live.json",
+      "kind": "valid",
+      "schema": "AggregateMeta"
+    },
+    {
+      "description": "Metadata for a tombstone, which the client keeps to block resurrection.",
+      "file": "aggregate-meta-tombstone.json",
+      "kind": "edge",
+      "schema": "AggregateMeta"
+    },
+    {
+      "description": "Every optional field absent, and retryable.",
+      "file": "error-minimal.json",
+      "kind": "error",
+      "schema": "MueError"
+    },
+    {
+      "description": "Carries currentRevision so the client can rebase.",
+      "file": "error-revision-conflict.json",
+      "kind": "error",
+      "schema": "MueError"
+    },
+    {
+      "description": "Names the missing field (PRD section 14.4).",
+      "file": "error-missing-required-field.json",
+      "kind": "error",
+      "schema": "MueError"
+    },
+    {
+      "description": "An aggregate type but no id: the whole type is unreadable.",
+      "file": "error-upgrade-required.json",
+      "kind": "error",
+      "schema": "MueError"
+    },
+    {
+      "description": "An outbox batch of one upsert and one delete.",
+      "file": "push-request.json",
+      "kind": "valid",
+      "schema": "PushRequest"
+    },
+    {
+      "description": "applied, duplicate and rejected in one body.",
+      "file": "push-response.json",
+      "kind": "valid",
+      "schema": "PushResponse"
+    },
+    {
+      "description": "A resumed pull, declaring the payload versions it can apply.",
+      "file": "pull-request.json",
+      "kind": "valid",
+      "schema": "PullRequest"
+    },
+    {
+      "description": "A page of changes, with a sequence past 2^53.",
+      "file": "pull-response-ok.json",
+      "kind": "valid",
+      "schema": "PullResponse"
+    },
+    {
+      "description": "The upgrade demand, which structurally carries no nextCursor.",
+      "file": "pull-response-upgrade-required.json",
+      "kind": "edge",
+      "schema": "PullResponse"
+    }
+  ],
+  "version": 1
+}

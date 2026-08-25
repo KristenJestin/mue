@@ -1,0 +1,48 @@
+{
+  "changes": [
+    {
+      "aggregateId": "2026-08-25",
+      "aggregateType": "measurement",
+      "meta": {
+        "createdAt": "2026-08-25T06:12:04.500Z",
+        "deletedAt": null,
+        "id": "2026-08-25",
+        "lastMutationId": "0198f0a1-2b3c-7d4e-8f90-a1b2c3d4e5f6",
+        "originId": "device-7f3c1a04",
+        "originType": "android",
+        "revision": "4",
+        "updatedAt": "2026-08-25T06:12:04.500Z"
+      },
+      "op": "upsert",
+      "payload": {
+        "date": "2026-08-25",
+        "weightCg": 7845
+      },
+      "payloadSchemaVersion": 1,
+      "sequence": "9007199254740993"
+    },
+    {
+      "aggregateId": "2026-08-24",
+      "aggregateType": "measurement",
+      "meta": {
+        "createdAt": "2026-08-24T06:03:11.000Z",
+        "deletedAt": "2026-08-25T06:12:05.310Z",
+        "id": "2026-08-24",
+        "lastMutationId": "0198f0a1-9e8d-7c6b-b5a4-938271605f4e",
+        "originId": "device-7f3c1a04",
+        "originType": "android",
+        "revision": "10",
+        "updatedAt": "2026-08-25T06:12:05.310Z"
+      },
+      "op": "delete",
+      "payload": null,
+      "payloadSchemaVersion": 1,
+      "sequence": "9007199254740994"
+    }
+  ],
+  "hasMore": false,
+  "lastAndroidSyncAt": "2026-08-25T06:12:06.900Z",
+  "nextCursor": "eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk0In0",
+  "serverTime": "2026-08-25T06:12:07.000Z",
+  "status": "ok"
+}

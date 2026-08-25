@@ -1,0 +1,8 @@
+{
+  "aggregateId": "2026-08-25",
+  "aggregateType": "measurement",
+  "code": "sync.missing_required_field",
+  "field": "payload.weightCg",
+  "message": "payload.weightCg is required for a measurement upsert.",
+  "retryable": false
+}
