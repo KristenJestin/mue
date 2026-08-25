@@ -107,7 +107,7 @@ Le lancement d'un minuteur d'activité depuis le Web n'est pas inclus par défau
 
 ### 6.4 Alimentation
 
-Le domaine est proposé par [`PRD_FOOD.md`](./PRD_FOOD.md), non encore arbitré, dont la V1 serait Android. Le Web ne l'ouvre qu'après la livraison de ce module et de sa synchronisation.
+Le domaine est défini par [`PRD_FOOD.md`](./PRD_FOOD.md), dont la V1 est Android. Le Web ne l'ouvre qu'après la livraison de ce module et de sa synchronisation.
 
 Son périmètre Web candidat se limite alors à la consultation du journal, à la lecture des recettes et à la correction d'une entrée depuis un clavier confortable. La création par scan reste propre au téléphone.
 
