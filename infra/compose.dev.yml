@@ -1,0 +1,54 @@
+# Development PostgreSQL for the Mue Platform (PRD §20.3).
+#
+# Development only. Production connects to the shared PostgreSQL already
+# administered on the personal server through DATABASE_URL; the Mue deployment
+# ships no PostgreSQL container and creates no database and no role. What the
+# init scripts below do here is exactly what a DBA prepares by hand there --
+# see infra/README.md.
+#
+#   docker compose -f infra/compose.dev.yml up -d
+#   docker compose -f infra/compose.dev.yml down      # keeps the data
+#   docker compose -f infra/compose.dev.yml down -v   # resets the cluster
+
+name: mue-dev
+
+services:
+  postgres:
+    image: postgres:${MUE_DB_IMAGE_TAG:-18-alpine}
+    container_name: mue-dev-postgres
+    restart: unless-stopped
+    # Loopback by default: no Mue service listens on a public interface unless
+    # it was configured to (§22.5).
+    ports:
+      - "${MUE_DB_BIND:-127.0.0.1}:${MUE_DB_PORT:-5433}:5432"
+    environment:
+      # initdb owner. Stands in for the DBA of the shared production cluster;
+      # the application never uses it.
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the repository-root .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the repository-root .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in the repository-root .env}
+      # Read by the init scripts through psql's \getenv.
+      MUE_DB_ROLE: ${MUE_DB_ROLE:?set MUE_DB_ROLE in the repository-root .env}
+      MUE_DB_PASSWORD: ${MUE_DB_PASSWORD:?set MUE_DB_PASSWORD in the repository-root .env}
+      MUE_APP_SCHEMA: ${MUE_APP_SCHEMA:-mue_app}
+      MUE_AUTH_SCHEMA: ${MUE_AUTH_SCHEMA:-mue_auth}
+    volumes:
+      # postgres:18 puts PGDATA in /var/lib/postgresql/18/docker and declares
+      # /var/lib/postgresql as its volume; mounting the parent is what makes
+      # `down` then `up` keep the data on this major.
+      - pgdata:/var/lib/postgresql
+      # Ran once, by the entrypoint, only when the volume is empty.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -h forces TCP. During initdb the entrypoint serves a temporary cluster
+      # on the unix socket only, so a socket probe would report healthy before
+      # the init scripts had created the role and the schemas.
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:
+    name: ${MUE_DB_VOLUME:-mue-dev-pgdata}
