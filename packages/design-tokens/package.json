@@ -1,0 +1,8 @@
+{
+  "name": "@mue/design-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared design tokens, future Web and Android foundation",
+  "scripts": {}
+}

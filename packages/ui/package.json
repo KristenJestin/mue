@@ -1,0 +1,8 @@
+{
+  "name": "@mue/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared UI primitives, future shadcn foundation",
+  "scripts": {}
+}

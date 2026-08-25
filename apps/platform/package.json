@@ -1,0 +1,8 @@
+{
+  "name": "@mue/platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TanStack Start entry point delegating /api/*, /mcp and /health/* to Hono",
+  "scripts": {}
+}

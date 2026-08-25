@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Mue — Évolution · Aube</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style type="text/tailwindcss">@theme{--font-sans:Inter,ui-sans-serif,system-ui,sans-serif}[x-cloak]{display:none!important}.phone{width:min(100%,390px);height:min(844px,100dvh)}</style>
+</head>
+<body class="min-h-screen bg-[#dcd8ce] text-[#1b2b27] antialiased sm:flex sm:items-center sm:justify-center sm:p-6">
+  <main class="phone flex flex-col overflow-hidden bg-[#fbf8f1] shadow-2xl sm:rounded-[2.7rem]" x-data="{period:'30 j',periods:['7 j','30 j','3 mois','Tout'],points:[75.6,75.1,75.2,74.8,74.9,74.5],draw(){let c=this.$refs.chart,x=c.getContext('2d'),d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;x.scale(d,d);x.clearRect(0,0,w,h);let min=74.2,max=75.9,p=12,px=i=>p+i*(w-p*2)/(this.points.length-1),py=v=>p+(max-v)*(h-p*2)/(max-min);x.beginPath();this.points.forEach((v,i)=>i?x.lineTo(px(i),py(v)):x.moveTo(px(i),py(v)));x.lineWidth=3;x.strokeStyle='#e66f51';x.lineCap='round';x.lineJoin='round';x.stroke();this.points.forEach((v,i)=>{x.beginPath();x.arc(px(i),py(v),i===this.points.length-1?5:3,0,Math.PI*2);x.fillStyle=i===this.points.length-1?'#183f37':'#e66f51';x.fill()})}}" x-init="$nextTick(()=>draw())">
+    <header class="flex items-center justify-between px-7 pb-2 pt-7"><a href="../index.html" class="text-sm font-black tracking-[.2em]">MUE</a><span class="text-xs font-semibold text-[#8f8a7e]">23 août 2026</span></header>
+    <section class="flex-1 overflow-y-auto px-7 pb-5 pt-7">
+      <p class="text-sm text-[#817d73]">Ton parcours</p><h1 class="mt-1 text-3xl font-semibold tracking-[-.045em]">Lentement, sûrement.</h1>
+      <div class="mt-7 flex gap-2 overflow-x-auto pb-1"><template x-for="p in periods"><button @click="period=p;draw()" class="shrink-0 rounded-full px-4 py-2 text-xs font-semibold transition" :class="period===p?'bg-[#183f37] text-white':'bg-[#eee8de] text-[#77736a]'" x-text="p"></button></template></div>
+      <div class="mt-5 rounded-[1.8rem] bg-white p-5 shadow-[0_12px_40px_rgba(77,61,43,.07)] ring-1 ring-black/5">
+        <div class="flex items-end justify-between"><div><span class="text-xs text-[#8c867b]">Poids actuel</span><div class="mt-1 text-4xl font-semibold tracking-[-.06em]">74,5 <span class="text-sm font-medium text-[#959087]">kg</span></div></div><span class="rounded-full bg-[#dff1e8] px-3 py-1.5 text-xs font-bold text-[#2f6b5c]">−1,1 kg</span></div>
+        <canvas x-ref="chart" class="mt-5 h-44 w-full"></canvas>
+        <div class="flex justify-between text-[10px] font-medium text-[#aaa398]"><span>25 juil.</span><span>Aujourd'hui</span></div>
+      </div>
+      <div class="mt-5 grid grid-cols-2 gap-3"><div class="rounded-2xl bg-[#efe9df] p-4"><span class="text-xs text-[#8b857a]">IMC actuel</span><strong class="mt-2 block text-2xl">23,0</strong><span class="text-xs text-[#4e766b]">Zone habituelle</span></div><div class="rounded-2xl bg-[#183f37] p-4 text-white"><span class="text-xs text-white/60">Rythme moyen</span><strong class="mt-2 block text-2xl">−0,3</strong><span class="text-xs text-white/60">kg / semaine</span></div></div>
+      <h2 class="mt-6 text-sm font-bold">Dernières mesures</h2>
+      <div class="mt-2 divide-y divide-[#e8e0d5]"><div class="flex justify-between py-3 text-sm"><span class="text-[#817b71]">Aujourd'hui</span><strong>74,5 kg</strong></div><div class="flex justify-between py-3 text-sm"><span class="text-[#817b71]">18 août</span><strong>74,9 kg</strong></div><div class="flex justify-between py-3 text-sm"><span class="text-[#817b71]">12 août</span><strong>74,8 kg</strong></div></div>
+    </section>
+    <nav class="grid grid-cols-3 border-t border-[#e9e2d6] bg-[#fffdf8] px-5 py-3 text-center text-[11px] font-semibold"><a class="text-[#9c988f]" href="./saisie.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full border border-current"></span>Saisie</a><a class="text-[#e66f51]" href="./evolution.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full bg-current"></span>Évolution</a><a class="text-[#9c988f]" href="./profil.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full border border-current"></span>Profil</a></nav>
+  </main>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prototypes — Suivi du poids</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style type="text/tailwindcss">
+    @theme { --font-sans: Inter, ui-sans-serif, system-ui, sans-serif; }
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="min-h-screen bg-[#ecebe7] text-[#171815] antialiased">
+  <main class="mx-auto max-w-6xl px-6 py-12 lg:py-20" x-data="{ selected: null }">
+    <div class="mb-12 max-w-2xl">
+      <p class="mb-3 text-xs font-bold tracking-[.24em] text-[#74766f] uppercase">Comparateur de directions</p>
+      <h1 class="text-4xl font-semibold tracking-[-.05em] sm:text-6xl">Trois façons de donner du poids au geste.</h1>
+      <p class="mt-5 text-lg leading-8 text-[#63655f]">Chaque piste contient les écrans Saisie, Évolution et Profil. Les interactions principales sont actives.</p>
+    </div>
+
+    <section class="grid gap-6 lg:grid-cols-3">
+      <article class="group overflow-hidden rounded-[2rem] bg-[#f7f2e8] shadow-[0_18px_60px_rgba(43,35,23,.08)] transition hover:-translate-y-1">
+        <div class="h-48 p-6">
+          <div class="flex h-full flex-col justify-between rounded-[1.5rem] bg-[#fbf8f1] p-5 ring-1 ring-black/5">
+            <div class="flex items-center justify-between text-xs font-semibold"><span>MUE</span><span class="rounded-full bg-[#d9f0e8] px-3 py-1 text-[#2d6658]">74,5 kg</span></div>
+            <div><div class="mb-3 h-px bg-[#d2c6b5]"></div><div class="h-2 w-20 rounded-full bg-[#e66f51]"></div></div>
+          </div>
+        </div>
+        <div class="border-t border-black/5 p-6">
+          <p class="text-xs font-bold tracking-[.18em] text-[#9a6d5d] uppercase">Aube</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight">Douceur éditoriale</h2>
+          <p class="mt-2 min-h-12 text-sm leading-6 text-[#69645b]">Chaleureux, calme, tactile. Une application qui accompagne plutôt qu'elle ne juge.</p>
+          <a href="./aube/saisie.html" class="mt-6 inline-flex rounded-full bg-[#183f37] px-5 py-3 text-sm font-semibold text-white transition hover:scale-[1.03]">Explorer la piste</a>
+        </div>
+      </article>
+
+      <article class="group overflow-hidden rounded-[2rem] bg-[#0a0b0c] text-white shadow-[0_18px_60px_rgba(0,0,0,.2)] transition hover:-translate-y-1">
+        <div class="h-48 p-6">
+          <div class="flex h-full flex-col justify-between rounded-[1.5rem] bg-[#121416] p-5 ring-1 ring-white/10">
+            <div class="flex items-center justify-between text-xs font-semibold"><span>MUE/</span><span class="text-[#c8ff45]">+0,4%</span></div>
+            <div class="text-right text-4xl font-light tracking-[-.06em]">74.5<span class="text-sm text-white/40"> KG</span></div>
+            <div class="h-px bg-gradient-to-r from-transparent via-[#c8ff45] to-transparent"></div>
+          </div>
+        </div>
+        <div class="border-t border-white/10 p-6">
+          <p class="text-xs font-bold tracking-[.18em] text-[#c8ff45] uppercase">Nuit</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight">Contraste cinétique</h2>
+          <p class="mt-2 min-h-12 text-sm leading-6 text-white/55">Sombre, précis et énergique. La donnée devient un instrument vivant.</p>
+          <a href="./nuit/saisie.html" class="mt-6 inline-flex rounded-full bg-[#c8ff45] px-5 py-3 text-sm font-bold text-black transition hover:scale-[1.03]">Explorer la piste</a>
+        </div>
+      </article>
+
+      <article class="group overflow-hidden rounded-[2rem] bg-[#f4f4f0] shadow-[0_18px_60px_rgba(26,34,63,.1)] transition hover:-translate-y-1">
+        <div class="h-48 p-6">
+          <div class="relative flex h-full flex-col justify-between overflow-hidden rounded-[1.5rem] bg-[#fdfdf9] p-5 ring-1 ring-black/10">
+            <div class="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-[#ff5b35]"></div>
+            <div class="relative text-xs font-black tracking-[.2em]">MUE®</div>
+            <div class="relative text-5xl font-black tracking-[-.08em] text-[#273cff]">74,5</div>
+            <div class="relative h-2 bg-[#151515]"></div>
+          </div>
+        </div>
+        <div class="border-t border-black/10 p-6">
+          <p class="text-xs font-bold tracking-[.18em] text-[#273cff] uppercase">Signal</p>
+          <h2 class="mt-2 text-2xl font-black tracking-tight">Graphisme essentiel</h2>
+          <p class="mt-2 min-h-12 text-sm leading-6 text-[#5f615d]">Franc, coloré et typographique. Plus expressif, tout en restant très simple.</p>
+          <a href="./signal/saisie.html" class="mt-6 inline-flex rounded-xl bg-[#273cff] px-5 py-3 text-sm font-bold text-white transition hover:-rotate-1 hover:scale-[1.03]">Explorer la piste</a>
+        </div>
+      </article>
+    </section>
+
+    <section class="mt-8 rounded-[2rem] bg-[#101012] p-7 text-white shadow-[0_18px_60px_rgba(0,0,0,.18)]">
+      <div class="flex flex-col justify-between gap-6 sm:flex-row sm:items-center">
+        <div>
+          <p class="text-xs font-bold tracking-[.18em] text-[#efb45f] uppercase">Direction retenue</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight">Aube × Nuit · Ambre</h2>
+          <p class="mt-2 max-w-xl text-sm leading-6 text-white/55">Les messages et la simplicité d'Aube, le fond sombre de Nuit, l'accent ambre, Sora et une inertie équilibrée. La direction finale intègre désormais Entry, Progress, Activity, Food et Profile.</p>
+        </div>
+        <div class="flex shrink-0 flex-wrap gap-2"><a href="./fusion/saisie.html" class="rounded-full bg-[#efb45f] px-5 py-3 text-sm font-bold text-[#1d160d] transition hover:scale-[1.03]">Voir la direction finale</a><a href="./fusion/food.html" class="rounded-full border border-[#efb45f]/40 px-5 py-3 text-sm font-bold text-[#efb45f] transition hover:bg-[#efb45f]/10">Tester Food</a><a href="./fusion/activity.html" class="rounded-full border border-[#efb45f]/40 px-5 py-3 text-sm font-bold text-[#efb45f] transition hover:bg-[#efb45f]/10">Voir Activities</a><a href="./fusion/start-activity.html" class="rounded-full border border-[#efb45f]/40 px-5 py-3 text-sm font-bold text-[#efb45f] transition hover:bg-[#efb45f]/10">Tester le minuteur</a><a href="./fusion/typographies.html" class="rounded-full border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/8">Tester les typos</a><a href="./fusion/inertie.html" class="rounded-full border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/8">Tester l'inertie</a></div>
+      </div>
+    </section>
+
+    <section class="mt-12 rounded-[2rem] bg-white/70 p-7 ring-1 ring-black/5">
+      <h2 class="text-lg font-semibold">Noms à garder en tête</h2>
+      <div class="mt-4 flex flex-wrap gap-2 text-sm">
+        <span class="rounded-full bg-black px-4 py-2 text-white">Mue</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Repère</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Palier</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Sillage</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Élan</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Juste</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Virgule</span><span class="rounded-full bg-[#e8e8e2] px-4 py-2">Mesure</span>
+      </div>
+      <p class="mt-4 text-xs text-[#777971]">Pistes créatives uniquement : disponibilité juridique, domaines et boutiques d'applications non vérifiés.</p>
+    </section>
+  </main>
+</body>
+</html>

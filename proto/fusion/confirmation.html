@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mue — Confirmation d'enregistrement</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400..800&display=swap');
+
+:root{
+  --canvas:#101012; --elevated:#17171B; --accent:#EFB45F; --ink:#1D160D;
+  --soft:#33291E; --t1:rgba(255,255,255,.92); --t2:rgba(255,255,255,.55);
+  --t3:rgba(255,255,255,.48); --quiet:rgba(255,255,255,.30);
+  --border:rgba(255,255,255,.12); --hair:rgba(255,255,255,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#0A0A0C;font-family:Sora,ui-sans-serif,system-ui,sans-serif;
+  color:var(--t1);min-height:100vh;padding:32px 20px 64px;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:980px;margin:0 auto}
+h1{font-size:22px;font-weight:600;letter-spacing:-.03em;margin-bottom:6px}
+.sub{color:var(--t2);font-size:13.5px;line-height:1.6;max-width:62ch;margin-bottom:26px}
+.sub b{color:var(--accent);font-weight:600}
+
+.picker{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.chip{
+  border:0;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:600;
+  padding:10px 16px;border-radius:999px;background:rgba(255,255,255,.05);
+  color:var(--t3);transition:background .18s,color .18s;
+}
+.chip[aria-selected="true"]{background:var(--accent);color:var(--ink)}
+.desc{color:var(--t2);font-size:13px;line-height:1.65;margin:14px 0 26px;min-height:44px;max-width:70ch}
+
+.stage{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+.panel{
+  background:var(--canvas);border:1px solid var(--hair);border-radius:28px;
+  padding:26px 24px 24px;position:relative;overflow:hidden;
+}
+.panel::before{
+  content:'';position:absolute;inset:0 0 auto;height:190px;opacity:.20;pointer-events:none;
+  background:radial-gradient(circle at 50% 0,var(--accent),transparent 65%);
+}
+.tag{
+  position:relative;font-size:10px;font-weight:700;letter-spacing:.18em;
+  color:var(--quiet);margin-bottom:22px;
+}
+
+/* ---- Entry context ---- */
+.readout{position:relative;text-align:center;margin-bottom:6px}
+.num{
+  font-size:56px;font-weight:500;letter-spacing:-.06em;line-height:1;
+  font-variant-numeric:tabular-nums;
+}
+.unit{font-size:15px;color:var(--t3);margin-left:4px;font-weight:400}
+.hint{
+  position:relative;text-align:center;font-size:9.5px;font-weight:700;
+  letter-spacing:.2em;color:var(--accent);margin:12px 0 18px;
+}
+.ruler{position:relative;height:62px;margin-bottom:26px}
+.ticks{
+  position:absolute;inset:8px -20px 20px;
+  background-image:repeating-linear-gradient(90deg,transparent 0 13px,rgba(255,255,255,.22) 13px 14px);
+  background-size:14px 22px;background-repeat:repeat-x;background-position-y:center;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 22%,#000 78%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 22%,#000 78%,transparent);
+  transition:filter .3s;
+}
+.marker{
+  position:absolute;left:50%;top:2px;width:2px;height:46px;background:var(--accent);
+  transform:translateX(-50%);border-radius:2px;
+}
+.marker::after{
+  content:'';position:absolute;bottom:-5px;left:-4px;width:10px;height:10px;
+  border-radius:50%;background:var(--accent);
+}
+.marker.flare{animation:markerFlare .85s cubic-bezier(.2,.8,.3,1)}
+@keyframes markerFlare{
+  0%{box-shadow:0 0 0 rgba(239,180,95,0)}
+  22%{box-shadow:0 0 26px 7px rgba(239,180,95,.85)}
+  100%{box-shadow:0 0 0 rgba(239,180,95,0)}
+}
+.ripple{
+  position:absolute;left:50%;top:50%;width:8px;height:8px;border-radius:50%;
+  transform:translate(-50%,-50%) scale(0);opacity:0;pointer-events:none;
+  background:radial-gradient(circle,rgba(239,180,95,.55),transparent 70%);
+}
+.ripple.go{animation:rippleOut .8s cubic-bezier(.15,.75,.3,1)}
+@keyframes rippleOut{
+  0%{transform:translate(-50%,-50%) scale(0);opacity:.9}
+  100%{transform:translate(-50%,-50%) scale(34);opacity:0}
+}
+.ticks.brighten{filter:brightness(2.6)}
+
+/* ---- Profile context ---- */
+.field{
+  border:1px solid var(--border);border-radius:18px;padding:12px 16px;margin-bottom:12px;
+}
+.field span{display:block;font-size:11px;color:var(--t3)}
+.field strong{display:block;font-size:17px;font-weight:600;margin-top:2px}
+.bmi{
+  background:var(--accent);color:var(--ink);border-radius:24px;padding:16px 18px;margin-bottom:18px;
+}
+.bmi span{font-size:11px;color:rgba(0,0,0,.55);font-weight:500}
+.bmiv{
+  font-size:38px;font-weight:500;letter-spacing:-.05em;line-height:1.05;margin-top:2px;
+  font-variant-numeric:tabular-nums;display:inline-block;
+}
+.bmiv.hop{animation:bmiHop .6s cubic-bezier(.2,.85,.3,1)}
+@keyframes bmiHop{
+  0%{transform:translateY(0)} 35%{transform:translateY(-7px)} 100%{transform:translateY(0)}
+}
+
+/* ---- The button under test ---- */
+.btnwrap{position:relative}
+.halo{
+  position:absolute;inset:0;border-radius:20px;pointer-events:none;opacity:0;
+  box-shadow:0 0 0 0 rgba(239,180,95,.55);
+}
+.halo.go{animation:haloOut .95s cubic-bezier(.15,.7,.3,1)}
+@keyframes haloOut{
+  0%{opacity:1;box-shadow:0 0 22px 2px rgba(239,180,95,.75)}
+  100%{opacity:0;box-shadow:0 0 70px 34px rgba(239,180,95,0)}
+}
+.btn{
+  position:relative;width:100%;height:56px;border:0;border-radius:20px;cursor:pointer;
+  background:var(--accent);color:var(--ink);font-family:inherit;font-size:14.5px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;overflow:hidden;
+  transition:transform .16s cubic-bezier(.3,.8,.4,1),background .22s;
+}
+.btn:active{transform:scale(.975)}
+.btn.press{transform:scale(.975)}
+.btn.rest{background:var(--soft);color:var(--accent)}
+.label{transition:opacity .13s}
+.label.out{opacity:0}
+.tickmark{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .12s;
+}
+.tickmark.show{opacity:1}
+.tickmark path{
+  stroke:var(--ink);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round;fill:none;
+  stroke-dasharray:34;stroke-dashoffset:34;
+}
+.tickmark.draw path{animation:drawTick .3s cubic-bezier(.4,.9,.4,1) forwards}
+@keyframes drawTick{to{stroke-dashoffset:0}}
+
+.foot{
+  margin-top:30px;color:var(--quiet);font-size:12px;line-height:1.7;
+  border-top:1px solid var(--hair);padding-top:16px;max-width:70ch;
+}
+.replay{
+  margin-top:18px;background:transparent;border:1px solid var(--border);color:var(--t2);
+  border-radius:999px;padding:9px 18px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;
+}
+.replay:hover{color:var(--t1);border-color:rgba(255,255,255,.28)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Confirmation d'enregistrement</h1>
+  <p class="sub">
+    Trois remplacements possibles du <b>Saved ✓</b>. Choisis une variante, puis
+    <b>clique sur le bouton ambre</b> — les deux écrans jouent en même temps, pour vérifier
+    que le traitement tient aussi bien sur Entry que sur Profile.
+  </p>
+
+  <div class="picker" role="tablist">
+    <button class="chip" role="tab" aria-selected="true"  data-v="both">Éclat + repos</button>
+    <button class="chip" role="tab" aria-selected="false" data-v="glow">L'éclat seul</button>
+    <button class="chip" role="tab" aria-selected="false" data-v="tick">La coche tracée</button>
+    <button class="chip" role="tab" aria-selected="false" data-v="rest">Le bouton au repos</button>
+  </div>
+  <p class="desc" id="desc"></p>
+
+  <div class="stage">
+    <!-- Entry -->
+    <section class="panel">
+      <div class="tag">ENTRY</div>
+      <div class="readout"><span class="num">75.60</span><span class="unit">kg</span></div>
+      <div class="hint">SLIDE TO ADJUST</div>
+      <div class="ruler">
+        <div class="ticks" id="ticks"></div>
+        <div class="ripple" id="ripple"></div>
+        <div class="marker" id="marker"></div>
+      </div>
+      <div class="btnwrap">
+        <div class="halo" id="halo1"></div>
+        <button class="btn" id="btn1">
+          <span class="label">Save measurement</span>
+          <span class="tickmark"><svg width="30" height="30" viewBox="0 0 30 30"><path d="M7 15.5 L12.5 21 L23 9.5"/></svg></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Profile -->
+    <section class="panel">
+      <div class="tag">PROFILE</div>
+      <div class="bmi">
+        <span>Body mass index</span>
+        <div class="bmiv" id="bmiv">25.9</div>
+      </div>
+      <div class="field"><span>Height</span><strong>180 cm</strong></div>
+      <div class="field"><span>Date of birth</span><strong>16 August 1996</strong></div>
+      <div class="btnwrap" style="margin-top:18px">
+        <div class="halo" id="halo2"></div>
+        <button class="btn" id="btn2">
+          <span class="label">Save profile</span>
+          <span class="tickmark"><svg width="30" height="30" viewBox="0 0 30 30"><path d="M7 15.5 L12.5 21 L23 9.5"/></svg></span>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <button class="replay" id="replay">Rejouer les deux</button>
+
+  <p class="foot">
+    Les durées correspondent à celles du PRD : contraction au toucher, confirmation d'environ une
+    seconde, aucune attente imposée avant la prochaine action. Une vibration courte accompagne le
+    déclenchement dans les trois cas. Ce prototype ne reproduit ni la typographie exacte à l'écran,
+    ni le rendu haptique.
+  </p>
+</div>
+
+<script>
+const DESC = {
+  both: "Le bouton décharge sa lumière puis se tait. Le halo ambre part vers l'extérieur pendant que le bouton lui-même abandonne son ambre plein pour la teinte sourde, le temps d'un « Saved ». L'énergie quitte le bouton et va se poser sur la balance : le repère s'illumine, l'onde traverse la règle, l'IMC fait son saut. Les deux gestes racontent la même chose au lieu de s'additionner — le bouton se décharge, l'écran reçoit.",
+  glow: "Le bouton se contracte, son libellé s'estompe, et un halo ambre se propage puis s'éteint. Aucune coche, aucun texte de remplacement. Sur Entry le repère central s'illumine et une onde parcourt la règle ; sur Profile la valeur d'IMC fait un petit saut. Même grammaire, expression propre à chaque écran : la confirmation passe par la lumière plutôt que par un pictogramme.",
+  tick: "Le libellé s'efface et une coche est tracée au Canvas en 300 ms, trait arrondi à la graisse de la typographie. Ce n'est plus un caractère de police mais un chemin animé : il se dessine, marque un temps, puis s'efface. Strictement identique sur les deux boutons, un seul composant à écrire.",
+  rest: "Aucun symbole, aucun halo. Le bouton abandonne son ambre plein pour la teinte sourde du design system, son libellé devient un mot calme, puis tout revient. La confirmation se fait par retrait plutôt que par ajout : l'élément le plus bruyant de l'écran se tait un instant."
+};
+const LABELS = { btn1:"Save measurement", btn2:"Save profile" };
+let variant = "both";
+const $ = id => document.getElementById(id);
+
+document.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+  document.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-selected', x === c));
+  variant = c.dataset.v;
+  $('desc').textContent = DESC[variant];
+  play();
+});
+$('desc').textContent = DESC.both;
+
+function reset(){
+  ['btn1','btn2'].forEach(id => {
+    const b = $(id);
+    b.classList.remove('press','rest');
+    b.querySelector('.label').classList.remove('out');
+    b.querySelector('.label').textContent = LABELS[id];
+    const t = b.querySelector('.tickmark');
+    t.classList.remove('show','draw');
+  });
+  ['halo1','halo2'].forEach(id => $(id).classList.remove('go'));
+  $('marker').classList.remove('flare');
+  $('ripple').classList.remove('go');
+  $('ticks').classList.remove('brighten');
+  $('bmiv').classList.remove('hop');
+}
+
+function reflow(el){ void el.offsetWidth; }
+
+function play(){
+  reset();
+  requestAnimationFrame(() => {
+    ['btn1','btn2'].forEach((id, i) => {
+      const b = $(id), label = b.querySelector('.label'), mark = b.querySelector('.tickmark');
+      b.classList.add('press');
+      setTimeout(() => b.classList.remove('press'), 170);
+
+      if (variant === 'glow'){
+        label.classList.add('out');
+        const halo = $(i === 0 ? 'halo1' : 'halo2');
+        reflow(halo); halo.classList.add('go');
+        setTimeout(() => label.classList.remove('out'), 900);
+      }
+      if (variant === 'tick'){
+        label.classList.add('out');
+        setTimeout(() => { mark.classList.add('show'); reflow(mark); mark.classList.add('draw'); }, 130);
+        setTimeout(() => mark.classList.remove('show'), 880);
+        setTimeout(() => label.classList.remove('out'), 940);
+      }
+      if (variant === 'both'){
+        // The halo leaves while the button dims: the light is handed over, not stacked.
+        label.classList.add('out');
+        const halo = $(i === 0 ? 'halo1' : 'halo2');
+        reflow(halo); halo.classList.add('go');
+        setTimeout(() => { label.textContent = 'Saved'; label.classList.remove('out'); b.classList.add('rest'); }, 140);
+        setTimeout(() => label.classList.add('out'), 830);
+        setTimeout(() => {
+          b.classList.remove('rest');
+          label.textContent = LABELS[id];
+          label.classList.remove('out');
+        }, 960);
+      }
+      if (variant === 'rest'){
+        label.classList.add('out');
+        setTimeout(() => { label.textContent = 'Saved'; label.classList.remove('out'); b.classList.add('rest'); }, 130);
+        setTimeout(() => label.classList.add('out'), 820);
+        setTimeout(() => {
+          b.classList.remove('rest');
+          label.textContent = LABELS[id];
+          label.classList.remove('out');
+        }, 950);
+      }
+    });
+
+    if (variant === 'glow' || variant === 'both'){
+      const m = $('marker'), r = $('ripple'), t = $('ticks'), v = $('bmiv');
+      reflow(m); m.classList.add('flare');
+      reflow(r); r.classList.add('go');
+      t.classList.add('brighten');
+      setTimeout(() => t.classList.remove('brighten'), 420);
+      reflow(v); v.classList.add('hop');
+    }
+  });
+}
+
+$('btn1').onclick = play;
+$('btn2').onclick = play;
+$('replay').onclick = play;
+setTimeout(play, 500);
+</script>
+</body>
+</html>

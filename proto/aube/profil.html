@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Mue — Profil · Aube</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style type="text/tailwindcss">@theme{--font-sans:Inter,ui-sans-serif,system-ui,sans-serif}[x-cloak]{display:none!important}.phone{width:min(100%,390px);height:min(844px,100dvh)}</style>
+</head>
+<body class="min-h-screen bg-[#dcd8ce] text-[#1b2b27] antialiased sm:flex sm:items-center sm:justify-center sm:p-6">
+  <main class="phone flex flex-col overflow-hidden bg-[#fbf8f1] shadow-2xl sm:rounded-[2.7rem]" x-data="{birth:'1992-04-16',height:180,weight:74.5,saved:false,get age(){let b=new Date(this.birth),n=new Date();return n.getFullYear()-b.getFullYear()-((n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))?1:0)},get bmi(){return (this.weight/((this.height/100)**2)).toFixed(1).replace('.',',')},save(){this.saved=true;setTimeout(()=>this.saved=false,1600)}}">
+    <header class="flex items-center justify-between px-7 pb-2 pt-7"><a href="../index.html" class="text-sm font-black tracking-[.2em]">MUE</a><span class="rounded-full bg-[#eee7dc] px-3 py-2 text-xs font-semibold">Profil santé</span></header>
+    <section class="flex-1 overflow-y-auto px-7 pb-5 pt-7">
+      <p class="text-sm text-[#817d73]">Tes repères</p><h1 class="mt-1 text-3xl font-semibold tracking-[-.045em]">Un suivi qui te ressemble.</h1>
+      <div class="mt-7 rounded-[1.8rem] bg-[#183f37] p-5 text-white shadow-[0_15px_35px_rgba(24,63,55,.2)]">
+        <div class="flex items-start justify-between"><div><span class="text-xs text-white/60">Indice de masse corporelle</span><div class="mt-2 text-5xl font-medium tracking-[-.06em]" x-text="bmi"></div></div><span class="rounded-full bg-white/12 px-3 py-1.5 text-xs font-semibold">Repère</span></div>
+        <div class="mt-5 h-2 overflow-hidden rounded-full bg-white/15"><div class="h-full w-[48%] rounded-full bg-[#e9b76e]"></div></div>
+        <div class="mt-2 flex justify-between text-[10px] text-white/55"><span>Insuffisant</span><span>Habituel</span><span>Élevé</span></div>
+        <p class="mt-4 text-xs leading-5 text-white/60">L'IMC est un indicateur général, pas un diagnostic individuel.</p>
+      </div>
+      <div class="mt-5 space-y-3">
+        <label class="block rounded-2xl bg-white px-4 py-3 ring-1 ring-black/5"><span class="text-xs text-[#8d877c]">Date de naissance</span><div class="mt-1 flex items-center justify-between"><input type="date" x-model="birth" class="bg-transparent text-sm font-semibold outline-none"><span class="text-xs text-[#8d877c]" x-text="age+' ans'"></span></div></label>
+        <label class="block rounded-2xl bg-white px-4 py-3 ring-1 ring-black/5"><span class="text-xs text-[#8d877c]">Taille</span><div class="mt-1 flex items-center"><input type="number" min="120" max="230" x-model.number="height" class="w-full bg-transparent text-2xl font-semibold outline-none"><span class="text-sm text-[#8d877c]">cm</span></div></label>
+      </div>
+      <button @click="save()" class="mt-5 w-full rounded-2xl bg-[#e66f51] py-4 text-sm font-bold text-white transition active:scale-[.98]" x-text="saved?'Profil enregistré ✓':'Enregistrer le profil'"></button>
+      <div class="mt-5 rounded-2xl bg-[#f0eae0] p-4"><h2 class="text-sm font-bold">À quoi servent ces données ?</h2><p class="mt-1 text-xs leading-5 text-[#787268]">La taille permet de calculer l'IMC. L'âge pourra contextualiser certains indicateurs futurs. Ces informations restent sur l'appareil dans cette première version.</p></div>
+    </section>
+    <nav class="grid grid-cols-3 border-t border-[#e9e2d6] bg-[#fffdf8] px-5 py-3 text-center text-[11px] font-semibold"><a class="text-[#9c988f]" href="./saisie.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full border border-current"></span>Saisie</a><a class="text-[#9c988f]" href="./evolution.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full border border-current"></span>Évolution</a><a class="text-[#e66f51]" href="./profil.html"><span class="mx-auto mb-1 block h-1.5 w-1.5 rounded-full bg-current"></span>Profil</a></nav>
+  </main>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "name": "@mue/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Better Auth configuration and adapters",
+  "scripts": {}
+}

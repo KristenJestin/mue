@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Mue — Profil · Signal</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style type="text/tailwindcss">@theme{--font-sans:Arial,Helvetica,sans-serif}.phone{width:min(100%,390px);height:min(844px,100dvh)}</style>
+</head>
+<body class="min-h-screen bg-[#d7d7d3] text-[#121212] antialiased sm:flex sm:items-center sm:justify-center sm:p-6">
+  <main class="phone flex flex-col overflow-hidden bg-[#fdfdf8] shadow-2xl sm:rounded-[2.7rem]" x-data="{birth:'1992-04-16',height:180,weight:74.5,saved:false,get age(){let b=new Date(this.birth),n=new Date();return n.getFullYear()-b.getFullYear()-((n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))?1:0)},get bmi(){return (this.weight/((this.height/100)**2)).toFixed(1).replace('.',',')},save(){this.saved=true;setTimeout(()=>this.saved=false,1600)}}">
+    <header class="flex items-center justify-between border-b-2 border-black px-6 pb-4 pt-7"><a href="../index.html" class="text-sm font-black tracking-[.18em]">MUE®</a><span class="bg-[#e8ff52] px-3 py-1.5 text-[10px] font-black">PROFIL</span></header>
+    <section class="flex-1 overflow-y-auto px-6 pb-5 pt-6">
+      <h1 class="text-5xl font-black leading-[.9] tracking-[-.08em] text-[#273cff]">Tes<br>données.</h1>
+      <div class="mt-6 border-2 border-black bg-[#ff5b35] p-5 shadow-[7px_7px_0_#121212]"><div class="flex items-start justify-between"><div><span class="text-[10px] font-black tracking-wider">INDICE DE MASSE CORPORELLE</span><strong class="mt-2 block text-7xl font-black tracking-[-.08em]" x-text="bmi"></strong></div><span class="border-2 border-black bg-white px-2 py-1 text-[9px] font-black">REPÈRE</span></div><div class="mt-5 grid h-3 grid-cols-[1fr_1.6fr_1.2fr]"><span class="bg-[#273cff]"></span><span class="bg-[#e8ff52]"></span><span class="bg-black"></span></div><p class="mt-4 text-xs font-bold leading-5">Un indicateur général, pas un diagnostic médical.</p></div>
+      <div class="mt-6 space-y-3"><label class="block border-2 border-black bg-white px-4 py-3"><span class="text-[10px] font-black tracking-wider">DATE DE NAISSANCE</span><div class="mt-2 flex items-center justify-between"><input type="date" x-model="birth" class="bg-transparent text-sm font-bold outline-none"><span class="bg-[#273cff] px-2 py-1 text-[10px] font-black text-white" x-text="age+' ANS'"></span></div></label><label class="block border-2 border-black bg-white px-4 py-3"><span class="text-[10px] font-black tracking-wider">TAILLE</span><div class="mt-1 flex items-end"><input type="number" min="120" max="230" x-model.number="height" class="w-full bg-transparent text-4xl font-black outline-none"><span class="mb-1 text-xs font-black">CM</span></div></label></div>
+      <button @click="save()" class="mt-5 flex w-full items-center justify-between bg-[#273cff] px-5 py-4 text-sm font-black text-white shadow-[7px_7px_0_#121212] transition active:translate-x-1 active:translate-y-1 active:shadow-none"><span x-text="saved?'PROFIL ENREGISTRÉ':'ENREGISTRER LE PROFIL'"></span><span x-text="saved?'✓':'↗'"></span></button>
+      <div class="mt-6 border-l-8 border-[#e8ff52] bg-black p-4 text-white"><p class="text-xs font-bold leading-5">La taille sert au calcul de l'IMC. L'âge pourra contextualiser de futurs indicateurs. Les données restent locales.</p></div>
+    </section>
+    <nav class="grid grid-cols-3 border-t-2 border-black bg-white px-4 py-3 text-center text-[10px] font-black tracking-wider"><a href="./saisie.html">01<br>SAISIE</a><a href="./evolution.html">02<br>COURBE</a><a class="text-[#273cff]" href="./profil.html">03<br>PROFIL</a></nav>
+  </main>
+</body>
+</html>

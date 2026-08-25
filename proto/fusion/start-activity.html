@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mue — Start activity · Amber</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400..700&display=swap');</style>
+  <style type="text/tailwindcss">
+    @theme { --font-sans: Sora, ui-sans-serif, system-ui, sans-serif; }
+    [x-cloak] { display:none !important; }
+    .phone { width:min(100%,390px); height:min(844px,100dvh); }
+    .enter { animation:enter .42s cubic-bezier(.2,.8,.2,1) both; }
+    @keyframes enter { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+    @media (prefers-reduced-motion:reduce) { .enter { animation:none !important; } }
+  </style>
+</head>
+<body class="min-h-screen bg-[#252527] font-sans text-white antialiased sm:flex sm:items-center sm:justify-center sm:p-6">
+  <main class="phone relative flex flex-col overflow-hidden bg-[#101012] shadow-2xl sm:rounded-[2.7rem]" x-data="startActivity()" x-init="$nextTick(() => lucide.createIcons())">
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-80 opacity-20" style="background:radial-gradient(circle at 50% 0,#efb45f,transparent 65%)"></div>
+
+    <header class="relative flex items-center justify-between px-5 pb-2 pt-6">
+      <a href="./activity.html" class="grid h-10 w-10 place-items-center rounded-full border border-white/8 bg-white/[.035] text-white/55 transition hover:bg-white/[.08] hover:text-white" aria-label="Back to activity"><i data-lucide="arrow-left" class="h-4 w-4"></i></a>
+      <span class="text-sm font-bold">Start activity</span>
+      <span class="h-10 w-10"></span>
+    </header>
+
+    <section class="relative flex-1 overflow-y-auto px-5 pb-32 pt-5">
+      <div class="enter px-2">
+        <p class="text-sm text-white/42">Starting now</p>
+        <h1 class="mt-1 text-3xl font-semibold tracking-[-.05em]">What are you doing?</h1>
+      </div>
+
+      <div class="enter mt-6 grid grid-cols-3 gap-2" style="animation-delay:.06s">
+        <button @click="selected='treadmill'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='treadmill'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="footprints" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Treadmill<br>walk</span></button>
+        <button @click="selected='walk'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='walk'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="trees" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Outdoor<br>walk</span></button>
+        <button @click="selected='run'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='run'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="person-standing" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Run</span></button>
+        <button @click="selected='cycling'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='cycling'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="bike" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Cycling</span></button>
+        <button @click="selected='strength'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='strength'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="dumbbell" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Strength<br>training</span></button>
+        <button @click="selected='other'" class="group min-h-[88px] rounded-[1.15rem] border p-3 text-left transition active:scale-[.97]" :class="selected==='other'?'border-[#efb45f]/45 bg-[#2d261d] text-[#efb45f]':'border-white/8 bg-white/[.035] text-white/42'"><i data-lucide="shapes" class="h-[18px] w-[18px]"></i><span class="mt-3 block text-[10px] font-bold leading-3.5">Other</span></button>
+      </div>
+
+      <div class="enter mt-4 rounded-[1.35rem] border border-white/8 bg-white/[.035] p-4" style="animation-delay:.15s">
+        <div class="flex items-center justify-between"><span class="flex items-center gap-2 text-[10px] font-semibold text-white/35"><i data-lucide="circle-dot" class="h-3.5 w-3.5 text-[#efb45f]"></i>Ready to start</span><span class="text-[9px] text-white/22">Aug 24 · now</span></div>
+        <div class="mt-3 flex items-end justify-between gap-3"><div><strong class="block text-base" x-text="activityName"></strong><span class="mt-1 block text-[10px] text-white/32" x-text="activityContext"></span></div><span class="rounded-full bg-[#2d261d] px-3 py-1.5 text-[9px] font-bold text-[#efb45f]">NO METRICS YET</span></div>
+      </div>
+
+      <div x-show="selected==='other'" x-cloak x-transition class="mt-3 space-y-2 rounded-[1.35rem] border border-white/8 bg-white/[.025] p-3">
+        <label class="block"><span class="ml-1 text-[9px] text-white/30">Main activity</span><select x-model="otherActivity" class="mt-1 w-full rounded-xl border border-white/8 bg-[#171719] px-3 py-3 text-xs outline-none [color-scheme:dark]"><option>Yoga</option><option>Hiking</option><option>Rowing</option><option>Climbing</option><option>Dancing</option><option>Pilates</option></select></label>
+        <div class="grid grid-cols-2 gap-2"><label><span class="ml-1 text-[9px] text-white/30">Environment</span><select x-model="otherEnvironment" class="mt-1 w-full rounded-xl border border-white/8 bg-[#171719] px-3 py-3 text-xs outline-none [color-scheme:dark]"><option>Not set</option><option>Indoor</option><option>Outdoor</option></select></label><label><span class="ml-1 text-[9px] text-white/30">Equipment</span><select x-model="otherEquipment" class="mt-1 w-full rounded-xl border border-white/8 bg-[#171719] px-3 py-3 text-xs outline-none [color-scheme:dark]"><option>None</option><option>Yoga mat</option><option>Resistance bands</option><option>Rowing machine</option></select></label></div>
+        <p class="px-1 pt-1 text-[9px] leading-4 text-white/25">The full searchable catalog and custom creation use the same picker as Log activity.</p>
+      </div>
+
+      <div class="enter mt-4 flex items-start gap-3 rounded-2xl border border-white/7 bg-white/[.02] p-3.5" style="animation-delay:.2s"><i data-lucide="bell" class="mt-0.5 h-4 w-4 shrink-0 text-white/28"></i><p class="text-[10px] leading-4 text-white/30">The timer keeps its time with the screen off. Mue may ask permission to show pause and finish controls in a notification.</p></div>
+    </section>
+
+    <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#101012] via-[#101012] to-transparent px-5 pb-6 pt-8">
+      <a :href="timerHref" class="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#efb45f] py-4 text-sm font-bold text-[#1d160d] shadow-[0_12px_30px_rgba(239,180,95,.16)] transition hover:shadow-[0_15px_36px_rgba(239,180,95,.24)] active:scale-[.98]"><i data-lucide="play" class="h-4 w-4" fill="currentColor"></i>Start timer</a>
+    </div>
+  </main>
+
+  <script>
+    function startActivity() {
+      const preset = new URLSearchParams(window.location.search).get('preset');
+      return {
+        selected: preset || 'treadmill',
+        otherActivity: 'Yoga',
+        otherEnvironment: 'Not set',
+        otherEquipment: 'None',
+        get activityName() {
+          return { treadmill:'Treadmill walk', walk:'Outdoor walk', run:'Run', cycling:'Cycling', strength:'Strength training', other:this.otherActivity }[this.selected];
+        },
+        get activityContext() {
+          return { treadmill:'Indoor · Treadmill', walk:'Outdoor · No equipment', run:'Not set · No equipment', cycling:'Not set · Bicycle', strength:'Indoor · Equipment chosen later', other:this.otherEnvironment+' · '+this.otherEquipment }[this.selected];
+        },
+        get timerHref() {
+          const params = new URLSearchParams({ type:this.selected, name:this.activityName, context:this.activityContext });
+          return './active-activity.html?' + params.toString();
+        }
+      }
+    }
+  </script>
+</body>
+</html>

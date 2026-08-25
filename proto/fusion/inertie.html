@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Mue — Inertia test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script><script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400..700&display=swap');</style>
+  <style type="text/tailwindcss">[x-cloak]{display:none!important}.phone{width:min(100%,390px);height:min(844px,100dvh)}.ruler{background-image:repeating-linear-gradient(90deg,transparent 0 15px,rgba(255,255,255,.24) 15px 16px);background-size:16px 25px;background-repeat:repeat-x;background-position-y:center}</style>
+</head>
+<body class="min-h-screen bg-[#252527] text-white antialiased sm:flex sm:items-center sm:justify-center sm:p-6" style="font-family:Sora,sans-serif">
+  <main class="phone relative flex flex-col overflow-hidden bg-[#101012] shadow-2xl sm:rounded-[2.7rem]" x-data="{
+    position:74.5,preset:'Balanced',dragging:false,lastX:0,lastTime:0,velocity:0,frame:null,lastTick:149,
+    presets:[{name:'Precise',friction:.72,note:'Stops quickly. Best control, least physical.'},{name:'Balanced',friction:.84,note:'A short, natural glide. Recommended starting point.'},{name:'Glide',friction:.92,note:'Longer momentum. Playful, but easier to overshoot.'}],
+    get config(){return this.presets.find(p=>p.name===this.preset)},get weight(){return Math.round(this.position*10)/10},
+    clamp(v){return Math.min(250,Math.max(30,v))},tick(){let t=Math.round(this.position*2);if(t!==this.lastTick){this.lastTick=t;navigator.vibrate?.(4)}},
+    start(e){cancelAnimationFrame(this.frame);this.dragging=true;this.velocity=0;this.lastX=e.clientX;this.lastTime=performance.now();e.currentTarget.setPointerCapture?.(e.pointerId)},
+    move(e){if(!this.dragging)return;let now=performance.now(),dx=e.clientX-this.lastX,dt=Math.max(8,now-this.lastTime),delta=-dx/80;this.position=this.clamp(this.position+delta);this.velocity=delta/dt;this.lastX=e.clientX;this.lastTime=now;this.tick()},
+    stop(){if(!this.dragging)return;this.dragging=false;this.coast()},
+    coast(){let step=()=>{this.velocity*=this.config.friction;if(Math.abs(this.velocity)<.0007){this.position=Math.round(this.position*10)/10;this.tick();return}this.position=this.clamp(this.position+this.velocity*16);this.tick();this.frame=requestAnimationFrame(step)};this.frame=requestAnimationFrame(step)},
+    nudge(d){cancelAnimationFrame(this.frame);this.position=this.clamp(Math.round((this.position+d)*10)/10);this.tick()}
+  }">
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-72 opacity-20" style="background:radial-gradient(circle at 50% 0,#efb45f,transparent 65%)"></div>
+    <header class="relative flex items-center justify-between px-7 pb-2 pt-7"><a href="../index.html" class="text-sm font-extrabold tracking-[.2em]">MUE</a><a href="./saisie.html" class="text-xs font-semibold text-white/40">Back to prototype</a></header>
+    <section class="relative flex flex-1 flex-col px-7 pt-7">
+      <p class="text-[10px] font-bold tracking-[.18em] text-[#efb45f] uppercase">Motion test</p><h1 class="mt-2 text-3xl font-semibold tracking-[-.045em]">How should the scale feel?</h1><p class="mt-2 text-xs leading-5 text-white/38">Swipe quickly, then release. Try each preset several times.</p>
+      <div class="mt-5 grid grid-cols-3 gap-2"><template x-for="item in presets" :key="item.name"><button @click="preset=item.name" class="rounded-xl border px-2 py-3 text-xs font-bold transition" :class="preset===item.name?'border-[#efb45f] bg-[#33291e] text-[#efb45f]':'border-white/8 bg-white/[.03] text-white/40'" x-text="item.name"></button></template></div>
+      <p class="mt-3 min-h-10 text-xs leading-5 text-white/35" x-text="config.note"></p>
+      <div class="mt-7 text-center"><div class="inline-flex items-end gap-2"><span class="text-[4.8rem] font-medium leading-none tracking-[-.08em] tabular-nums" x-text="weight.toFixed(1)"></span><span class="mb-2 text-lg text-white/35">kg</span></div><p class="mt-3 text-[10px] font-bold tracking-[.2em] text-[#efb45f]" x-text="dragging?'KEEP MOVING':'SWIPE AND RELEASE'"></p></div>
+      <div class="mt-6 select-none touch-none" @pointerdown="start($event)" @pointermove="move($event)" @pointerup="stop()" @pointercancel="stop()"><div class="relative h-28 cursor-ew-resize overflow-hidden rounded-2xl border border-white/8 bg-white/[.025]"><div class="ruler absolute inset-x-[-80px] top-7 h-14" :style="`background-position-x:${-(position*160)%80}px`"></div><div class="absolute left-1/2 top-2 h-20 w-[2px] -translate-x-1/2 bg-[#efb45f] shadow-[0_0_14px_rgba(239,180,95,.45)]"><span class="absolute -bottom-1 -left-[4px] h-[10px] w-[10px] rounded-full bg-[#efb45f]"></span></div><div class="absolute inset-x-0 bottom-2 flex justify-between px-5 text-[10px] font-semibold text-white/28"><span x-text="Math.floor(weight-1)+' kg'"></span><span x-text="Math.ceil(weight+1)+' kg'"></span></div></div></div>
+      <div class="mt-4 grid grid-cols-2 gap-3"><button @click="nudge(-.1)" class="rounded-2xl border border-white/10 bg-white/[.04] py-3 text-xl font-semibold text-white/60">−</button><button @click="nudge(.1)" class="rounded-2xl border border-white/10 bg-white/[.04] py-3 text-xl font-semibold text-white/60">+</button></div>
+      <div class="mt-auto pb-6"><div class="rounded-2xl bg-[#33291e] p-4 text-xs leading-5 text-[#efb45f]">The final feel must still be tested on a real Android phone: native touch sampling and haptics will make it slightly different from this web prototype.</div></div>
+    </section>
+  </main>
+</body>
+</html>
