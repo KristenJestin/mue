@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+
+    <!--
+      Lint is right that minSdk 26 makes the -v26 qualifier look redundant, but its suggested
+      merge does not build: with the launcher icon living in a bare `mipmap-anydpi` folder,
+      AAPT2 fails to link `android:icon` with "resource mipmap/ic_launcher not found". Verified
+      both ways on a clean build — the qualifier stays.
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+
+</lint>

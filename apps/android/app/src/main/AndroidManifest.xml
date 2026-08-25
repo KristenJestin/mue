@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      Mue runs entirely offline. The absence of android.permission.INTERNET is a
+      deliberate, verifiable guarantee that no measurement ever leaves the device.
+      Do not add it.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      The Activity Timer's ongoing notification (PRD_ACTIVITY_TIMER 6.5 and 17). Asked for at
+      runtime on Android 13 and above, in the context of the first `Start timer`, and refused
+      without consequence: the timer runs, pauses and finishes from inside Mue either way.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Install-time only, with no runtime prompt. Android clears every notification at boot, so
+      a timer restored from Room would come back invisible outside the app; this is what lets
+      it be reposted. It does nothing at all when no timer is running or paused.
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".MueApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Mue">
+
+        <!--
+          Portrait is a product decision, not an oversight: PRD 20.1 fixes the orientation and
+          PRD 5 puts landscape and tablet outside the V1. The scale is a horizontal gesture
+          sized against the screen width, so a landscape layout is a redesign, not a rotation.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="uiMode|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|orientation"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Mue"
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          `Pause`, `Resume` and `Discard` from the ongoing notification. Not exported: the only
+          sender is this process, through its own PendingIntents, and nothing outside Mue has
+          any business stopping a user's timer.
+        -->
+        <receiver
+            android:name=".timer.TimerActionReceiver"
+            android:directBootAware="false"
+            android:exported="false" />
+
+        <!--
+          Reposts the notification of a timer that survived a reboot.
+
+          `exported="true"` is mandatory and not a relaxation: a receiver that is not exported
+          never receives a broadcast sent by the system, and it fails silently. BOOT_COMPLETED
+          is a protected broadcast, so only the system can send it.
+
+          `directBootAware="false"`, with no LOCKED_BOOT_COMPLETED filter: the database is
+          credential-encrypted and cannot be read before the first unlock, which is exactly
+          when the plain BOOT_COMPLETED broadcast arrives.
+        -->
+        <receiver
+            android:name=".timer.BootCompletedReceiver"
+            android:directBootAware="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Shares the generated CSV without exposing the app's private storage. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>

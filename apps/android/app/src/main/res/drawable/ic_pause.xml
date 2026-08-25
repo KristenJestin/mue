@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lucide `pause` (ISC). Stroked 24x24 grid, never filled; tinted by the caller. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:pathData="M7 4 h2 a1 1 0 0 1 1 1 v14 a1 1 0 0 1 -1 1 h-2 a1 1 0 0 1 -1 -1 V5 a1 1 0 0 1 1 -1 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M15 4 h2 a1 1 0 0 1 1 1 v14 a1 1 0 0 1 -1 1 h-2 a1 1 0 0 1 -1 -1 V5 a1 1 0 0 1 1 -1 Z"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+</vector>

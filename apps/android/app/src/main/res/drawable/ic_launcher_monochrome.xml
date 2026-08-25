@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Themed-icon layer: the same five graduations, flat white. The launcher tints this shape with
+  the user's wallpaper colours, so it carries geometry only — never the product amber, which
+  would fight the tint.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,58 A4,4 0 0 1 30,58 V66 A4,4 0 0 1 22,66 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,50 A4,4 0 0 1 44,50 V66 A4,4 0 0 1 36,66 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,36 A6,6 0 0 1 60,36 V64 A6,6 0 0 1 48,64 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M64,50 A4,4 0 0 1 72,50 V66 A4,4 0 0 1 64,66 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,58 A4,4 0 0 1 86,58 V66 A4,4 0 0 1 78,66 Z" />
+</vector>
