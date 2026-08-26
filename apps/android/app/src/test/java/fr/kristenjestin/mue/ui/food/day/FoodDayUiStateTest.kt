@@ -3,6 +3,7 @@ package fr.kristenjestin.mue.ui.food.day
 import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.model.Energy
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.testing.LocaleRule
@@ -239,6 +240,30 @@ class FoodDayUiStateTest {
         assertEquals(FoodDayMessages.MISSING_RECIPE, requireNotNull(dinner.plan).recipeName)
     }
 
+    /**
+     * FR-PLAN-003 against PRD_FOOD 22, now that a day ahead can be reached at all.
+     *
+     * `I ate this` writes a journal line dated on the proposal's own day, so on Thursday's dinner
+     * it cannot be offered — the card would be asking whether you ate Thursday. `Swap` and
+     * `Dismiss` are untouched: both are things you do today about a day to come.
+     */
+    @Test
+    fun `a proposal ahead of today is not offered I ate this`() {
+        val tomorrow = TODAY.plusDays(1)
+
+        val ahead = FoodDayUiState
+            .of(date = tomorrow, today = TODAY, plans = FoodDayPreviewData.plans(tomorrow))
+            .slot(MealSlot.DINNER)
+
+        assertFalse(requireNotNull(ahead.plan).canConfirm)
+
+        val now = FoodDayUiState
+            .of(date = TODAY, today = TODAY, plans = FoodDayPreviewData.plans())
+            .slot(MealSlot.DINNER)
+
+        assertTrue(requireNotNull(now.plan).canConfirm)
+    }
+
     /** A proposal posed for another day is not this day's business. */
     @Test
     fun `a proposal from another day never reaches this one`() {
@@ -253,11 +278,83 @@ class FoodDayUiStateTest {
 
     // region the date (PRD_FOOD 10.1 and 22)
 
+    /*
+     * The second finding, in the owner's words:
+     *
+     *   "le fait que je puisse pas aller dans le futur mais uniquement dans le passé sur la page
+     *    food ?"
+     *
+     * Two rules had been read as one. `FoodLogEntry.isLoggableOn` is the **journal's** ceiling and
+     * PRD_FOOD 22 keeps it — a day ahead cannot be completed. `MealPlanEntry.isPlannableOn` allows
+     * sixty days ahead and is what PRD_FOOD 12 calls the primer that makes the journal possible.
+     * The date navigation asked only the first, so no future day could be reached by any route,
+     * and the proposal machinery that was already written and already rendered could never appear.
+     */
+
+    /** Forward now stops where **both** rules stop, not where the journal's does. */
     @Test
-    fun `today is the ceiling and yesterday is not`() {
-        assertFalse(FoodDayUiState.of(TODAY, TODAY).canGoForward)
+    fun `the day navigation reaches as far ahead as a proposal may be posed`() {
+        val lastPlannable = TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD)
+
+        assertTrue(FoodDayUiState.of(TODAY, TODAY).canGoForward)
         assertTrue(FoodDayUiState.of(YESTERDAY, TODAY).canGoForward)
+        assertTrue(FoodDayUiState.of(lastPlannable.minusDays(1), TODAY).canGoForward)
+        assertFalse(FoodDayUiState.of(lastPlannable, TODAY).canGoForward)
         assertTrue(FoodDayUiState.of(TODAY, TODAY).canGoBack)
+    }
+
+    /**
+     * PRD_FOOD 22 unchanged: reaching a day ahead is not being allowed to write on it.
+     *
+     * The two facts held together on one object is the whole of the separation — the day is
+     * reachable, and it is not loggable.
+     */
+    @Test
+    fun `a day ahead can be reached and still cannot be logged`() {
+        val tomorrow = FoodDayUiState.of(TODAY.plusDays(1), TODAY)
+
+        assertTrue(tomorrow.isReachable)
+        assertTrue(tomorrow.canPlan)
+        assertFalse(tomorrow.canLog)
+
+        val today = FoodDayUiState.of(TODAY, TODAY)
+        assertTrue(today.canLog)
+        assertTrue(today.canPlan)
+
+        val yesterday = FoodDayUiState.of(YESTERDAY, TODAY)
+        assertTrue(yesterday.canLog)
+        assertFalse(yesterday.canPlan)
+    }
+
+    /** Beyond the sixtieth day there is neither a line to write nor a proposal to pose. */
+    @Test
+    fun `a day past the planning window is reachable by nothing`() {
+        val beyond = TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD + 1)
+
+        assertFalse(FoodDayUiState.isReachable(beyond, TODAY))
+        assertTrue(FoodDayUiState.isReachable(TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD), TODAY))
+        assertTrue(FoodDayUiState.isReachable(TODAY.minusYears(3), TODAY))
+    }
+
+    /**
+     * PRD_FOOD 10.1 keeps the add row "toujours présent"; PRD_FOOD 22 will not let it write.
+     *
+     * So on a day ahead it stays and stops being a control, and says what the moment *can* hold
+     * instead of what it refuses.
+     */
+    @Test
+    fun `a moment ahead of today offers a plan rather than an entry`() {
+        val ahead = FoodDayUiState.of(TODAY.plusDays(2), TODAY)
+
+        ahead.slots.forEach { slot ->
+            assertFalse(slot.canAdd, "${slot.label} still offers to log on a future day")
+            assertEquals(FoodDayMessages.PLANNABLE_SLOT, slot.addLabel)
+        }
+
+        FoodDayUiState.of(TODAY, TODAY).slots.forEach { slot ->
+            assertTrue(slot.canAdd)
+            assertEquals(FoodDayMessages.ADD_FIRST, slot.addLabel)
+        }
     }
 
     @Test

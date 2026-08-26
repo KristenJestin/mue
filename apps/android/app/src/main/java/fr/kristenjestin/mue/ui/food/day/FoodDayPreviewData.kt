@@ -196,6 +196,28 @@ internal fun emptyDayState(
 ): FoodDayUiState = FoodDayUiState.of(date = date, today = today)
 
 /**
+ * A day that has not happened yet (PRD_FOOD 12 and 22).
+ *
+ * The half of the module that had no door until the two rules were told apart: the journal's
+ * ceiling stops today, planning reaches sixty days past it, and the date navigation asked only
+ * the first. What this state draws is the answer to both at once — a day that says plainly it
+ * cannot be logged, four moments that say what they *can* hold, and the proposal already sitting
+ * on the dinner with `Swap` and `Dismiss` but no `I ate this`.
+ */
+internal fun futureDayState(
+    today: LocalDate = FoodDayPreviewData.TODAY,
+    daysAhead: Long = 2,
+): FoodDayUiState {
+    val date = today.plusDays(daysAhead)
+    return FoodDayUiState.of(
+        date = date,
+        today = today,
+        plans = FoodDayPreviewData.plans(date),
+        recipeNames = FoodDayPreviewData.recipeNames,
+    )
+}
+
+/**
  * A day holding **one** line, whose protein is genuinely unknown (PRD_FOOD 13.1 and 13.2).
  *
  * The other half of the module's null discipline, and the state that has to be told apart from

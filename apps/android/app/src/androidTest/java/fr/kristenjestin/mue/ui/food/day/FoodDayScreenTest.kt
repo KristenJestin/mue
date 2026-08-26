@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.height
 import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.food.FoodTestTags
@@ -221,13 +222,81 @@ class FoodDayScreenTest {
         compose.onNodeWithContentDescription(FoodDayMessages.NEXT_DAY).assertIsDisplayed()
     }
 
-    /** PRD_FOOD 22: "un jour futur ne peut pas être complété". */
+    /**
+     * The second finding on the glass: "je puisse pas aller dans le futur".
+     *
+     * PRD_FOOD 12 and 15 let a proposal sit up to sixty days ahead, so the arrow reaches there.
+     * PRD_FOOD 22 still refuses a line on such a day, which is what the two tests below check.
+     */
     @Test
-    fun tomorrowIsOutOfReachFromToday() {
+    fun tomorrowIsReachableFromToday() {
         setDay(previewDayState())
 
-        compose.onNodeWithTag(FoodTestTags.NEXT_DAY).assertIsNotEnabled()
+        compose.onNodeWithTag(FoodTestTags.NEXT_DAY).assertIsEnabled()
         compose.onNodeWithTag(FoodTestTags.PREVIOUS_DAY).assertIsEnabled()
+    }
+
+    /** The ceiling moved rather than going: the last plannable day is still the last one. */
+    @Test
+    fun theLastPlannableDayIsStillTheLastOne() {
+        setDay(
+            FoodDayUiState.of(
+                date = TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD),
+                today = TODAY,
+            ),
+        )
+
+        compose.onNodeWithTag(FoodTestTags.NEXT_DAY).assertIsNotEnabled()
+    }
+
+    /**
+     * What a day ahead actually shows (PRD_FOOD 12 and 22).
+     *
+     * It says once what it is, and each of its four moments stops offering to log. The add row
+     * keeps its place — PRD_FOOD 10.1 wants it "toujours présent" — and stops being a control,
+     * which is the difference between refusing before the tap and refusing after `Save entry`.
+     */
+    @Test
+    fun aDayAheadSaysSoAndRefusesToBeLogged() {
+        setDay(FoodDayUiState.of(date = TODAY.plusDays(2), today = TODAY))
+
+        /*
+         * The note announces itself as one sentence and its two lines are cleared from the merged
+         * tree, which is what stops a screen reader hearing them as loose fragments (PRD_FOOD 18).
+         * So the announcement is read on the node that carries it, and the glyphs are read on the
+         * unmerged tree — `onNodeWithText` would be looking for a string this node deliberately
+         * does not publish.
+         */
+        compose.onNodeWithTag(FoodTestTags.FUTURE_DAY)
+            .assertIsDisplayed()
+            .assertContentDescriptionContains(FoodDayMessages.FUTURE_DAY, substring = true)
+        assertDrawn(FoodTestTags.FUTURE_DAY, FoodDayMessages.FUTURE_DAY)
+        assertDrawn(FoodTestTags.FUTURE_DAY, FoodDayMessages.FUTURE_DAY_DETAIL)
+
+        MealSlot.ORDERED.forEach { slot ->
+            compose.onNodeWithTag(FoodTestTags.DAY).performScrollToNode(
+                hasTestTag(FoodTestTags.addToSlot(slot)),
+            )
+            compose.onNodeWithTag(FoodTestTags.addToSlot(slot))
+                .assertIsNotEnabled()
+                .assertContentDescriptionContains(
+                    FoodDayMessages.PLANNABLE_SLOT,
+                    substring = true,
+                )
+        }
+
+        addedTo = null
+        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.BREAKFAST)).performClick()
+        assertTrue("a future day opened the add sheet anyway", addedTo == null)
+    }
+
+    /** Today says none of that, and its rows are buttons as they always were. */
+    @Test
+    fun todaySaysNothingAboutBeingAhead() {
+        setDay(previewDayState())
+
+        compose.onNodeWithTag(FoodTestTags.FUTURE_DAY).assertDoesNotExist()
+        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.BREAKFAST)).assertIsEnabled()
     }
 
     @Test

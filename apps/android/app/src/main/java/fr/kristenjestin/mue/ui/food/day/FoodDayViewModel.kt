@@ -123,14 +123,20 @@ class FoodDayViewModel(
     }
 
     /**
-     * PRD_FOOD 22: "un jour futur ne peut pas être complété".
+     * Forward as far as a proposal may be posed (PRD_FOOD 12 and 15), not as far as a line may be
+     * written (PRD_FOOD 22).
      *
-     * The button is disabled on today, and the guard is here as well: a disabled control that
-     * would still act if pressed is one accessibility service away from being pressed.
+     * The two rules had been read as one, and the journal's ceiling was the one that won: the
+     * arrow stopped on today, so the sixty days `MealPlanEntry.isPlannableOn` allows were
+     * unreachable and nothing could ever be planned. `Un jour futur ne peut pas être complété`
+     * stays true — it is [FoodDayUiState.canLog] that says so, on the day itself.
+     *
+     * The guard is repeated here as well as on the button: a disabled control that would still
+     * act if pressed is one accessibility service away from being pressed.
      */
     fun onNextDay() {
         val next = viewedDate().plusDays(1)
-        if (FoodLogEntry.isLoggableOn(next, today())) select(next)
+        if (FoodDayUiState.isReachable(next, today())) select(next)
     }
 
     fun onShowDatePicker() {
@@ -141,10 +147,17 @@ class FoodDayViewModel(
         savedStateHandle[KEY_DATE_PICKER] = false
     }
 
-    /** A day chosen from the calendar; a future one is refused rather than silently accepted. */
+    /**
+     * A day chosen from the calendar; one the module can do nothing with is refused rather than
+     * silently accepted.
+     *
+     * The same predicate the arrows and the grid use, so a day the calendar offers is a day this
+     * accepts. Beyond the sixtieth day ahead there is neither a line to write nor a proposal to
+     * pose, and the screen returns to today rather than to a date it could not draw.
+     */
     fun onDayPicked(date: LocalDate) {
         val today = today()
-        select(if (FoodLogEntry.isLoggableOn(date, today)) date else today)
+        select(if (FoodDayUiState.isReachable(date, today)) date else today)
         onDismissDatePicker()
     }
 
@@ -172,6 +185,16 @@ class FoodDayViewModel(
      */
     fun onConfirmPlan(key: MealPlanKey) {
         viewModelScope.launch {
+            /*
+             * PRD_FOOD 22, now that a day ahead can be reached at all: confirming writes a
+             * journal line dated on the proposal's own day, and no line may be written to a day
+             * that has not happened. The card does not offer the action there
+             * (`FoodDayPlanUiState.canConfirm`), and this is the same guard behind it — for the
+             * reason `onNextDay` repeats its own: a control that is merely not drawn is still
+             * reachable by an assistive service, and an MCP client could put a proposal on
+             * Thursday between the two.
+             */
+            if (!FoodLogEntry.isLoggableOn(key.plannedOn, today())) return@launch
             val plan = plans.find(key) ?: return@launch
             if (plan.isConsumed) return@launch
             val detail = recipes.findDetail(plan.recipeId) ?: return@launch

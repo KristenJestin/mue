@@ -47,6 +47,9 @@ import kotlin.test.assertTrue
 
 private val TODAY: LocalDate = FoodDayPreviewData.TODAY
 private val YESTERDAY: LocalDate = TODAY.minusDays(1)
+
+/** PRD_FOOD 12 and 15: a day a proposal may be posed on, and a line may not be written to. */
+private val TOMORROW: LocalDate = TODAY.plusDays(1)
 private val DINNER_TODAY: MealPlanKey = MealPlanKey(TODAY, MealSlot.DINNER)
 
 /** Mid-afternoon, so `MealSlotRules.defaultTime` has an hour of today to answer with. */
@@ -92,23 +95,47 @@ class FoodDayViewModelTest {
         assertEquals(TODAY, state(day).date)
     }
 
-    /** PRD_FOOD 22: "un jour futur ne peut pas être complété". */
+    /**
+     * The second finding: "je puisse pas aller dans le futur mais uniquement dans le passé".
+     *
+     * PRD_FOOD 22 bars a *line* from a day ahead; it does not bar the day. PRD_FOOD 12 and 15 make
+     * that day the only place a proposal may be posed, and the arrow used to stop on today — so
+     * the whole planning half of the module had no way in.
+     */
     @Test
-    fun `the day after today is refused even when the control is pressed`() = dayTest { day ->
+    fun `stepping forward reaches a day ahead, which still refuses a line`() = dayTest { day ->
         day.viewModel.onNextDay()
 
-        assertEquals(TODAY, state(day).date)
+        val tomorrow = state(day)
+        assertEquals(TODAY.plusDays(1), tomorrow.date)
+        assertTrue(tomorrow.canPlan)
+        assertFalse(tomorrow.canLog)
+    }
+
+    /** The ceiling moved rather than disappearing: sixty days ahead and not one more. */
+    @Test
+    fun `the forward step stops at the last day a proposal may be posed`() = dayTest { day ->
+        day.viewModel.onDayPicked(TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD))
         assertFalse(state(day).canGoForward)
+
+        day.viewModel.onNextDay()
+
+        assertEquals(TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD), state(day).date)
     }
 
     @Test
-    fun `a day chosen from the calendar is taken, and a future one is not`() = dayTest { day ->
-        day.viewModel.onDayPicked(TODAY.minusDays(30))
-        assertEquals(TODAY.minusDays(30), state(day).date)
+    fun `a day chosen from the calendar is taken, within the reach of either rule`() =
+        dayTest { day ->
+            day.viewModel.onDayPicked(TODAY.minusDays(30))
+            assertEquals(TODAY.minusDays(30), state(day).date)
 
-        day.viewModel.onDayPicked(TODAY.plusDays(3))
-        assertEquals(TODAY, state(day).date)
-    }
+            day.viewModel.onDayPicked(TODAY.plusDays(3))
+            assertEquals(TODAY.plusDays(3), state(day).date)
+
+            // Past the sixtieth day there is nothing to do at all, so the screen returns to today.
+            day.viewModel.onDayPicked(TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD + 1))
+            assertEquals(TODAY, state(day).date)
+        }
 
     @Test
     fun `the calendar opens and closes, and choosing a day closes it`() = dayTest { day ->
@@ -256,6 +283,30 @@ class FoodDayViewModelTest {
         val link = day.plans.consumed.single()
         assertEquals(DINNER_TODAY, link.first)
         assertEquals(line.id, link.second)
+    }
+
+    /**
+     * PRD_FOOD 22, from the one direction that only opened up now that a day ahead is reachable.
+     *
+     * Confirming writes a **journal line** on the proposal's own day. The card does not offer the
+     * action there, but a control that is merely not drawn is still reachable by an assistive
+     * service, and an MCP client can pose a proposal on Thursday between one read and the next —
+     * so the write is refused here as well, and the proposal is left waiting rather than consumed.
+     */
+    @Test
+    fun `a proposal for a day ahead cannot be confirmed into the journal`() = dayTest(
+        plans = FoodDayPreviewData.plans(TOMORROW),
+        recipes = listOf(salmonDetail()),
+        foods = listOf(salmon()),
+        savedState = SavedStateHandle(
+            mapOf(FoodDayViewModel.KEY_DATE to TOMORROW.toString()),
+        ),
+    ) { day ->
+        day.viewModel.onConfirmPlan(MealPlanKey(TOMORROW, MealSlot.DINNER))
+        advanceUntilIdle()
+
+        assertTrue(day.logs.saved.isEmpty(), "a line was written to a day that has not happened")
+        assertTrue(day.plans.consumed.isEmpty(), "the proposal was marked eaten in advance")
     }
 
     /**

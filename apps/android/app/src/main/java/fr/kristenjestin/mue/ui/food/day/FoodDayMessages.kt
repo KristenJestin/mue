@@ -53,6 +53,32 @@ object FoodDayMessages {
 
     // endregion
 
+    // region a day still to come (PRD_FOOD 12, 15 and 22)
+
+    /**
+     * What a day ahead says about itself, once the arrows can reach one.
+     *
+     * PRD_FOOD 22 bars the journal from a future day and PRD_FOOD 12 makes that day the whole
+     * point of planning, so the screen has to hold both facts at once: not a refusal, and not an
+     * invitation to write a line either. It states which of the two the day is for and stops.
+     */
+    const val FUTURE_DAY: String = "This day hasn't happened yet"
+
+    const val FUTURE_DAY_DETAIL: String =
+        "Its moments can carry a suggestion. An entry waits for the day itself."
+
+    /**
+     * What a moment ahead of today offers, in the row the add button holds on every other day.
+     *
+     * PRD_FOOD 10.1 wants that row "toujours présent", and PRD_FOOD 22 will not let it write a
+     * line, so it keeps its place and stops being a control. It names what the moment can hold
+     * rather than what it refuses — the day's own line above has already said that once, and four
+     * refusals under it would read as four errors.
+     */
+    const val PLANNABLE_SLOT: String = "Can hold a suggestion"
+
+    // endregion
+
     // region proposals (PRD_FOOD 12 and 18)
 
     /**

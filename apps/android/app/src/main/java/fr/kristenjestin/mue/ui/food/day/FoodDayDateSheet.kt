@@ -11,7 +11,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import fr.kristenjestin.mue.domain.model.FoodLogEntry
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.ui.components.MueBottomSheet
 import fr.kristenjestin.mue.ui.components.MueBottomSheetDefaults
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
@@ -29,9 +29,15 @@ private const val MILLIS_PER_DAY = 86_400_000L
  * dressed in the product's colours, as the base PRD 12.1 allows for the V1 — so the module with
  * two date pickers is not also the module where they look like different products.
  *
- * The one rule it enforces is PRD_FOOD 22's: "un jour futur ne peut pas être complété". A future
- * day is never *offered*, in the grid or in the year list, rather than refused after the fact,
- * and the predicate is [FoodLogEntry.isLoggableOn] so the calendar and the storage agree.
+ * The rule it enforces is [FoodDayUiState.isReachable]'s: a day is offered when the journal will
+ * take it (PRD_FOOD 22) **or** when a proposal may be posed on it (PRD_FOOD 12 and 15). It used to
+ * ask `FoodLogEntry.isLoggableOn` alone, which is the journal's ceiling, so every day after today
+ * was greyed out in the grid and the whole planning half of the module had no door — the arrows,
+ * this calendar and the ViewModel all refused the same days for the same wrong reason.
+ *
+ * A day beyond both rules is never *offered*, in the grid or in the year list, rather than refused
+ * after the fact, and it is the one predicate the screen uses everywhere so the calendar, the
+ * arrows and the storage cannot disagree.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,11 +63,13 @@ internal fun FoodDayDateSheet(
         // rather than on the last choice that was abandoned.
         key(visible, selected) {
             val selectableDates = remember(today) {
+                // The furthest day either rule allows, which is where the year list has to stop.
+                val furthest = today.plusDays(MealPlanEntry.MAX_DAYS_AHEAD)
                 object : SelectableDates {
                     override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                        FoodLogEntry.isLoggableOn(utcTimeMillis.toUtcLocalDate(), today)
+                        FoodDayUiState.isReachable(utcTimeMillis.toUtcLocalDate(), today)
 
-                    override fun isSelectableYear(year: Int): Boolean = year <= today.year
+                    override fun isSelectableYear(year: Int): Boolean = year <= furthest.year
                 }
             }
             val pickerState = rememberDatePickerState(
@@ -99,7 +107,7 @@ internal fun FoodDayDateSheet(
                 label = FoodDayMessages.USE_THIS_DAY,
                 onClick = {
                     val picked = pickerState.selectedDateMillis?.toUtcLocalDate() ?: selected
-                    onConfirm(if (FoodLogEntry.isLoggableOn(picked, today)) picked else today)
+                    onConfirm(if (FoodDayUiState.isReachable(picked, today)) picked else today)
                 },
             )
         }

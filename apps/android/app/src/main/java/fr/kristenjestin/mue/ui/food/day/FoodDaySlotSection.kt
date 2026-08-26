@@ -355,14 +355,21 @@ private fun PlanCard(
         MueDivider()
 
         PlanActions(
-            actions = listOf(
+            actions = listOfNotNull(
+                /*
+                 * PRD_FOOD 12's first action, and the only one of the three that writes a journal
+                 * line — so the only one PRD_FOOD 22 can refuse. On a proposal for Thursday it is
+                 * not there at all: a card cannot ask whether you ate Thursday's dinner, and the
+                 * day's own note above has already said why. `Swap` and `Dismiss` are unaffected,
+                 * because replacing and freeing a moment ahead are exactly what planning is.
+                 */
                 PlanActionSpec(
                     label = FoodDayMessages.I_ATE_THIS,
                     iconName = MueIcons.CHECK,
                     tint = colors.accent,
                     testTag = FoodTestTags.confirmPlan(state.key.slot),
                     onClick = onConfirm,
-                ),
+                ).takeIf { state.canConfirm },
                 PlanActionSpec(
                     label = FoodDayMessages.SWAP,
                     iconName = MueIcons.ROTATE_CW,
@@ -495,27 +502,36 @@ private fun AddToSlotRow(
             .heightIn(min = MueMinTouchTarget)
             .clip(shape)
             .border(BorderStroke(1.dp, colors.hairline), shape)
-            .clickable(role = Role.Button, onClick = onClick)
+            /*
+             * PRD_FOOD 22: on a day still to come the row keeps its place and stops being a
+             * control. `enabled = false` rather than a missing `clickable`, so the node is still
+             * announced as a disabled button instead of quietly becoming a paragraph — a reader
+             * who reaches it hears that it is there and cannot be used, which is the fact.
+             */
+            .clickable(enabled = state.canAdd, role = Role.Button, onClick = onClick)
             .padding(horizontal = spacing.md, vertical = spacing.sm)
             .testTag(FoodTestTags.addToSlot(state.slot))
             // The words alone do not say which moment they would add to.
             .announcedAs("${state.addLabel}, ${state.label}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(AddTileSize)
-                .clip(MueTheme.shapes.small)
-                .background(colors.surface),
-            contentAlignment = Alignment.Center,
-        ) {
-            MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textTertiary, size = 14.dp)
+        // The `+` is the promise of a line, so it goes where no line may be written.
+        if (state.canAdd) {
+            Box(
+                modifier = Modifier
+                    .size(AddTileSize)
+                    .clip(MueTheme.shapes.small)
+                    .background(colors.surface),
+                contentAlignment = Alignment.Center,
+            ) {
+                MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textTertiary, size = 14.dp)
+            }
         }
         MueText(
             text = state.addLabel,
             style = MueTheme.typography.caption,
-            color = colors.textTertiary,
-            modifier = Modifier.padding(start = spacing.md),
+            color = if (state.canAdd) colors.textTertiary else colors.textQuiet,
+            modifier = Modifier.padding(start = if (state.canAdd) spacing.md else 0.dp),
         )
     }
 }

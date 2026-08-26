@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -127,6 +128,9 @@ internal fun FoodDayScreen(
                 )
             }
 
+            // PRD_FOOD 22 and 12: what a day still to come is, said once, above its moments.
+            if (!state.canLog) item(key = "future") { FutureDayNote() }
+
             // Four moments, always four, in PRD_FOOD 10.1's order and never keyed by position.
             items(items = state.slots, key = { it.slot.id }) { slot ->
                 FoodDaySlotSection(
@@ -151,12 +155,54 @@ internal fun FoodDayScreen(
 }
 
 /**
+ * What a day ahead of today is for, and what it is not (PRD_FOOD 12 and 22).
+ *
+ * Two sentences and no control. The moments below already say what each of them can hold, and a
+ * refusal repeated five times on one screen reads as five errors rather than as one fact about the
+ * day. It is deliberately not an error colour: nothing has gone wrong — the reader has simply
+ * walked forward into a part of the module that keeps proposals rather than entries.
+ *
+ * Announced as one sentence, so a screen reader hears the fact and its consequence together
+ * instead of two fragments (PRD_FOOD 18).
+ */
+@Composable
+private fun FutureDayNote() {
+    val colors = MueTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(FoodTestTags.FUTURE_DAY)
+            .announcedAs(
+                FoodDayFormat.sentence(
+                    FoodDayMessages.FUTURE_DAY,
+                    FoodDayMessages.FUTURE_DAY_DETAIL,
+                ),
+            ),
+        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
+    ) {
+        // Neither is capped: at the largest font size these are the only words explaining why
+        // every add row below has stopped being a button.
+        MueText(
+            text = FoodDayMessages.FUTURE_DAY,
+            style = MueTheme.typography.bodyStrong,
+            color = colors.textSecondary,
+        )
+        MueText(
+            text = FoodDayMessages.FUTURE_DAY_DETAIL,
+            style = MueTheme.typography.caption,
+            color = colors.textTertiary,
+        )
+    }
+}
+
+/**
  * The date and the two steps either side of it (PRD_FOOD 10.1).
  *
- * `Next day` is disabled on today rather than hidden: PRD_FOOD 22 refuses a future day, and a
- * control that disappears leaves the row jumping about as the week is walked. The guard is
- * repeated in the ViewModel, because a disabled control is still reachable by an assistive
- * service.
+ * `Next day` stops where both of the module's rules stop — the journal's ceiling *or* the sixty
+ * days a proposal may be posed within — rather than on today, which is what left the planning half
+ * of the module unreachable. It is disabled rather than hidden, so the row does not jump about as
+ * the week is walked, and the guard is repeated in the ViewModel because a disabled control is
+ * still reachable by an assistive service.
  */
 @Composable
 private fun DayNavigation(
@@ -318,6 +364,35 @@ private fun FoodDayEmptyPreview() {
     MuePreviewHost(padding = 0) {
         FoodDayScreen(
             state = emptyDayState(),
+            onPreviousDay = {},
+            onNextDay = {},
+            onOpenDatePicker = {},
+            onDismissDatePicker = {},
+            onDayPicked = {},
+            onAddToSlot = {},
+            onEditEntry = {},
+            onConfirmPlan = {},
+            onSwapPlan = {},
+            onDismissPlan = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * A day still to come, which the module could not reach at all until today.
+ *
+ * What to look for: the date arrow on the right is live rather than faded, one line under the
+ * date saying what this day is and is not, four add rows that have stopped being buttons and say
+ * what their moment can hold instead — and the dinner's proposal carrying `Swap` and `Dismiss`
+ * but **not** `I ate this`, because nobody has eaten Thursday.
+ */
+@Preview(name = "Day — still to come", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodDayAheadPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodDayScreen(
+            state = futureDayState(),
             onPreviousDay = {},
             onNextDay = {},
             onOpenDatePicker = {},

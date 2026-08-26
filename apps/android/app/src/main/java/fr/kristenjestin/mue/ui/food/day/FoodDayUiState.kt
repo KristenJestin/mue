@@ -74,15 +74,54 @@ data class FoodDayUiState(
     /**
      * PRD_FOOD 22: "un jour passé peut être complété ; un jour futur ne peut pas l'être".
      *
-     * Asked of the domain rather than of `isBefore`, so the screen and the storage refuse the
-     * same days. Stepping forward from today would land on a date no line may be written to.
+     * The **journal's** rule, and only the journal's. Asked of the domain rather than of
+     * `isAfter`, so the screen and the storage refuse the same days.
      */
-    val canGoForward: Boolean get() = FoodLogEntry.isLoggableOn(date.plusDays(1), today)
+    val canLog: Boolean get() = FoodLogEntry.isLoggableOn(date, today)
+
+    /**
+     * PRD_FOOD 12 and 15: "date proposée : aujourd'hui ou dans le futur, dans les 60 jours".
+     *
+     * The other rule, which is not the journal's and never was. It is what a day ahead is *for* —
+     * PRD_FOOD 12 calls planning "l'amorce qui rend le journal possible" — and it is the half the
+     * day screen used to have no way of reaching.
+     */
+    val canPlan: Boolean get() = MealPlanEntry.isPlannableOn(date, today)
+
+    /**
+     * A day the module has something to say about, in either direction.
+     *
+     * This is the whole of the second finding. The forward step, the calendar and the day the
+     * ViewModel accepts were **all** gated on [FoodLogEntry.isLoggableOn] — the journal's ceiling
+     * — so no day after today could be reached by any route. `MealPlanEntry.isPlannableOn` allowed
+     * sixty days ahead, `MealSlotRules.pendingPlans` was already being rendered and the proposal
+     * card with its three actions was already drawn, and none of it could ever appear: nothing
+     * could be planned because nowhere could be planned *on*.
+     *
+     * Reading the two domain predicates together is the separation. Nothing new is decided here
+     * and no bound is restated: a day is reachable when the journal will take it or when a
+     * proposal may sit on it, and both halves stay exactly where they were written.
+     */
+    val isReachable: Boolean get() = canLog || canPlan
+
+    /** PRD_FOOD 10.1: the date navigation, which now reaches as far as a proposal may. */
+    val canGoForward: Boolean get() = isReachable(date.plusDays(1), today)
 
     /** Backwards is always open: the journal has no floor, only a ceiling. */
     val canGoBack: Boolean get() = true
 
     companion object {
+
+        /**
+         * [isReachable] for a day the screen is not currently showing.
+         *
+         * The date navigation, the calendar's selectable days and the ViewModel's own guard all
+         * ask this one function, so a day offered in the grid is a day the arrows reach is a day
+         * the ViewModel will accept. Three readings of one rule was how the module ended up with
+         * a planning feature nobody could get to.
+         */
+        fun isReachable(date: LocalDate, today: LocalDate): Boolean =
+            FoodLogEntry.isLoggableOn(date, today) || MealPlanEntry.isPlannableOn(date, today)
 
         /**
          * The whole screen from one day's rows.
@@ -123,6 +162,7 @@ data class FoodDayUiState(
                         total = summary.totalIn(slot),
                         plan = pending[slot],
                         recipeNames = recipeNames,
+                        canLog = FoodLogEntry.isLoggableOn(date, today),
                         locale = locale,
                     )
                 },
@@ -160,6 +200,16 @@ data class FoodDaySlotUiState(
     val description: String,
     /** The add button's own words, which change once the moment holds something. */
     val addLabel: String,
+    /**
+     * PRD_FOOD 22: whether a line may be written into this moment at all.
+     *
+     * False on a day that has not happened. The row keeps its place — PRD_FOOD 10.1 wants an add
+     * control "toujours présent" — and stops being a control, saying instead what the moment can
+     * hold until the day arrives. Refusing after the tap would have been the other reading, and a
+     * worse one: the sheet would open, the food would be chosen, the quantity typed, and only
+     * `Save entry` would say no.
+     */
+    val canAdd: Boolean,
 ) {
 
     val isEmpty: Boolean get() = entries.isEmpty()
@@ -174,6 +224,7 @@ data class FoodDaySlotUiState(
             total: Nutrients?,
             plan: MealPlanEntry?,
             recipeNames: Map<RecipeId, String>,
+            canLog: Boolean = true,
             locale: Locale = Locale.getDefault(),
         ): FoodDaySlotUiState {
             val rows = entries.map { FoodDayEntryUiState.of(it, locale) }
@@ -186,18 +237,20 @@ data class FoodDaySlotUiState(
                 entries = rows,
                 totalLabel = energy,
                 proteinLabel = protein,
-                plan = plan?.let { FoodDayPlanUiState.of(it, recipeNames) },
+                plan = plan?.let { FoodDayPlanUiState.of(it, recipeNames, canConfirm = canLog) },
                 description = FoodDayFormat.sentence(
                     slot.label,
                     FoodDayMessages.entryCount(rows.size),
                     energy?.let(FoodDayFormat::spoken),
                     protein?.let(FoodDayFormat::spoken),
                 ),
-                addLabel = if (rows.isEmpty()) {
-                    FoodDayMessages.ADD_FIRST
-                } else {
-                    FoodDayMessages.ADD_MORE
+                addLabel = when {
+                    // PRD_FOOD 12: what a moment ahead of today is for, said in its own row.
+                    !canLog -> FoodDayMessages.PLANNABLE_SLOT
+                    rows.isEmpty() -> FoodDayMessages.ADD_FIRST
+                    else -> FoodDayMessages.ADD_MORE
                 },
+                canAdd = canLog,
             )
         }
     }
@@ -278,12 +331,25 @@ data class FoodDayPlanUiState(
     val servingsLabel: String,
     /** PRD_FOOD 18: `Suggested` is spoken, so the card is never told apart by colour alone. */
     val description: String,
+    /**
+     * FR-PLAN-003 against PRD_FOOD 22: whether `I ate this` is offered at all.
+     *
+     * False on a proposal sitting on a day still to come. Confirming writes a **journal line**
+     * dated on the proposal's own day, and PRD_FOOD 22 refuses one there — so the action is not
+     * shown rather than shown and refused. `Swap` and `Dismiss` stay: replacing tomorrow's dinner
+     * and freeing tomorrow's slot are both things you can do today.
+     *
+     * The claim it would make is the plainer objection: a card cannot ask "did you eat this?"
+     * about Thursday.
+     */
+    val canConfirm: Boolean,
 ) {
     companion object {
 
         fun of(
             plan: MealPlanEntry,
             recipeNames: Map<RecipeId, String>,
+            canConfirm: Boolean = true,
         ): FoodDayPlanUiState {
             val name = recipeNames[plan.recipeId] ?: FoodDayMessages.MISSING_RECIPE
             val servings = FoodDayMessages.servings(plan.plannedServings)
@@ -296,6 +362,7 @@ data class FoodDayPlanUiState(
                     name,
                     servings,
                 ),
+                canConfirm = canConfirm,
             )
         }
     }

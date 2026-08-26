@@ -37,6 +37,9 @@ internal object FoodTestTags {
     const val NEXT_DAY: String = "food:nextDay"
     const val DAY_DATE_PICKER: String = "food:dayDatePicker"
 
+    /** PRD_FOOD 22 and 12: what a day still to come says about itself. */
+    const val FUTURE_DAY: String = "food:futureDay"
+
     /** One of the four moments, always present whether it holds anything or not. */
     fun slot(slot: MealSlot): String = "food:slot:${slot.id}"
 
