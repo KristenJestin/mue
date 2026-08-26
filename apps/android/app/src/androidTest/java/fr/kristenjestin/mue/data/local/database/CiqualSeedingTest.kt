@@ -102,15 +102,22 @@ class CiqualSeedingTest {
         assertEquals(0, database.syncDao().pendingMutations(50).size)
     }
 
+    /**
+     * Raw SQL rather than `findByIds`: a thousand bound parameters is a limit to run into for
+     * nothing, and the point here is what the columns hold, not what the mapper makes of them.
+     */
     @Test
     fun everySeededFoodIsAReadOnlyCiqualEntryWithItsVersion() = runTest {
         seeding.seedIfNeeded()
 
         val version = CiqualCatalogueAsset.availableVersion(context.assets)
-        database.foodDao().findByIds(seededIds()).forEach { row ->
-            assertEquals(FoodSource.CIQUAL.id, row.source)
-            assertEquals(version, row.sourceVersion)
-        }
+        database.openHelper.readableDatabase
+            .query("SELECT COUNT(*) FROM food WHERE source <> 'ciqual' OR source_version <> ?", arrayOf(version))
+            .use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+        assertTrue(seededIds().isNotEmpty())
     }
 
     /** The identifiers are the asset's own, so two installs agree on what a food is. */
