@@ -248,6 +248,8 @@ MealPlanEntry
 - updatedAt
 ```
 
+> **Implémenté sans `id`, avec `(plannedOn, slot)` pour clé primaire.** La section 21.3 désigne déjà `(date, moment)` comme clé métier, et la section ci-dessous pose qu'un moment ne porte au maximum qu'une proposition. Un UUID contredit les deux : deux appareils qui planifient le même dîner hors ligne créent deux propositions concurrentes que rien ne réconcilie, là où la clé composite les fait converger d'elles-mêmes — le raisonnement déjà retenu pour les mesures de poids. Le champ `fromPlanEntryId` de la section 8.4 est donc stocké comme la paire `(plannedOn, slot)`, seul champ de la section 8 qui ne peut pas l'être tel qu'écrit.
+
 Un moment ne porte **au maximum qu'une proposition**, à la différence du journal qui accepte autant de lignes que voulu. Une proposition référence toujours une recette ; un aliment simple se journalise directement et n'est pas planifié. Proposer sur un moment déjà pourvu demande une confirmation dans l'interface, puis remplace la proposition précédente.
 
 `consumedLogEntryId` est renseigné lorsque l'utilisateur confirme ; l'annulation le vide et supprime la ligne de journal correspondante.
@@ -265,9 +267,13 @@ Un moment ne porte **au maximum qu'une proposition**, à la différence du journ
 | Aliment | Ratio | Sens |
 |---|---:|---|
 | Pâtes complètes, sèches | 2,3 | absorbent de l'eau |
-| Riz blanc, sec | 2,8 | absorbe de l'eau |
+| Riz blanc, sec | 2,26 | absorbe de l'eau |
 | Lentilles corail, sèches | 2,4 | absorbent de l'eau |
 | Blanc de poulet | 0,72 | perd de l'eau |
+
+> **Ces quatre valeurs sont indicatives ; les ratios livrés sont ceux que le générateur dérive de Ciqual**, par conservation de la matière sèche entre l'entrée de référence et l'entrée cuite. Un test épingle l'écart entre les deux et fait échouer la construction s'il dérive.
+>
+> Le riz est passé de 2,8 à 2,26 : **2,8 décrit la cuisson par absorption** — une part de riz pour deux d'eau, toute absorbée — alors que le riz cuit de Ciqual est bouilli puis égoutté, donc plus ferme. Les deux chiffres sont justes, pour deux préparations différentes ; celui du catalogue doit décrire l'aliment que le catalogue contient. Les trois autres reproduisent à moins de 10 % (2,19 · 2,61 · 0,77).
 
 Perdre de l'eau et en absorber sont le même phénomène : la matière sèche est conservée, seule la masse change. Un ratio unique suffit donc dans les deux sens, et un rôti nature ne demande **aucune entrée supplémentaire**.
 
@@ -679,6 +685,8 @@ Il n'existe aucun mode, badge ou interrupteur lié à MCP. Connecté ou non, cha
 ### 20.1 Métadonnées de synchronisation dès la création
 
 Les quatre agrégats de ce module — `food`, `recipe` avec ses ingrédients, `food_log_entry` et `meal_plan_entry` — portent **dès leur première migration** les métadonnées communes définies par la section 12.1 de [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) : identité UUID stable, révision serveur, instants de création et de modification, tombstone, origine et identifiant de la dernière mutation.
+
+> **Implémenté autrement, et pour la raison même qu'invoque cette section.** Le module serveur a livré entre-temps une table d'état générique, indexée par type d'agrégat, que le poids et le profil de santé utilisent déjà. Les cinq tables de Food ne portent donc **aucune colonne de synchronisation** : elles journalisent leurs mutations par `SyncOutbox`, comme le dépôt des mesures. La contrainte de séquencement décrite ci-dessous disparaît d'elle-même — il n'y a plus de format à figer avant la première migration, ni de seconde migration à prévoir sur un journal alimentaire peuplé. `FoodMigrationTest` vérifie explicitement l'absence de ces colonnes.
 
 Ces colonnes existent même si le serveur n'est pas encore développé, et même si l'utilisateur n'associe jamais de serveur. Elles restent alors simplement inutilisées.
 
