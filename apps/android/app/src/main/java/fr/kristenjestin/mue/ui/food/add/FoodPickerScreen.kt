@@ -1,7 +1,6 @@
 package fr.kristenjestin.mue.ui.food.add
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -24,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -36,6 +33,7 @@ import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueIcon
+import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MueSearchField
@@ -233,36 +231,22 @@ private fun SourceFilter(
     }
 }
 
+/**
+ * One provenance filter, drawn by the pill the rest of the app already uses.
+ *
+ * This had been a private copy of `MuePeriodPill` with two values changed: a 48 dp minimum height
+ * instead of the pill's 40, and an outlined `accentSoft` selection instead of the filled `accent`
+ * one. Both showed. `All` is a three-letter word, so at 48 dp tall and 16 dp of side padding it
+ * came out taller than it was wide and drew a **circle**, while the identical `All` on `Foods`
+ * two taps away drew a capsule — one filter row contradicting the other. The prototype has a
+ * single pill (`rounded-full px-3 py-2`, amber when active) and uses it for every filter it has.
+ *
+ * The 48 dp target is not lost: `MuePeriodPill` wraps its 40 dp body in a 48 dp touch height, so
+ * PRD_FOOD 18 is satisfied by the component rather than by this call site.
+ */
 @Composable
 private fun SourceChip(option: FoodSourceFilterUiState, onClick: () -> Unit) {
-    val colors = MueTheme.colors
-    val shape = MueTheme.shapes.pill
-    Box(
-        modifier = Modifier
-            .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .background(if (option.selected) colors.accentSoft else colors.surfaceStrong)
-            .border(
-                width = if (option.selected) 2.dp else 1.dp,
-                color = if (option.selected) colors.accent else colors.surfaceBorder,
-                shape = shape,
-            )
-            .selectable(
-                selected = option.selected,
-                indication = null,
-                interactionSource = null,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(horizontal = MueTheme.spacing.lg, vertical = MueTheme.spacing.sm),
-        contentAlignment = Alignment.Center,
-    ) {
-        MueText(
-            text = option.label,
-            style = MueTheme.typography.chip,
-            color = if (option.selected) colors.onAccentSoft else colors.textTertiary,
-        )
-    }
+    MuePeriodPill(label = option.label, selected = option.selected, onClick = onClick)
 }
 
 /**
