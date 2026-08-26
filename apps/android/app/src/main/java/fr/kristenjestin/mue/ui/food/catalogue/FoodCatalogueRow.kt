@@ -1,14 +1,19 @@
 package fr.kristenjestin.mue.ui.food.catalogue
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
@@ -25,6 +30,17 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 
 /** The gap between the name and the figures while the two still fit on one line. */
 private val SplitGap: Dp = 16.dp
+
+/**
+ * The provenance tile at the head of a catalogue row: the prototype's `h-11 w-11`, so 44 dp.
+ *
+ * The row had none at all. Where the prototype opens every food with an amber glyph on a dark
+ * tile — the same object the journal, the picker and the recipes all lead with — this screen put
+ * a 16 dp grey glyph on a **third line**, under the name and under the figures. The result was a
+ * tall block of left-aligned text with nothing to enter it by, and the one list in the module
+ * that did not look like the others.
+ */
+private val SourceTileSize: Dp = 44.dp
 
 /**
  * One food of the catalogue (PRD_FOOD 9.4, 13.2, 16.3 and 18).
@@ -47,74 +63,91 @@ internal fun FoodCatalogueRow(
             .heightIn(min = MueMinTouchTarget)
             .testTag(FoodTestTags.foodCard(state.id.value)),
         shape = MueTheme.shapes.field,
-        contentPadding = PaddingValues(spacing.lg),
+        contentPadding = PaddingValues(spacing.md),
         onClick = onClick,
         onClickLabel = state.name,
     ) {
-        Column(
+        Row(
             // The card is one announcement, not five fragments (PRD_FOOD 18).
             modifier = Modifier.fillMaxWidth().announcedAs(state.description),
-            verticalArrangement = Arrangement.spacedBy(spacing.sm),
+            verticalAlignment = Alignment.Top,
         ) {
-            FoodSplitRow(
-                leading = {
-                    Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
-                        /*
-                         * No `maxLines`. PRD_FOOD 15 lets a name run to eighty characters, and
-                         * `MueText` ellipsises whatever it cannot fit — which `onNodeWithText`
-                         * would never notice, because it matches the semantics string rather
-                         * than the glyphs. The name wraps instead.
-                         */
-                        MueText(state.name, MueTheme.typography.bodyStrong)
-                        state.brand?.let {
-                            MueText(it, MueTheme.typography.caption, color = colors.textTertiary)
-                        }
-                    }
-                },
-                figures = {
-                    if (state.hasFigures) {
-                        Column(
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(spacing.xxs),
-                        ) {
-                            MueText(
-                                text = state.figures.first(),
-                                style = MueTheme.typography.bodyStrong,
-                                color = colors.accent,
-                                textAlign = TextAlign.End,
-                            )
-                            MueText(
-                                text = state.basisLabel,
-                                style = MueTheme.typography.micro,
-                                color = colors.textQuiet,
-                                textAlign = TextAlign.End,
-                            )
-                        }
-                    }
-                },
-                gap = SplitGap,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+            Box(
+                modifier = Modifier
+                    .size(SourceTileSize)
+                    .clip(MueTheme.shapes.field)
+                    .background(colors.accentSoft),
+                contentAlignment = Alignment.Center,
             ) {
-                MueIcon(iconName = state.iconName, tint = colors.textTertiary, size = 16.dp)
-                MueText(state.sourceLabel, MueTheme.typography.micro, color = colors.textTertiary)
+                // Decorative: the provenance is spelled out in the meta line beside it.
+                MueIcon(iconName = state.iconName, tint = colors.onAccentSoft, size = 20.dp)
             }
 
-            /*
-             * The four macronutrients, each keeping its noun, so `— fibre` cannot be mistaken
-             * for a missing row and `≈ 0.0 g fibre` cannot be mistaken for an unknown one. They
-             * wrap onto as many lines as the font scale needs rather than being squeezed on one.
-             */
-            if (state.figures.size > 1) {
-                MueText(
-                    text = state.figures.drop(1).joinToString(SEPARATOR),
-                    style = MueTheme.typography.caption,
-                    color = colors.textSecondary,
+            Column(
+                modifier = Modifier.weight(1f).padding(start = spacing.md),
+                verticalArrangement = Arrangement.spacedBy(spacing.sm),
+            ) {
+                FoodSplitRow(
+                    leading = {
+                        Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+                            /*
+                             * No `maxLines`. PRD_FOOD 15 lets a name run to eighty characters,
+                             * and `MueText` ellipsises whatever it cannot fit — which
+                             * `onNodeWithText` would never notice, because it matches the
+                             * semantics string rather than the glyphs. The name wraps instead.
+                             */
+                            MueText(state.name, MueTheme.typography.bodyStrong)
+                            /*
+                             * The prototype's `(brand||source)` line, kept as `brand · source`
+                             * rather than as a choice between the two: FR-CATALOG-004 wants a
+                             * provenance readable on every food, and a branded product that
+                             * printed only its brand would no longer say it was scanned.
+                             */
+                            MueText(
+                                text = state.metaLabel,
+                                style = MueTheme.typography.micro,
+                                color = colors.textTertiary,
+                            )
+                        }
+                    },
+                    figures = {
+                        if (state.hasFigures) {
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(spacing.xxs),
+                            ) {
+                                MueText(
+                                    text = state.figures.first(),
+                                    style = MueTheme.typography.bodyStrong,
+                                    color = colors.accent,
+                                    textAlign = TextAlign.End,
+                                )
+                                MueText(
+                                    text = state.basisLabel,
+                                    style = MueTheme.typography.micro,
+                                    color = colors.textQuiet,
+                                    textAlign = TextAlign.End,
+                                )
+                            }
+                        }
+                    },
+                    gap = SplitGap,
+                    modifier = Modifier.fillMaxWidth(),
                 )
+
+                /*
+                 * The four macronutrients, each keeping its noun, so `— fibre` cannot be mistaken
+                 * for a missing row and `≈ 0.0 g fibre` cannot be mistaken for an unknown one.
+                 * They wrap onto as many lines as the font scale needs rather than being squeezed
+                 * on one.
+                 */
+                if (state.figures.size > 1) {
+                    MueText(
+                        text = state.figures.drop(1).joinToString(SEPARATOR),
+                        style = MueTheme.typography.caption,
+                        color = colors.textSecondary,
+                    )
+                }
             }
         }
     }
