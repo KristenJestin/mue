@@ -116,21 +116,28 @@ describeIfPresent("the shape CiqualEntry.kt declares", () => {
     expect(entry.has("waterMilligrams")).toBe(false);
   });
 
-  test("`id` is emitted and Kotlin does not yet read it", () => {
-    // This is a cross-module gap, recorded here rather than fixed here: the asset is in
-    // this task's scope and `CiqualEntry.kt` is not.
+  test("`id` is emitted and Kotlin reads it", () => {
+    // The cross-module gap this test was written to record is now closed: `CiqualEntry`
+    // declares `val id: String? = null` and `toFoodOrNull` prefers it over its parameter,
+    // so the identifier the generator writes down is the one every device seeds.
     //
-    // Today `toFoodOrNull(sourceVersion, id = FoodId.random())` mints an identifier on the
-    // device, so two installs seeded from the same file hold different ids for the same
-    // food - which is exactly what `ExerciseCatalogSeed.kt` writes its ids down to avoid,
-    // and what PRD_FOOD 21's synchronised `Food` aggregate cannot reconcile. The id is
-    // therefore already in the file, where `ignoreUnknownKeys = true` accepts it harmlessly,
-    // and adding `val id: String? = null` to `CiqualEntry` plus passing it to
-    // `toFoodOrNull` is a one-line change on the Kotlin side.
+    // That matters because two installs seeded from the same file would otherwise hold the
+    // same food under different ids - what `ExerciseCatalogSeed.kt` writes its ids down to
+    // avoid, and what PRD_FOOD 21's synchronised `Food` aggregate cannot reconcile: the
+    // server would receive one food twice instead of converging on it.
     //
-    // When that lands, this test flips to asserting the field exists. Until then it fails
-    // loudly if someone adds it without telling the generator - or removes the emitted id.
+    // Both halves are asserted, because either one alone is a silent failure. A file that
+    // stopped emitting ids still parses - `id` is nullable so older fixtures decode - and
+    // every device would quietly go back to minting its own.
     for (const row of parsed.entries) expect(typeof row["id"]).toBe("string");
-    expect(entry.has("id")).toBe(false);
+    expect(entry.has("id")).toBe(true);
+  });
+
+  test("no two rows in the shipped catalogue share an id", () => {
+    // A name-based UUID of `"ciqual:$code"` collides only if two rows carry one code, which
+    // the pairing step can produce when a raw and a cooked entry merge. A duplicate here
+    // would make the seed silently drop a food, since the id is the primary key.
+    const ids = parsed.entries.map((row) => row["id"]);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
