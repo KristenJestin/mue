@@ -1,0 +1,314 @@
+package fr.kristenjestin.mue.domain.logic
+
+import fr.kristenjestin.mue.domain.model.MealSlot
+import fr.kristenjestin.mue.domain.model.Nutrients
+import java.time.LocalDate
+import java.time.LocalTime
+import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+private val TODAY_SLOTS: LocalDate = LocalDate.parse("2026-08-19")
+
+/**
+ * PRD_FOOD 10.3's windows, read **half-open**.
+ *
+ * The table writes them `05:00 – 10:00`, but the sentence beneath it and PRD_FOOD 22 both say
+ * "une pomme a dix heures tombe en collation, un dessert a quatorze heures au dejeuner". Read
+ * closed the two statements contradict each other; read half-open they agree, which is the
+ * reading `MealSlot.forTime` settled in the domain contract.
+ */
+class MealSlotRulesWindowTest {
+
+    @Test
+    fun `breakfast opens at five o'clock sharp`() {
+        assertEquals(MealSlot.BREAKFAST, MealSlotRules.slotFor(LocalTime.of(5, 0)))
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(4, 59)))
+    }
+
+    @Test
+    fun `PRD_FOOD 22 - an apple at ten o'clock falls in the snack`() {
+        assertEquals(MealSlot.BREAKFAST, MealSlotRules.slotFor(LocalTime.of(9, 59)))
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(10, 0)))
+    }
+
+    @Test
+    fun `lunch opens at half past eleven`() {
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(11, 29)))
+        assertEquals(MealSlot.LUNCH, MealSlotRules.slotFor(LocalTime.of(11, 30)))
+    }
+
+    @Test
+    fun `PRD_FOOD 22 - a dessert at two in the afternoon falls in lunch`() {
+        assertEquals(MealSlot.LUNCH, MealSlotRules.slotFor(LocalTime.of(14, 0)))
+    }
+
+    @Test
+    fun `lunch closes at half past two, exclusively`() {
+        assertEquals(MealSlot.LUNCH, MealSlotRules.slotFor(LocalTime.of(14, 29, 59)))
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(14, 30)))
+    }
+
+    @Test
+    fun `dinner runs from six in the evening to ten, exclusively`() {
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(17, 59)))
+        assertEquals(MealSlot.DINNER, MealSlotRules.slotFor(LocalTime.of(18, 0)))
+        assertEquals(MealSlot.DINNER, MealSlotRules.slotFor(LocalTime.of(21, 59)))
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(22, 0)))
+    }
+
+    @Test
+    fun `the middle of the night is a snack`() {
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.MIDNIGHT))
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(LocalTime.of(23, 59)))
+    }
+
+    @Test
+    fun `every one of the three named windows knows its own bounds`() {
+        assertEquals(
+            MealSlotWindow(LocalTime.of(5, 0), LocalTime.of(10, 0)),
+            MealSlotRules.windowOf(MealSlot.BREAKFAST),
+        )
+        assertEquals(
+            MealSlotWindow(LocalTime.of(11, 30), LocalTime.of(14, 30)),
+            MealSlotRules.windowOf(MealSlot.LUNCH),
+        )
+        assertEquals(
+            MealSlotWindow(LocalTime.of(18, 0), LocalTime.of(22, 0)),
+            MealSlotRules.windowOf(MealSlot.DINNER),
+        )
+    }
+
+    @Test
+    fun `a snack has no window of its own, because it is the complement of the three`() {
+        assertNull(MealSlotRules.windowOf(MealSlot.SNACK))
+    }
+
+    @Test
+    fun `a window is closed at its start and open at its end`() {
+        val breakfast = assertNotNull(MealSlotRules.windowOf(MealSlot.BREAKFAST))
+        assertTrue(LocalTime.of(5, 0) in breakfast)
+        assertTrue(LocalTime.of(9, 59, 59) in breakfast)
+        assertFalse(LocalTime.of(10, 0) in breakfast)
+        assertFalse(LocalTime.of(4, 59, 59) in breakfast)
+    }
+
+    @Test
+    fun `the window predicate and the preselection are two readings of one partition`() {
+        var minute = 0
+        while (minute < 24 * 60) {
+            val time = LocalTime.of(minute / 60, minute % 60)
+            val chosen = MealSlotRules.slotFor(time)
+            MealSlot.entries.forEach { slot ->
+                assertEquals(
+                    slot == chosen,
+                    MealSlotRules.isWithinWindow(slot, time),
+                    "$time and $slot disagree",
+                )
+            }
+            minute += 7
+        }
+    }
+
+    @Test
+    fun `the windows constrain nothing - any line may be logged in any moment`() {
+        val breakfastAtNight = logEntryOf(at = "23:30", slot = MealSlot.BREAKFAST)
+        assertEquals(MealSlot.BREAKFAST, breakfastAtNight.slot)
+        assertEquals(MealSlot.SNACK, MealSlotRules.slotFor(breakfastAtNight.consumedAt))
+    }
+}
+
+/** PRD_FOOD 10.3: the default time of a new line, and the minute it is stored to. */
+class MealSlotRulesDefaultTimeTest {
+
+    @Test
+    fun `today keeps the current time`() {
+        val now = LocalTime.of(15, 42)
+        assertEquals(now, MealSlotRules.defaultTime(MealSlot.SNACK, TODAY_SLOTS, TODAY_SLOTS, now))
+    }
+
+    @Test
+    fun `a retroactive entry takes the middle of its moment, never the current time`() {
+        val now = LocalTime.of(22, 10)
+        val yesterday = TODAY_SLOTS.minusDays(1)
+        assertEquals(
+            LocalTime.of(8, 0),
+            MealSlotRules.defaultTime(MealSlot.BREAKFAST, yesterday, TODAY_SLOTS, now),
+        )
+    }
+
+    @Test
+    fun `the four defaults are the ones PRD_FOOD 10_3 prints`() {
+        val past = TODAY_SLOTS.minusDays(3)
+        val now = LocalTime.of(11, 0)
+        assertEquals(LocalTime.of(8, 0), MealSlotRules.defaultTime(MealSlot.BREAKFAST, past, TODAY_SLOTS, now))
+        assertEquals(LocalTime.of(13, 0), MealSlotRules.defaultTime(MealSlot.LUNCH, past, TODAY_SLOTS, now))
+        assertEquals(LocalTime.of(16, 30), MealSlotRules.defaultTime(MealSlot.SNACK, past, TODAY_SLOTS, now))
+        assertEquals(LocalTime.of(20, 0), MealSlotRules.defaultTime(MealSlot.DINNER, past, TODAY_SLOTS, now))
+    }
+
+    @Test
+    fun `every default time falls inside the window of its own moment`() {
+        MealSlot.ORDERED.forEach { slot ->
+            assertTrue(
+                MealSlotRules.isWithinWindow(slot, slot.defaultTime),
+                "${slot.defaultTime} is not in $slot",
+            )
+        }
+    }
+
+    @Test
+    fun `today's default is brought to the minute`() {
+        val now = LocalTime.of(15, 42, 51, 123)
+        assertEquals(
+            LocalTime.of(15, 42),
+            MealSlotRules.defaultTime(MealSlot.SNACK, TODAY_SLOTS, TODAY_SLOTS, now),
+        )
+    }
+
+    @Test
+    fun `a stray second never decides which of two lines comes first`() {
+        assertEquals(LocalTime.of(13, 0), MealSlotRules.normalize(LocalTime.of(13, 0, 59, 999)))
+    }
+
+    @Test
+    fun `a future date is treated as a retroactive one, and never crashes`() {
+        val tomorrow = TODAY_SLOTS.plusDays(1)
+        assertEquals(
+            LocalTime.of(13, 0),
+            MealSlotRules.defaultTime(MealSlot.LUNCH, tomorrow, TODAY_SLOTS, LocalTime.NOON),
+        )
+    }
+}
+
+/** PRD_FOOD 10.1: how the lines of a day arrange themselves under the four moments. */
+class MealSlotRulesGroupingTest {
+
+    private val day = listOf(
+        logEntryOf(at = "20:30", slot = MealSlot.DINNER, id = "dinner-late"),
+        logEntryOf(at = "08:10", slot = MealSlot.BREAKFAST, id = "breakfast"),
+        logEntryOf(at = "18:05", slot = MealSlot.DINNER, id = "dinner-early"),
+        logEntryOf(at = "13:00", slot = MealSlot.LUNCH, id = "lunch"),
+    )
+
+    @Test
+    fun `the lines of a moment come back ordered by time`() {
+        val dinner = MealSlotRules.entriesIn(day, MealSlot.DINNER)
+        assertEquals(listOf("dinner-early", "dinner-late"), dinner.map { it.id.value })
+    }
+
+    @Test
+    fun `the four moments always appear, in their own order, filled or not`() {
+        val grouped = MealSlotRules.groupBySlot(day)
+        assertEquals(MealSlot.ORDERED, grouped.keys.toList())
+        assertTrue(grouped.getValue(MealSlot.SNACK).isEmpty())
+        assertEquals(2, grouped.getValue(MealSlot.DINNER).size)
+    }
+
+    @Test
+    fun `an empty day is still four moments`() {
+        val grouped = MealSlotRules.groupBySlot(emptyList())
+        assertEquals(4, grouped.size)
+        assertTrue(grouped.values.all { it.isEmpty() })
+    }
+
+    @Test
+    fun `sorting by time is stable, so two lines of the same minute keep their order`() {
+        val sameMinute = listOf(
+            logEntryOf(at = "08:00", id = "first"),
+            logEntryOf(at = "08:00", id = "second"),
+        )
+        assertEquals(listOf("first", "second"), MealSlotRules.sortedByTime(sameMinute).map { it.id.value })
+    }
+
+    @Test
+    fun `only the lines of the selected day take part`() {
+        val across = day + logEntryOf(isoDate = "2026-08-18", at = "13:00", id = "yesterday")
+        assertEquals(4, MealSlotRules.entriesOn(across, TODAY_SLOTS).size)
+        assertEquals(1, MealSlotRules.entriesOn(across, TODAY_SLOTS.minusDays(1)).size)
+    }
+
+    @Test
+    fun `a day nobody wrote on has no line at all`() {
+        assertTrue(MealSlotRules.entriesOn(day, TODAY_SLOTS.minusDays(10)).isEmpty())
+    }
+
+    @Test
+    fun `three lines of different natures share one moment without replacing each other`() {
+        val breakfast = listOf(
+            logEntryOf(at = "08:00", slot = MealSlot.BREAKFAST, title = "Yoghurt", id = "a"),
+            logEntryOf(at = "08:05", slot = MealSlot.BREAKFAST, title = "Banana", id = "b"),
+        )
+        assertEquals(2, MealSlotRules.entriesIn(breakfast, MealSlot.BREAKFAST).size)
+    }
+}
+
+/** PRD_FOOD 8.5 and 12: a moment holds at most one proposal, and none of them enters a total. */
+class MealSlotRulesPlanTest {
+
+    private val plans = listOf(
+        planOf(slot = MealSlot.LUNCH, recipeId = "recipe-curry"),
+        planOf(slot = MealSlot.DINNER, recipeId = "recipe-soup"),
+    )
+
+    @Test
+    fun `a moment finds its own proposal`() {
+        assertEquals("recipe-curry", MealSlotRules.planIn(plans, MealSlot.LUNCH)?.recipeId?.value)
+        assertEquals("recipe-soup", MealSlotRules.planIn(plans, MealSlot.DINNER)?.recipeId?.value)
+    }
+
+    @Test
+    fun `a moment with no proposal says so with a null rather than an empty card`() {
+        assertNull(MealSlotRules.planIn(plans, MealSlot.BREAKFAST))
+    }
+
+    @Test
+    fun `two proposals for one moment resolve to the last, never to both`() {
+        val duplicated = plans + planOf(slot = MealSlot.LUNCH, recipeId = "recipe-replacement")
+        assertEquals(
+            "recipe-replacement",
+            MealSlotRules.planIn(duplicated, MealSlot.LUNCH)?.recipeId?.value,
+        )
+    }
+
+    @Test
+    fun `a confirmed proposal stops being shown`() {
+        val confirmed = plans + planOf(
+            slot = MealSlot.BREAKFAST,
+            recipeId = "recipe-porridge",
+            consumedLogEntryId = "entry-1",
+        )
+        val pending = MealSlotRules.pendingPlans(confirmed)
+        assertEquals(2, pending.size)
+        assertTrue(pending.none { it.slot == MealSlot.BREAKFAST })
+    }
+
+    @Test
+    fun `deleting the line puts the proposal back in waiting`() {
+        val confirmed = planOf(slot = MealSlot.LUNCH, consumedLogEntryId = "entry-1")
+        assertTrue(confirmed.isConsumed)
+        val released = confirmed.copy(consumedLogEntryId = null)
+        assertFalse(released.isConsumed)
+        assertEquals(1, MealSlotRules.pendingPlans(listOf(released)).size)
+    }
+
+    @Test
+    fun `the day screen sees one proposal per moment, in the moments' own order`() {
+        val bySlot = MealSlotRules.plansBySlot(plans)
+        assertEquals(MealSlot.ORDERED, bySlot.keys.toList())
+        assertNull(bySlot.getValue(MealSlot.BREAKFAST))
+        assertNull(bySlot.getValue(MealSlot.SNACK))
+        assertNotNull(bySlot.getValue(MealSlot.LUNCH))
+    }
+
+    @Test
+    fun `a proposal carries no nutritional value and enters no total before it is confirmed`() {
+        val proposal = planOf(slot = MealSlot.LUNCH)
+        val lines = MealSlotRules.entriesIn(emptyList(), MealSlot.LUNCH)
+        assertEquals(Nutrients.ZERO, NutritionMath.total(lines))
+        assertEquals(MealSlot.LUNCH, proposal.slot)
+    }
+}
