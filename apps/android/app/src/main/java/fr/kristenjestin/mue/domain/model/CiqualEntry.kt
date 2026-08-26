@@ -59,6 +59,19 @@ data class CiqualCatalogue(
  */
 @Serializable
 data class CiqualEntry(
+    /**
+     * The [FoodId] the generator wrote down, a name-based UUID of `"ciqual:$code"`.
+     *
+     * PRD_FOOD 9.4 seeds the same catalogue onto every device, so the id has to come from the
+     * asset rather than be minted at seeding time: two phones that each rolled their own would
+     * hold the same food under two identities, and PRD_SERVER_SYNC_MCP 13 would then sync it
+     * twice instead of converging. This is the argument `ExerciseCatalogSeed` already settled
+     * for a handful of exercises, applied to a thousand foods.
+     *
+     * Absent only in a fixture written before the generator existed; [toFoodOrNull] falls back
+     * to its `id` parameter there.
+     */
+    val id: String? = null,
     /** The Ciqual food code (`alim_code`), which becomes `Food.sourceId`. */
     val code: String,
     /** English, like the rest of the app; the generator translates the French table. */
@@ -110,7 +123,7 @@ data class CiqualEntry(
         if ((label == null) != (servingThousandths == null)) return null
 
         return Food(
-            id = id,
+            id = this.id?.let(::FoodId) ?: id,
             name = trimmedName,
             source = FoodSource.CIQUAL,
             referenceUnit = ReferenceUnit.fromId(unit),
