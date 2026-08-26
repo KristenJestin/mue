@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.kristenjestin.mue.data.local.database.HealthProfileDao
 import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
+import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
@@ -38,6 +39,12 @@ import java.time.format.DateTimeParseException
 class DataStoreUserProfileRepository(
     private val dataStore: DataStore<Preferences>,
     private val healthProfileDao: HealthProfileDao,
+    /**
+     * Defaulted, exactly as on `RoomMeasurementRepository`, so every existing construction site
+     * keeps compiling *and keeps journalling*. An opt-in journal would leave the shipped path
+     * untested by the very tests that exercise this class.
+     */
+    private val outbox: SyncOutbox = SyncOutbox(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : UserProfileRepository {
 
@@ -63,6 +70,14 @@ class DataStoreUserProfileRepository(
      * synchronised fields are the ones in Room. A display name written without its height is a
      * cosmetic loss on a crash; a height written without its cursor would be a lie to the
      * server.
+     *
+     * The Room half now goes through `upsertWithMutation`, so the health profile is journalled
+     * in the transaction that writes it (FR-SYNC-001). Until it was, this method wrote the row
+     * and nothing else: PRD 13.4 has called the profile a synchronised aggregate all along and
+     * `SyncAggregateStateEntity.TYPE_HEALTH_PROFILE` already existed, but a height the user
+     * typed left no trace that it had to be sent, so the guarantee held for measurements only.
+     *
+     * The display name is not journalled and must not be: sync PRD 10.1 keeps it on the phone.
      */
     override suspend fun save(profile: UserProfile) {
         withContext(ioDispatcher) {
@@ -72,11 +87,15 @@ class DataStoreUserProfileRepository(
                     MueValidation.normalizeDisplayName(profile.displayName),
                 )
             }
-            healthProfileDao.upsert(
+            healthProfileDao.upsertWithMutation(
                 HealthProfileEntity(
                     heightCm = profile.heightCm,
                     birthDate = profile.birthDate?.toString(),
-                )
+                ),
+                outbox.healthProfileUpsert(
+                    heightCm = profile.heightCm,
+                    birthDate = profile.birthDate,
+                ),
             )
         }
     }

@@ -19,7 +19,8 @@ import { createServerEntry } from "./server";
  * immediately. Wiring there would turn the whole offline platform suite into a suite
  * that needs a live PostgreSQL to import a module.
  *
- * Nothing imports this file except `serve.ts`, which is executed only by
+ * Nothing imports this file except `serve.ts`, and nothing imports `serve.ts` except
+ * `main.ts` and TanStack Start itself -- so this module is evaluated only under
  * `bun run start` and `bun run dev`. That is what keeps `bun test` offline.
  */
 export interface PlatformRuntime {
