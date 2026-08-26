@@ -22,6 +22,9 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
+import fr.kristenjestin.mue.ui.food.add.FoodAddRoute
+import fr.kristenjestin.mue.ui.food.add.FoodPickerRoute
+import fr.kristenjestin.mue.ui.food.add.foodAddViewModel
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodsRoute
@@ -42,9 +45,9 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * showing, as the Activity tab's own stack does. The direction of each is resolved once, above
  * the animation, because `transitionSpec` runs outside composition.
  *
- * `Day` is the first route with a screen behind it; the rest still draw [FoodPlaceholder]. They
- * land one directory at a time, and the routes, the tags and the icons they need are already here,
- * so none of them has to reopen a file another is editing.
+ * `Day`, `Add food` and the food picker have screens behind them; the rest still draw
+ * [FoodPlaceholder]. They land one directory at a time, and the routes, the tags and the icons
+ * they need are already here, so none of them has to reopen a file another is editing.
  */
 @Composable
 fun FoodNavHost(modifier: Modifier = Modifier) {
@@ -141,10 +144,10 @@ private fun indexOf(view: FoodRoute.View?): Int = FoodRoute.VIEWS.indexOf(view)
 /**
  * Where each screen's callbacks land on the stack.
  *
- * The `when` is exhaustive today over placeholders, which is the point: each of the screens that
- * follow replaces exactly one branch of it, and touches nothing else that is shared. `Day` is the
- * first of them, and the only thing it needed from this file was the stack the three routes it
- * opens are pushed onto.
+ * The `when` is exhaustive over the eleven routes, which is the point: each of the screens that
+ * follow replaces exactly one branch of it, and touches nothing else that is shared. What the add
+ * flow needed from this file is a push, a pop, a select, and the one call that hands the picker's
+ * choice to the sheet that opened it — plus the prefill the catalogue had already put here.
  */
 @Composable
 private fun FoodDestination(
@@ -186,10 +189,53 @@ private fun FoodDestination(
             modifier = modifier,
         )
 
-        is FoodRoute.AddFood -> FoodPlaceholder(modifier)
+        /*
+         * PRD_FOOD 7's `Add food`, in both its readings (FR-FOOD-002 to 008).
+         *
+         * The three callbacks are the three things the sheet cannot do itself. `Use a recipe`
+         * **selects** the recipes view rather than pushing a sheet: PRD_FOOD 7 makes `Recipes`
+         * one of the four siblings, and FR-FOOD-004 logs a recipe from its own card — so this is
+         * a handover, and `select` takes the sheet with it rather than leaving it underneath.
+         */
+        is FoodRoute.AddFood -> FoodAddRoute(
+            date = route.date,
+            slot = route.slot,
+            entryId = route.entryId,
+            onClose = { stack.pop() },
+            onSearchFood = { stack.push(FoodRoute.FoodPicker) },
+            onUseRecipe = { stack.select(FoodRoute.Recipes) },
+            modifier = modifier,
+        )
+
         is FoodRoute.RecipeDetail -> FoodPlaceholder(modifier)
         is FoodRoute.RecipeEditor -> FoodPlaceholder(modifier)
-        FoodRoute.FoodPicker -> FoodPlaceholder(modifier)
+
+        /*
+         * PRD_FOOD 11's shared selector (PRD_FOOD 9.4).
+         *
+         * The route carries no parameter and the stack has no result channel, so what the picker
+         * chose is written straight into the add flow's own ViewModel — the activity's store
+         * hands both screens the same instance, exactly as `Log activity` and the strength
+         * editor share one draft. Nothing is returned through the stack.
+         *
+         * The creation it offers carries the term that found nothing, through the same holder
+         * `Foods` fills: one shortcoming of the frozen route, answered once for both screens.
+         */
+        FoodRoute.FoodPicker -> {
+            val add = foodAddViewModel()
+            FoodPickerRoute(
+                onPicked = { foodId ->
+                    add.onFoodChosen(foodId)
+                    stack.pop()
+                },
+                onCreateFood = { prefill ->
+                    onEditorPrefillChange(prefill)
+                    stack.push(FoodRoute.FoodEditor())
+                },
+                onBack = { stack.pop() },
+                modifier = modifier,
+            )
+        }
 
         /* FR-CATALOG-003: creating a personal food, correcting one, duplicating a reference. */
         is FoodRoute.FoodEditor -> FoodEditorRoute(
