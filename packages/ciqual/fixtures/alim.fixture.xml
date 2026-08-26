@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<TABLE>
+   <ALIM>
+      <alim_code> 1000 </alim_code>
+      <alim_nom_fr> Pastis </alim_nom_fr>
+      <alim_nom_eng> Pastis (anise-flavoured spirit) </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 06 </alim_grp_code>
+      <alim_ssgrp_code> 0603 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 060303 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 4008 </alim_code>
+      <alim_nom_fr> Pomme de terre, sans peau, crue </alim_nom_fr>
+      <alim_nom_eng> Potato, peeled, raw </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 02 </alim_grp_code>
+      <alim_ssgrp_code> 0202 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 000000 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 4015 </alim_code>
+      <alim_nom_fr> Pomme de terre poêlée, avec matière grasse </alim_nom_fr>
+      <alim_nom_eng> Potato, sautéed/pan-fried with fat </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 02 </alim_grp_code>
+      <alim_ssgrp_code> 0202 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 000000 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 9100 </alim_code>
+      <alim_nom_fr> Riz blanc, cru </alim_nom_fr>
+      <alim_nom_eng> Rice, white, raw </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 03 </alim_grp_code>
+      <alim_ssgrp_code> 0301 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 030102 </alim_ssssgrp_code>
+      <facteur_Jones> 5.95 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 9104 </alim_code>
+      <alim_nom_fr> Riz blanc, cuit, sans sel ajouté </alim_nom_fr>
+      <alim_nom_eng> Rice, white, cooked, no added salt </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 03 </alim_grp_code>
+      <alim_ssgrp_code> 0301 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 030101 </alim_ssssgrp_code>
+      <facteur_Jones> 5.95 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 9810 </alim_code>
+      <alim_nom_fr> Pâtes sèches, standard, crues </alim_nom_fr>
+      <alim_nom_eng> Pasta, dry, regular, raw </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 03 </alim_grp_code>
+      <alim_ssgrp_code> 0301 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 030102 </alim_ssssgrp_code>
+      <facteur_Jones> 5.7 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 9811 </alim_code>
+      <alim_nom_fr> Pâtes sèches, standard, cuites, sans sel ajouté </alim_nom_fr>
+      <alim_nom_eng> Pasta, dry, regular, cooked, no added salt </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 03 </alim_grp_code>
+      <alim_ssgrp_code> 0301 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 030101 </alim_ssssgrp_code>
+      <facteur_Jones> 5.7 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 12726 </alim_code>
+      <alim_nom_fr> Cheddar </alim_nom_fr>
+      <alim_nom_eng> Cheddar cheese, from cow&apos;s milk </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 05 </alim_grp_code>
+      <alim_ssgrp_code> 0503 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 050303 </alim_ssssgrp_code>
+      <facteur_Jones> 6.38 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 13039 </alim_code>
+      <alim_nom_fr> Pomme, chair et peau, crue </alim_nom_fr>
+      <alim_nom_eng> Apple, flesh and skin, raw </alim_nom_eng>
+      <alim_nom_sci> Malus domestica Borkhausen </alim_nom_sci>
+      <alim_grp_code> 02 </alim_grp_code>
+      <alim_ssgrp_code> 0204 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 020401 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 19593 </alim_code>
+      <alim_nom_fr> Yaourt ou lait fermenté, nature </alim_nom_fr>
+      <alim_nom_eng> Yogurt or fermented milk, plain </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 05 </alim_grp_code>
+      <alim_ssgrp_code> 0502 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 050201 </alim_ssssgrp_code>
+      <facteur_Jones> 6.38 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 20535 </alim_code>
+      <alim_nom_fr> Lentille corail, sèche </alim_nom_fr>
+      <alim_nom_eng> Lentil, pink or red, dried </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 02 </alim_grp_code>
+      <alim_ssgrp_code> 0203 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 020303 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 20589 </alim_code>
+      <alim_nom_fr> Lentille corail, bouillie/cuite à l&apos;eau </alim_nom_fr>
+      <alim_nom_eng> Lentil, pink or red, boiled/cooked in water </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 02 </alim_grp_code>
+      <alim_ssgrp_code> 0203 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 020301 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 22000 </alim_code>
+      <alim_nom_fr> Oeuf cru </alim_nom_fr>
+      <alim_nom_eng> Egg, raw </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 04 </alim_grp_code>
+      <alim_ssgrp_code> 0410 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 041002 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 36017 </alim_code>
+      <alim_nom_fr> Poulet, filet sans peau cru </alim_nom_fr>
+      <alim_nom_eng> Chicken, breast, without skin, raw </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 04 </alim_grp_code>
+      <alim_ssgrp_code> 0402 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 040203 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+   <ALIM>
+      <alim_code> 36018 </alim_code>
+      <alim_nom_fr> Poulet, filet sans peau grillé/poêlé </alim_nom_fr>
+      <alim_nom_eng> Chicken, breast, without skin, grilled/pan-fried </alim_nom_eng>
+      <alim_nom_sci missing=" " />
+      <alim_grp_code> 04 </alim_grp_code>
+      <alim_ssgrp_code> 0401 </alim_ssgrp_code>
+      <alim_ssssgrp_code> 040103 </alim_ssssgrp_code>
+      <facteur_Jones> 6.25 </facteur_Jones>
+   </ALIM>
+</TABLE>
