@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -32,6 +34,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
@@ -175,6 +178,9 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
  * string stays the whole name whatever the glyphs do — while reading wrong on the phone. A long
  * name therefore makes a taller card, which is the honest outcome and the one that survives a
  * doubled font scale.
+ *
+ * Surviving it is [EntryCardBody]'s job, not the title's: the figures on the right are what
+ * decide how much width the name is left with, so that is where the doubled scale is handled.
  */
 @Composable
 internal fun FoodDayEntryCard(
@@ -208,21 +214,126 @@ internal fun FoodDayEntryCard(
                 MueIcon(iconName = state.iconName, tint = colors.onAccentSoft, size = 18.dp)
             }
 
-            Column(
-                modifier = Modifier.weight(1f).padding(horizontal = spacing.md),
-                verticalArrangement = Arrangement.spacedBy(spacing.xxs),
-            ) {
-                MueText(state.title, type.bodyStrong)
-                FactRow(facts = listOfNotNull(state.timeLabel, state.amountLabel))
-            }
+            EntryCardBody(
+                modifier = Modifier.weight(1f).padding(start = spacing.md),
+                gap = spacing.md,
+                name = {
+                    Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+                        MueText(state.title, type.bodyStrong)
+                        FactRow(facts = listOfNotNull(state.timeLabel, state.amountLabel))
+                    }
+                },
+                figures = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        MueText(state.energyLabel, type.bodyStrong)
+                        MueText(state.proteinLabel, type.micro, color = colors.textTertiary)
+                    }
+                },
+            )
+        }
+    }
+}
 
-            Column(horizontalAlignment = Alignment.End) {
-                MueText(state.energyLabel, type.bodyStrong)
-                MueText(state.proteinLabel, type.micro, color = colors.textTertiary)
+/**
+ * The two halves of a journal line — the name with its facts, and the energy figures — side by
+ * side while both can be read, stacked once they cannot.
+ *
+ * A plain `Row` is what broke at a doubled font scale. The figures carry no weight, so the row
+ * measures them **first and at whatever width they ask for**: `≈ 29.1 g protein` at scale 2.0
+ * wants some 430 px of a 1080 px screen, and the `weight(1f)` name is handed the ~215 px that
+ * are left. At that width `Golden chicken grain bowl…` breaks *mid-word* over seventeen lines,
+ * and [FactRow]'s quantity is squeezed to one glyph per line before ellipsising — `1 × serving`
+ * drawn as a vertical column of letters. Every assertion still passed: the semantics string is
+ * the whole name however the glyphs fall.
+ *
+ * Three fixes were weighed. A `dp` cap on the figures does not grow with the text, so it is
+ * either too tight at scale 1.0 or still too loose at 2.0. A weight on the figures would divide
+ * the row by a fixed ratio at *every* scale, including the ordinary one where the row is already
+ * right — the name would lose width it does not have to lose, and the figures would gain width
+ * they cannot use. Both trade one scale against the other.
+ *
+ * So the row is kept, and the decision is measured instead. `minIntrinsicWidth` of a paragraph
+ * is exactly the width of its longest word — the narrowest the name can be laid out in without
+ * breaking one — and `maxIntrinsicWidth` of the figures is the width they want. While the two
+ * fit beside each other the layout is the one that shipped, to the pixel. When they no longer
+ * do, the figures drop onto their own line under the facts and the name gets the whole width
+ * rather than a ribbon. Nothing is capped, nothing is shrunk, and nothing about the ordinary
+ * scale changes: at scale 1.0 the widest of the four preview lines still clears the threshold
+ * by a fifth of the row.
+ *
+ * The figures stay end-aligned when they drop, so the eye still finds the energy on the right
+ * of the card at either scale.
+ */
+@Composable
+private fun EntryCardBody(
+    name: @Composable () -> Unit,
+    figures: @Composable () -> Unit,
+    gap: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Layout(
+        contents = listOf(name, figures),
+        modifier = modifier,
+    ) { (nameMeasurables, figureMeasurables), constraints ->
+        val nameMeasurable = nameMeasurables.first()
+        val figuresMeasurable = figureMeasurables.first()
+        val gapPx = gap.roundToPx()
+
+        /*
+         * A card is always measured inside a bounded row; the fallback is only so that an
+         * intrinsic pass, which hands out an infinite width, cannot make this crash.
+         */
+        val width = if (constraints.hasBoundedWidth) {
+            constraints.maxWidth
+        } else {
+            nameMeasurable.maxIntrinsicWidth(constraints.maxHeight) + gapPx +
+                figuresMeasurable.maxIntrinsicWidth(constraints.maxHeight)
+        }
+
+        val figuresWidth = figuresMeasurable
+            .maxIntrinsicWidth(constraints.maxHeight)
+            .coerceIn(0, width)
+        val besideName = width - figuresWidth - gapPx
+        val narrowestName = nameMeasurable.minIntrinsicWidth(constraints.maxHeight)
+
+        // Each measurable may be measured once, so the choice is made before either is.
+        if (besideName >= narrowestName) {
+            val namePlaceable = nameMeasurable.measure(constraints.atMostWide(besideName))
+            val figuresPlaceable = figuresMeasurable.measure(constraints.atMostWide(figuresWidth))
+            val height = maxOf(namePlaceable.height, figuresPlaceable.height)
+            layout(width, height) {
+                namePlaceable.placeRelative(0, (height - namePlaceable.height) / 2)
+                figuresPlaceable.placeRelative(
+                    width - figuresPlaceable.width,
+                    (height - figuresPlaceable.height) / 2,
+                )
+            }
+        } else {
+            val namePlaceable = nameMeasurable.measure(constraints.atMostWide(width))
+            val figuresPlaceable = figuresMeasurable.measure(constraints.atMostWide(width))
+            val height = namePlaceable.height + gapPx + figuresPlaceable.height
+            layout(width, height) {
+                namePlaceable.placeRelative(0, 0)
+                figuresPlaceable.placeRelative(
+                    width - figuresPlaceable.width,
+                    namePlaceable.height + gapPx,
+                )
             }
         }
     }
 }
+
+/**
+ * The same constraints, free to be anything up to [maxWidth] wide.
+ *
+ * `copy(maxWidth = …)` alone would keep a tight `minWidth` and could leave the two crossed over.
+ */
+private fun Constraints.atMostWide(maxWidth: Int): Constraints = Constraints(
+    minWidth = 0,
+    maxWidth = maxWidth.coerceAtLeast(0),
+    minHeight = 0,
+    maxHeight = maxHeight,
+)
 
 /**
  * The unconfirmed proposal at the head of a moment (PRD_FOOD 12 and 19).
@@ -388,22 +499,36 @@ private fun AddToSlotRow(
     }
 }
 
-/** The time and the quantity of a line, separated by the prototype's small bullet. */
+/**
+ * The time and the quantity of a line, separated by the prototype's small bullet.
+ *
+ * A `Row` measures each fact in turn out of what is left, so the last one takes the shortfall
+ * alone: at a doubled font scale `225 g` became `2 2 …` down the side of the card while the time
+ * beside it stayed whole. A fact is either drawn or it is not — half of one is a misreading, and
+ * `2 2 …` is not a weight.
+ *
+ * A flow row makes the shortfall a line break instead. Each fact carries its own bullet, so a
+ * fact that will not fit moves to the next line *with* the mark that separates it, and never
+ * leaves a bullet stranded at the end of a line. At one line — every line at the ordinary scale
+ * — this draws exactly what the `Row` drew.
+ */
 @Composable
 private fun FactRow(facts: List<String>, modifier: Modifier = Modifier) {
     val colors = MueTheme.colors
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(modifier = modifier) {
         facts.forEachIndexed { index, fact ->
-            if (index > 0) {
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = MueTheme.spacing.sm)
-                        .size(FactBulletSize)
-                        .clip(MueTheme.shapes.pill)
-                        .background(colors.textQuiet),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (index > 0) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = MueTheme.spacing.sm)
+                            .size(FactBulletSize)
+                            .clip(MueTheme.shapes.pill)
+                            .background(colors.textQuiet),
+                    )
+                }
+                MueText(fact, MueTheme.typography.micro, color = colors.textTertiary)
             }
-            MueText(fact, MueTheme.typography.micro, color = colors.textTertiary)
         }
     }
 }

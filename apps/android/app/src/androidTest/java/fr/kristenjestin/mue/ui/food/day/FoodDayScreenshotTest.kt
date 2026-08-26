@@ -30,9 +30,16 @@ import java.io.File
  * only way to look later is to keep the picture.
  *
  * The two font scales are the point of the second half. PRD_FOOD 18 asks for the module to hold
- * at the system's own text size, and the app's bottom bar is already known to truncate `Progress`
- * and `Profile` at scale 2.0 — a defect outside this screen's scope, and a warning that a row
- * assumed to be comfortably wide is not.
+ * at the system's own text size, and the app's bottom bar was truncating `Progress` and `Profile`
+ * to the same `Pro…` at scale 2.0 — a warning that a row assumed to be comfortably wide is not.
+ * At that scale this screen's own lines were worse: the energy figures took the row, the name was
+ * left a ribbon and broke mid-word, and `1 × serving` came out one letter per line.
+ *
+ * Each day is pictured as far as it goes and no further. The populated day needs two, and the
+ * second scrolls to the **dinner proposal** rather than to the snack — the snack is already on
+ * the first picture at the ordinary scale, so scrolling to it moved nothing and wrote the same
+ * bytes twice while PRD_FOOD 12's proposal card went unphotographed. A day holding one line, or
+ * none, fits on one screen and gets one picture.
  *
  * The files land beside the app's own data so `adb pull` can fetch them:
  * `/sdcard/Android/data/fr.kristenjestin.mue/files/screenshots/`.
@@ -48,7 +55,7 @@ class FoodDayScreenshotTest {
 
         capture("food-day-populated-top")
 
-        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
+        scrollTo(FoodTestTags.plan(MealSlot.DINNER))
         capture("food-day-populated-bottom")
     }
 
@@ -59,7 +66,7 @@ class FoodDayScreenshotTest {
 
         capture("food-day-scale2-top")
 
-        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
+        scrollTo(FoodTestTags.plan(MealSlot.DINNER))
         capture("food-day-scale2-bottom")
     }
 
@@ -77,9 +84,6 @@ class FoodDayScreenshotTest {
         setDay(state = emptyDayState())
 
         capture("food-day-empty")
-
-        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
-        capture("food-day-empty-bottom")
     }
 
     /** The other half of PRD_FOOD 13.2: one line, an energy known and a protein that is not. */
@@ -88,9 +92,6 @@ class FoodDayScreenshotTest {
         setDay(state = unknownProteinDayState())
 
         capture("food-day-unknown-protein")
-
-        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
-        capture("food-day-unknown-protein-bottom")
     }
 
     // region harness

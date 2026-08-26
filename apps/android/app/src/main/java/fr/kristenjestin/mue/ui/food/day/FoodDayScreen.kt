@@ -271,6 +271,47 @@ private fun FoodDayScreenPreview() {
     }
 }
 
+/**
+ * The same day on the narrowest phone the app supports and at the largest font scale.
+ *
+ * This is where the journal line used to come apart: the energy figures on the right took the
+ * row for themselves, the name was left a ribbon two characters wide, `Golden chicken grain
+ * bowl…` broke *mid-word* over seventeen lines and `1 × serving` came out one letter per line.
+ * Nothing in the suite could see it — `onNodeWithText` matches the semantics string, which is the
+ * whole name however the glyphs fall — so the check is this preview, the screenshot beside it and
+ * `FoodDayEntryCardLayoutTest`, which reads the text layout rather than the string.
+ *
+ * What to look for: every name wrapped at a space, every time and quantity whole, and the figures
+ * on their own line under the facts rather than crushed against them.
+ */
+@Preview(
+    name = "Day — 360 dp · largest font",
+    showBackground = true,
+    backgroundColor = 0xFF101012,
+    widthDp = 360,
+    heightDp = 900,
+    fontScale = 2.0f,
+)
+@Composable
+private fun FoodDayNarrowPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodDayScreen(
+            state = previewDayState(),
+            onPreviousDay = {},
+            onNextDay = {},
+            onOpenDatePicker = {},
+            onDismissDatePicker = {},
+            onDayPicked = {},
+            onAddToSlot = {},
+            onEditEntry = {},
+            onConfirmPlan = {},
+            onSwapPlan = {},
+            onDismissPlan = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
 @Preview(name = "Day — nothing logged", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
 @Composable
 private fun FoodDayEmptyPreview() {
