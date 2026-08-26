@@ -1,0 +1,10 @@
+# `oxfmt` reads this file from the package root; `vp fmt --help` documents it as one of
+# the two default ignore paths.
+#
+# `src/routeTree.gen.ts` is written by the TanStack Router generator on every build and
+# says so in its own header: "you should also exclude this file from your linter and/or
+# formatter to prevent it from being checked or modified." It is not a suggestion here.
+# The generator emits single quotes and no semicolons; oxfmt rewrites it to double
+# quotes and semicolons; the next `bun run build` puts it straight back. Formatting it
+# would make `format:check` fail after every build.
+src/routeTree.gen.ts

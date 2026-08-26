@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readConsentRequest } from "./oauth-consent";
+import { readConsentRequest } from "./consent";
 
 describe("the consent request", () => {
   const search =
