@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -26,6 +25,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
@@ -66,8 +66,11 @@ internal fun ScaleScanScreen(
         if (gate == ScanGate.READY) viewModel.onScanRequested()
     }
 
-    DisposableEffect(viewModel) {
-        onDispose { viewModel.onScreenHidden() }
+    // PRD_SCALE 3.7 : « le scan Bluetooth ne tourne qu'au premier plan ». Verrouiller le téléphone
+    // ne retire pas ce composable de la composition ; seul un événement de cycle de vie le dit.
+    // Les trente secondes de FR-SCALE-011 bornaient le gaspillage, elles ne le supprimaient pas.
+    LifecycleStartEffect(viewModel) {
+        onStopOrDispose { viewModel.onScreenHidden() }
     }
 
     // FR-SCALE-012 : une association réussie ramène à la liste des balances.

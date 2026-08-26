@@ -5,6 +5,7 @@ import fr.kristenjestin.mue.domain.model.ScaleSessionState
 import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
 import org.junit.Test
 import java.time.Instant
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -19,6 +20,11 @@ import kotlin.test.assertTrue
  * Les deux listes sont exhaustives sur [ScaleSessionState] à dessein : un état ajouté au contrat
  * de session sans être classé ici est un état dont personne n'aura décidé s'il garde le téléphone
  * allumé, et la panne serait une batterie vide plutôt qu'un test rouge.
+ *
+ * **Cette exhaustivité est tenue par le compilateur, pas par ce fichier.** `keepsScreenAwake` est un
+ * `when` sans `else` : un douzième état ne compile pas tant qu'il n'a pas été rangé d'un côté ou de
+ * l'autre. Ce que les deux listes ci-dessous ajoutent, c'est le *choix* fait pour chacun des onze
+ * états d'aujourd'hui, et le compte ci-dessous refuse qu'un état disparaisse d'ici sans bruit.
  */
 class ScaleScreenAwakeTest {
 
@@ -51,5 +57,16 @@ class ScaleScreenAwakeTest {
 
         awake.forEach { assertTrue(it.keepsScreenAwake, "$it doit garder l'écran éveillé") }
         asleep.forEach { assertFalse(it.keepsScreenAwake, "$it ne doit pas garder l'écran éveillé") }
+
+        // Les onze états du contrat de session (PRD_SCALE 21.2), chacun cité une fois exactement.
+        // Le compilateur oblige `keepsScreenAwake` à tous les classer ; ce compte oblige ce test à
+        // tous les *citer*, faute de quoi un état retiré de ces listes cesserait d'être éprouvé
+        // sans que rien ne le signale. Le nombre est écrit en clair plutôt que lu par réflexion :
+        // le dépôt ne dépend pas de `kotlin-reflect`, et un contrat gelé se recompte à la main.
+        assertEquals(
+            11,
+            (awake + asleep).map { it::class }.distinct().size,
+            "chaque état de ScaleSessionState doit être rangé dans exactement une des deux listes",
+        )
     }
 }

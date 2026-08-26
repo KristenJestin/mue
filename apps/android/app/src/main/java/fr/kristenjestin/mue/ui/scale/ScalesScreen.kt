@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,6 +21,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
@@ -76,10 +76,21 @@ internal fun ScalesScreen(
     val permissions = rememberScalePermissions()
     val context = LocalContext.current
 
+    /*
+     * PRD_SCALE 3.7 : « le scan Bluetooth ne tourne qu'au premier plan ».
+     *
+     * `LifecycleStartEffect` et non `DisposableEffect`, pour la raison qu'`EntryScreen` documente
+     * déjà : les deux façons de quitter cet écran sont des événements différents et toutes deux
+     * doivent couper la radio. Revenir en arrière retire ce composable, mais verrouiller le
+     * téléphone le laisse composé — et le repérage de présence de cet écran-ci n'a **aucune** borne
+     * de temps, contrairement aux trente secondes de l'appairage et aux deux minutes de la pesée.
+     * Un `DisposableEffect` laissait donc un scan `SCAN_MODE_LOW_LATENCY` tourner dans une poche,
+     * indéfiniment, jusqu'au retour sur l'application.
+     */
     val gate = permissions.toScanGate()
-    DisposableEffect(viewModel, gate) {
+    LifecycleStartEffect(viewModel, gate) {
         if (gate == ScanGate.READY) viewModel.onScreenVisible()
-        onDispose { if (gate == ScanGate.READY) viewModel.onScreenHidden() }
+        onStopOrDispose { if (gate == ScanGate.READY) viewModel.onScreenHidden() }
     }
 
     ScalesContent(
@@ -299,9 +310,28 @@ internal fun PairedScale.statusLine(locale: Locale, presenceKnown: Boolean = tru
     } else {
         "${ScaleMessages.LAST_SEEN_LABEL} ${formatLastSeen(lastSeenAt, locale)}"
     }
-    if (!presenceKnown) return lastSeen
-    val presence = if (inRange) ScaleMessages.IN_RANGE else ScaleMessages.NOT_IN_RANGE
+    val presence = presenceOrNull(presenceKnown) ?: return lastSeen
     return lastSeen + STATUS_SEPARATOR + presence
+}
+
+/**
+ * `In range`, `Not in range`, ou **rien** quand rien ne cherche (PRD_SCALE 18.5).
+ *
+ * Le seul endroit du module où l'on décide si la présence peut être affirmée, et c'est délibéré :
+ * [statusLine] l'emploie pour la liste, `ScaleDetailContent` pour la ligne d'état de la fiche. Les
+ * deux écrans lisent le même `inRange`, qui vaut `false` aussi bien pour « la balance est éteinte »
+ * que pour « personne n'a regardé » ; sans ce point de passage unique, l'un des deux finirait par
+ * traduire le second cas par `Not in range`, c'est-à-dire par accuser la balance d'une radio
+ * éteinte et par orienter vers le mauvais geste.
+ *
+ * @param presenceKnown Un scan tourne réellement — `gate == ScanGate.READY`, la même condition qui
+ *   l'a démarré. À `false`, il n'y a rien à dire, et une ligne absente est plus honnête qu'une
+ *   ligne fausse.
+ */
+internal fun PairedScale.presenceOrNull(presenceKnown: Boolean): String? = when {
+    !presenceKnown -> null
+    inRange -> ScaleMessages.IN_RANGE
+    else -> ScaleMessages.NOT_IN_RANGE
 }
 
 private val PreviewScales: List<PairedScale> = listOf(

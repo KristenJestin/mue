@@ -120,16 +120,35 @@ class EntryScaleTest {
         assertEquals(1, scale.starts)
     }
 
+    /**
+     * PRD_SCALE 18.1 : oublier la dernière balance rend l'écran du PRD socle, immédiatement.
+     *
+     * Le test part d'un écran qui a **déjà** quelque chose à montrer — l'indicateur discret d'une
+     * recherche en cours — pour que le retour à [EntryScaleUiState.ABSENT] soit un vrai
+     * changement. La version précédente réémettait `Absent` sur un état déjà `Absent` : un
+     * `StateFlow` élimine cette émission, le collecteur ne tournait pas, et le test comparait
+     * l'état initial à lui-même. Il serait resté vert même si la branche `Absent` posait un badge.
+     *
+     * L'assertion sur `paired` est celle qui compte : elle échoue si cette branche passait par
+     * `updateScale`, qui marque l'appairage sur tout ce qu'elle touche.
+     */
     @Test
-    fun `sans balance aucune trame ne peut rien changer`() = runTest {
-        val scale = FakeScaleSessionSource(ScaleSessionState.Absent)
+    fun `oublier la dernière balance ramène l'écran à celui du PRD socle`() = runTest {
+        val scale = FakeScaleSessionSource(ScaleSessionState.Idle)
         val model = viewModel(scale)
         val before = model.uiState.value
 
+        scale.emit(ScaleSessionState.Searching)
+        assertTrue(model.uiState.value.scale.paired, "l'écran doit d'abord avoir quelque chose")
+        assertEquals(EntryScaleIndicator.SEARCHING, model.uiState.value.scale.indicator)
+
         scale.emit(ScaleSessionState.Absent)
 
-        assertEquals(before.weight, model.uiState.value.weight)
         assertEquals(EntryScaleUiState.ABSENT, model.uiState.value.scale)
+        assertFalse(model.uiState.value.scale.paired)
+        assertFalse(model.uiState.value.scale.keepScreenOn)
+        // Rien de tout cela n'a touché à la valeur que l'utilisateur compose (BR-SCALE-011).
+        assertEquals(before.weight, model.uiState.value.weight)
     }
 
     // --- FR-SCALE-022, le poids reçu --------------------------------------------------
@@ -624,10 +643,35 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
 
         assertEquals(EntryScaleAnnouncement.UNAVAILABLE, model.uiState.value.scale.announcement)
+
+        /*
+         * « Une fois par affichage » (PRD_SCALE 20) — la moitié du nom que ce test ne prouvait pas,
+         * puisqu'il n'émettait l'indisponibilité qu'une seule fois.
+         *
+         * La reprise n'est pas rare : la radio rallumée puis recoupée, ou une session qui repasse
+         * par ce constat à chaque tentative, feraient répéter la même phrase dans le lecteur
+         * d'écran. Ce qui rend la règle observable, c'est qu'une autre annonce ait pris la parole
+         * entre-temps : si l'indisponibilité se réannonçait, elle la remplacerait.
+         */
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35)))
         assertEquals(
-            "Your scale is unavailable. You can still enter your weight.",
-            ScaleMessages.UNAVAILABLE_ANNOUNCEMENT,
+            EntryScaleAnnouncement.MEASUREMENT_RECEIVED,
+            model.uiState.value.scale.announcement,
         )
+
+        scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
+        assertEquals(
+            EntryScaleAnnouncement.MEASUREMENT_RECEIVED,
+            model.uiState.value.scale.announcement,
+            "l'indisponibilité ne reprend pas la parole dans le même affichage",
+        )
+
+        // Un nouvel affichage lui rend son droit de parole. `Searching` entre les deux parce qu'un
+        // `StateFlow` élimine une valeur réémise à l'identique.
+        model.onEntryVisible()
+        scale.emit(ScaleSessionState.Searching)
+        scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
+        assertEquals(EntryScaleAnnouncement.UNAVAILABLE, model.uiState.value.scale.announcement)
     }
 
     @Test

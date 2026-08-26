@@ -349,6 +349,58 @@ class BleScaleSessionSourceTest {
         assertEquals(2, f.transport.connectRequests.size)
     }
 
+    /**
+     * FR-SCALE-020 : un scan que la plateforme refuse ne clôt pas la session en silence.
+     *
+     * Android limite une application à cinq démarrages de scan par trente secondes ; le refus n'est
+     * donc pas exceptionnel, et il arrive à quelqu'un qui n'a rien changé sur son téléphone. Il doit
+     * se traiter exactement comme une liaison tombée — reprise silencieuse sur le temps restant
+     * (PRD_SCALE 18.5) —, et si les deux minutes s'épuisent, se conclure sur le `Scale not found ·
+     * Try again` qui donne enfin un geste à l'utilisateur.
+     *
+     * Ce test échoue si le scan ressort du `try` de la boucle de reprise : la session retomberait
+     * sur `Idle`, sans compte à rebours, sans `NotFound` et sans aucun moyen de relancer.
+     */
+    @Test
+    fun `un scan refusé par la plateforme se reprend en silence puis conclut sur NotFound`() =
+        runTest {
+            val f = fixture(listOf(hbScale))
+            f.transport.scansToRefuse = 1
+
+            f.source.start()
+            runCurrent()
+
+            // La session est toujours vivante : elle cherche, elle n'est pas retombée au repos.
+            assertEquals(ScaleSessionState.Searching, f.state)
+
+            // La reprise redémarre un vrai scan après le backoff, et celui-ci aboutit.
+            advanceTimeBy(FIRST_BACKOFF_MS + 1)
+            runCurrent()
+            assertEquals(2, f.transport.scanStarts)
+            assertTrue(f.transport.isScanning)
+
+            f.transport.advertise(hbAdvertisement)
+            runCurrent()
+            assertEquals(ScaleSessionState.WaitingForStepOn, f.state)
+        }
+
+    /** Le même refus, jusqu'au bout : le compte à rebours a bien été armé (FR-SCALE-020). */
+    @Test
+    fun `un scan toujours refusé finit sur NotFound et non sur un silence`() = runTest {
+        val f = fixture(listOf(hbScale))
+        f.transport.scansToRefuse = Int.MAX_VALUE
+
+        f.source.start()
+        runCurrent()
+        assertEquals(ScaleSessionState.Searching, f.state)
+
+        advanceTimeBy(SEARCH_WINDOW_MS + 1)
+        runCurrent()
+
+        // `Idle` ici signifierait « la balance n'a rien à dire », sans aucun geste offert.
+        assertEquals(ScaleSessionState.NotFound, f.state)
+    }
+
     // endregion
 
     // region la fenêtre de deux minutes

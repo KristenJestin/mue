@@ -171,6 +171,16 @@ internal class FakeScaleTransport : ScaleTransport {
     /** Nombre de connexions qui échoueront avant la première réussite (FR-SCALE-021). */
     var connectionsToRefuse: Int = 0
 
+    /**
+     * Nombre de scans qui échoueront avant le premier qui démarre.
+     *
+     * Ce n'est pas un cas de laboratoire : Android limite une application à cinq démarrages de scan
+     * par tranche de trente secondes, et le sixième est refusé sans que rien n'ait changé sur le
+     * téléphone. Le module ouvre un scan à chaque venue sur `Entry`, sur `Scales` et sur le flux
+     * d'appairage, si bien que la limite se rencontre en usage normal.
+     */
+    var scansToRefuse: Int = 0
+
     /** Durée d'une connexion, en temps virtuel. Sert à éprouver la fenêtre de deux minutes. */
     var connectDelayMs: Long = 0L
 
@@ -203,6 +213,10 @@ internal class FakeScaleTransport : ScaleTransport {
 
     override fun scan(): Flow<ScaleAdvertisement> = callbackFlow {
         scanStarts += 1
+        if (scansToRefuse > 0) {
+            scansToRefuse -= 1
+            throw ScaleTransportException("scan refused by the fake transport")
+        }
         scanners += channel
         awaitClose {
             scanners -= channel

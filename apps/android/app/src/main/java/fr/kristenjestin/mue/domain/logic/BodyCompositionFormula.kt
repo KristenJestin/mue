@@ -158,39 +158,20 @@ object BodyCompositionFormula {
      */
     val VALIDATION_AGE_RANGE_YEARS: IntRange = 16..75
 
-    /**
-     * Comment la population de validation a été mesurée : debout, pied-pied, contre la DXA comme
-     * méthode de référence. C'est exactement la posture qu'impose la balance de référence, et
-     * c'est ce qui rend cette équation-là défendable ici alors qu'une équation main-pied, plus
-     * courante dans la littérature, ne le serait pas.
-     */
-    const val VALIDATION_METHOD: String =
-        "554 healthy adults aged 16 to 75, measured standing on a foot-to-foot impedance scale " +
-            "and validated against DXA."
-
     // ------------------------------------------------------------------ textes d'interface
 
-    /**
-     * Phrase courte qui accompagne les quatre cartes de `Progress` (FR-BODY-005), dans le même
-     * esprit que celle de l'IMC (`BmiCalculator.DISCLAIMER`).
+    /*
+     * Trois constantes de texte ont été retirées d'ici : `VALIDATION_METHOD`, `DISCLAIMER` et
+     * `UNAVAILABLE_FOR_PROFILE`.
      *
-     * En anglais : l'application est anglophone et ses textes sont des constantes Kotlin, jamais
-     * `res/values/strings.xml`.
+     * Les deux premières n'avaient aucun lecteur, ni en production ni en test. La troisième
+     * recopiait mot pour mot `ScaleMessages.ESTIMATES_UNAVAILABLE`, qui est la constante que
+     * `BodyCompositionSection` affiche réellement, et rien ne tenait les deux copies en phase :
+     * corriger la phrase à un endroit l'aurait laissée fausse à l'autre, sans qu'aucun test ne
+     * rougisse. Les textes d'interface du module vivent dans `ScaleMessages` (contrat §1), et ce
+     * fichier-ci garde ce que la formule doit documenter d'elle-même — la population de validation,
+     * l'erreur type, le facteur d'hydratation et le texte de prudence qui les commente.
      */
-    const val DISCLAIMER: String =
-        "Estimates from weight and impedance, not measurements."
-
-    /**
-     * Ce que FR-BODY-001 autorise à dire quand aucune composition n'est disponible.
-     *
-     * Sobre, et **sans montrer l'IMC ni l'âge** : les afficher là transformerait une limite du
-     * domaine de validité d'une équation en jugement porté sur la personne.
-     *
-     * Reproduit au caractère près la phrase de FR-BODY-001, ponctuation finale comprise —
-     * c'est-à-dire sans point : l'écran la pose comme une constatation, pas comme un verdict.
-     */
-    const val UNAVAILABLE_FOR_PROFILE: String =
-        "Body composition estimates are not available for this profile"
 
     /**
      * Le texte de prudence détaillé accessible depuis `Progress`, paragraphe par paragraphe

@@ -15,7 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
@@ -63,10 +63,15 @@ internal fun ScaleDetailScreen(
     val permissions = rememberScalePermissions()
     val scale = state.scaleOrNull(scaleId)
 
-    val canScan = permissions.canScan
-    DisposableEffect(viewModel, canScan) {
-        if (canScan) viewModel.onScreenVisible()
-        onDispose { if (canScan) viewModel.onScreenHidden() }
+    // Exactement la lecture de `ScalesScreen`, et pour la même raison : `gate == ScanGate.READY`
+    // décide à la fois si le repérage démarre et si la fiche a le droit d'affirmer une présence.
+    // Les lire séparément laisserait la fiche écrire `Not in range` sans que rien ne cherche.
+    // `LifecycleStartEffect`, comme la liste et pour la même raison : PRD_SCALE 3.7 interdit qu'un
+    // scan survive au passage en arrière-plan, et ce repérage-ci n'a aucune borne de temps.
+    val gate = permissions.toScanGate()
+    LifecycleStartEffect(viewModel, gate) {
+        if (gate == ScanGate.READY) viewModel.onScreenVisible()
+        onStopOrDispose { if (gate == ScanGate.READY) viewModel.onScreenHidden() }
     }
 
     LaunchedEffect(state.loading, scale == null) {
@@ -86,6 +91,7 @@ internal fun ScaleDetailScreen(
     ScaleDetailContent(
         scale = scale,
         nameInput = draft ?: scale?.displayName.orEmpty(),
+        presenceKnown = gate == ScanGate.READY,
         // FR-SCALE-013 : la seule ligne du bloc technique qui décrive Android plutôt que la
         // balance. Lue, jamais demandée — `rememberScalePermissions()` est passif.
         requiredPermissions = permissions.required,
@@ -111,6 +117,11 @@ internal fun ScaleDetailScreen(
  * la seule chose qui permette de distinguer deux appareils identiques ; elle ne quitte jamais le
  * téléphone et n'apparaît dans aucun export (PRD_SCALE 16.2).
  *
+ * @param presenceKnown Un scan de présence tourne, donc « à portée » veut dire quelque chose. À
+ *   `false` — radio éteinte, permission absente, localisation système coupée — la ligne d'état
+ *   disparaît au lieu d'affirmer une absence que personne n'a constatée (PRD_SCALE 18.5). C'est la
+ *   règle de la liste, tenue par la même fonction [presenceOrNull], et non une seconde façon de
+ *   faire. Le dernier contact, lui, reste vrai sans scan et garde sa ligne.
  * @param requiredPermissions Ce que cette version d'Android exige avant tout scan (PRD_SCALE 16.1).
  *   Quatrième ligne du bloc, et la seule qui décrive le téléphone plutôt que la balance — c'est
  *   aussi pour cela qu'elle vient en dernier. Elle ne dit pas si les permissions sont accordées :
@@ -121,6 +132,7 @@ internal fun ScaleDetailScreen(
 internal fun ScaleDetailContent(
     scale: PairedScale?,
     nameInput: String,
+    presenceKnown: Boolean,
     requiredPermissions: List<String>,
     forgetTarget: PairedScale?,
     onNameChange: (String) -> Unit,
@@ -195,15 +207,18 @@ internal fun ScaleDetailContent(
                     value = formatLastSeen(scale.lastSeenAt, locale),
                     topPadding = spacing.sm,
                 )
-                MueText(
-                    text = if (scale.inRange) ScaleMessages.IN_RANGE else ScaleMessages.NOT_IN_RANGE,
-                    style = MueTheme.typography.caption,
-                    color = MueTheme.colors.textTertiary,
-                    modifier = Modifier
-                        .padding(top = spacing.sm)
-                        .testTag(ScaleTestTags.DETAIL_STATUS)
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                )
+                val presence = scale.presenceOrNull(presenceKnown)
+                if (presence != null) {
+                    MueText(
+                        text = presence,
+                        style = MueTheme.typography.caption,
+                        color = MueTheme.colors.textTertiary,
+                        modifier = Modifier
+                            .padding(top = spacing.sm)
+                            .testTag(ScaleTestTags.DETAIL_STATUS)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
             }
 
             MueSurfaceCard(
@@ -339,6 +354,7 @@ private fun ScaleDetailPreview() {
         ScaleDetailContent(
             scale = PreviewScale,
             nameInput = PreviewScale.displayName,
+            presenceKnown = true,
             requiredPermissions = ScalePermissions.REQUIRED,
             forgetTarget = null,
             onNameChange = {},

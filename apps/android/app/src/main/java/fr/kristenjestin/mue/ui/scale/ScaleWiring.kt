@@ -57,7 +57,13 @@ internal class TransportScaleDiscovery(
 
     override fun start() {
         openCount++
-        if (collection != null) return
+        // `isActive` et non `!= null` : la collecte peut s'être **terminée d'elle-même**, sur un
+        // `ScaleTransportException` que le `catch` ci-dessous avale — Android refuse un sixième
+        // démarrage de scan en trente secondes, et le refus arrive par ce chemin. Le champ garde
+        // alors un `Job` mort, et tant que [openCount] ne retombe pas à zéro — deux écrans composés
+        // ensemble le temps d'une transition, exactement ce que ce compte existe pour couvrir — ce
+        // `return` empêchait tout scan ultérieur, définitivement et sans rien afficher.
+        if (collection?.isActive == true) return
         collection = scope.launch {
             try {
                 transport.scan().collect(received::emit)

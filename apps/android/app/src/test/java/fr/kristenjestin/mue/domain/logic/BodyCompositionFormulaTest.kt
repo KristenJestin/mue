@@ -259,13 +259,13 @@ class BodyCompositionFormulaTest {
 
     // ------------------------------------------------------------------ textes de l'écran Progress
 
-    @Test
-    fun `le texte d'indisponibilité est celui de FR-BODY-001, au caractère près`() {
-        assertEquals(
-            "Body composition estimates are not available for this profile",
-            BodyCompositionFormula.UNAVAILABLE_FOR_PROFILE,
-        )
-    }
+    /*
+     * Le texte d'indisponibilité de FR-BODY-001 n'est plus éprouvé ici : il n'existe qu'une fois,
+     * dans `ScaleMessages.ESTIMATES_UNAVAILABLE`, qui est la constante que l'écran affiche, et
+     * `ScaleMessagesTest` le tient au caractère près. La copie qui vivait dans
+     * `BodyCompositionFormula` — que ce test verrouillait, et que rien ne rendait — était le
+     * deuxième exemplaire d'une même phrase sans rien pour les tenir en phase.
+     */
 
     @Test
     fun `le texte de prudence détaillé nomme la provenance, l'incertitude et le facteur d'hydratation`() {

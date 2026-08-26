@@ -20,8 +20,9 @@ import kotlinx.coroutines.flow.Flow
  * recherche persistante, et [stop] est appelé dès qu'un écran cesse d'être visible.
  *
  * **Lire cette interface ne demande aucune permission.** [start] n'est appelé qu'une fois
- * `ScalePermissionsState.canScan` vérifié par l'écran ; un appel sans permission ne doit rien
- * émettre plutôt que lever, parce qu'une permission peut être révoquée pendant qu'un scan tourne.
+ * `toScanGate() == ScanGate.READY` vérifié par l'écran — la même lecture que celle qui décide de la
+ * phrase de PRD_SCALE 18.5, et la seule ; un appel sans permission ne doit rien émettre plutôt que
+ * lever, parce qu'une permission peut être révoquée pendant qu'un scan tourne.
  */
 internal interface ScaleDiscovery {
 

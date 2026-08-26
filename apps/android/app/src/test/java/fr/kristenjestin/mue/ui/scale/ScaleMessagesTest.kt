@@ -34,7 +34,6 @@ class ScaleMessagesTest {
         assertEquals("Connecting", ScaleMessages.CONNECTING)
         assertEquals("Step on the scale", ScaleMessages.STEP_ON_THE_SCALE)
         assertEquals("Measuring", ScaleMessages.MEASURING)
-        assertEquals("Save measurement", ScaleMessages.SAVE_MEASUREMENT)
         assertEquals(
             "This measurement is outside the range Mue records",
             ScaleMessages.MEASUREMENT_OUT_OF_RANGE,

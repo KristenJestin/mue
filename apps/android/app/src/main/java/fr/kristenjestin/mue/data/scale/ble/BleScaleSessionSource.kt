@@ -280,8 +280,17 @@ internal class BleScaleSessionSource(
                 val index = (attempt - 1).coerceAtMost(RECONNECT_BACKOFF_MS.lastIndex)
                 delay(RECONNECT_BACKOFF_MS[index])
             }
-            val candidate = findCandidate(devices)
             val finished = try {
+                // Le scan est **dans** le `try`, et pas seulement la liaison : `ScaleTransport.scan`
+                // échoue par `ScaleTransportException` dès que la plateforme refuse le scan, et le
+                // refus le plus courant n'est pas la permission mais la limitation d'Android à cinq
+                // démarrages par trente secondes. Laissé dehors, ce refus remontait jusqu'au `catch`
+                // d'`openSession`, qui referme la session sur `Idle` : plus de scan, plus de
+                // décompte, et surtout plus de `Scale not found · Try again` — l'utilisateur n'avait
+                // aucun geste pour relancer. Ici, il est traité comme une liaison tombée : reprise
+                // silencieuse sur le temps restant, puis `NotFound` à l'échéance (FR-SCALE-020,
+                // PRD_SCALE 18.5).
+                val candidate = findCandidate(devices)
                 runLink(sessionId, candidate)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -349,11 +358,28 @@ internal class BleScaleSessionSource(
     private suspend fun runLink(sessionId: String, candidate: Candidate): Boolean {
         publish(sessionId, ScaleSessionState.Connecting)
 
-        val link = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
-            transport.connect(candidate.advertisement, candidate.profile)
-        } ?: return false
-
+        /*
+         * La liaison est retenue **dans** le bloc, avant que sa valeur ne traverse la frontière
+         * annulable de `withTimeoutOrNull`, et le `finally` porte sur elle et non sur `link`.
+         *
+         * `transport.connect` rend un `BluetoothGatt` **déjà ouvert**. Si l'annulation arrive
+         * pendant que cette valeur remonte — le délai de vingt secondes qui expire à cet instant,
+         * ou `endSession()` déclenché par un `stop()` au passage en arrière-plan, ce qui est le cas
+         * courant puisqu'une connexion dure plusieurs secondes — la continuation est reprise avec
+         * l'annulation et la valeur est **jetée**. Écrit `val link = withTimeoutOrNull { … } ?:
+         * return false`, ce GATT devenait alors inaccessible sans que personne ne l'ait fermé.
+         *
+         * Android n'accorde qu'une trentaine de clients GATT par processus et n'en récupère aucun :
+         * chaque fuite en consomme un définitivement, et une fois le quota épuisé toute connexion
+         * échoue en silence jusqu'au redémarrage de l'application. `close()` est idempotent et non
+         * suspendant (voir [ScaleLink.close]), donc l'appeler ici est sans risque et suffit.
+         */
+        var opened: ScaleLink? = null
         try {
+            val link = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+                transport.connect(candidate.advertisement, candidate.profile).also { opened = it }
+            } ?: return false
+
             if (activeSessionId != sessionId) return true
 
             // « markSeen sur la balance à chaque contact réussi » : l'adresse et le nom annoncé
@@ -383,7 +409,7 @@ internal class BleScaleSessionSource(
                 WeightOutcome.LinkLost -> false
             }
         } finally {
-            link.close()
+            opened?.close()
         }
     }
 

@@ -267,8 +267,15 @@ internal object ScaleMessages {
     /** FR-SCALE-022 and PRD_SCALE 19: the provenance mark, beside the value, never on it. */
     const val FROM_YOUR_SCALE: String = "From your scale"
 
-    /** FR-SCALE-023, word for word: receiving a weight saves nothing; this does. */
-    const val SAVE_MEASUREMENT: String = "Save measurement"
+    /*
+     * `Save measurement` is deliberately NOT declared here.
+     *
+     * The button predates this module: it is `EntryScreen`'s own `SaveLabel`, and that is the
+     * string the user reads. A copy here claiming FR-SCALE-023 as its authority would be a second
+     * literal to keep in step with the first — the very thing this file's KDoc says it exists to
+     * prevent — and the scale module never renamed that button anyway. FR-SCALE-023 is upheld by
+     * `EntryViewModel.onSave` being the only writer, not by owning the word.
+     */
 
     // endregion
 

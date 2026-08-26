@@ -159,6 +159,35 @@ class ScaleDetailScreenTest {
             .assertTextEquals(ScaleMessages.IN_RANGE)
     }
 
+    /**
+     * PRD_SCALE 18.5 : sans scan, la fiche ne prétend à aucune portée.
+     *
+     * Radio éteinte, permission absente ou localisation système coupée : `inRange` vaut `false`
+     * pour tout le monde parce que personne n'a regardé, et l'écrire `Not in range` accuserait la
+     * balance d'une panne qui n'est pas la sienne. La ligne disparaît, le dernier contact reste —
+     * exactement la règle de la liste, tenue par la même fonction.
+     */
+    @Test
+    fun withoutAScanTheCardClaimsNoPresenceAtAll() {
+        show(SCALE, presenceKnown = false)
+
+        compose.onNodeWithTag(ScaleTestTags.DETAIL_STATUS).assertDoesNotExist()
+        compose.onNodeWithText(ScaleMessages.NOT_IN_RANGE).assertDoesNotExist()
+        compose.onNodeWithText(ScaleMessages.IN_RANGE).assertDoesNotExist()
+        // Ce que Mue sait vraiment survit à l'absence de scan.
+        compose.onNodeWithText(ScaleMessages.LAST_SEEN_LABEL).assertIsDisplayed()
+    }
+
+    /** Une balance à portée le reste : couper la ligne n'est le fait que de l'absence de scan. */
+    @Test
+    fun withAScanAScaleInRangeStillSaysSo() {
+        show(SCALE.copy(inRange = true), presenceKnown = true)
+
+        compose.onNodeWithTag(ScaleTestTags.DETAIL_STATUS)
+            .performScrollTo()
+            .assertTextEquals(ScaleMessages.IN_RANGE)
+    }
+
     @Test
     fun aScaleThatWasNeverReachedSaysSo() {
         show(SCALE.copy(lastSeenAt = null))
@@ -239,13 +268,18 @@ class ScaleDetailScreenTest {
     }
 
     /** L'état est hissé ici : le brouillon du nom vit dans le test, jamais dans l'écran. */
-    private fun show(scale: PairedScale?, forgetTarget: PairedScale? = null) {
+    private fun show(
+        scale: PairedScale?,
+        forgetTarget: PairedScale? = null,
+        presenceKnown: Boolean = true,
+    ) {
         compose.setContent {
             var nameInput by remember { mutableStateOf(scale?.displayName.orEmpty()) }
             MueTheme {
                 ScaleDetailContent(
                     scale = scale,
                     nameInput = nameInput,
+                    presenceKnown = presenceKnown,
                     requiredPermissions = REQUIRED_PERMISSIONS,
                     forgetTarget = forgetTarget,
                     onNameChange = { nameInput = it },

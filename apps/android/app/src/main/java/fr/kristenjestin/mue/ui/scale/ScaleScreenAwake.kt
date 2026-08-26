@@ -37,5 +37,17 @@ internal val ScaleSessionState.keepsScreenAwake: Boolean
         is ScaleSessionState.Measuring,
         -> true
 
-        else -> false
+        // Énuméré au lieu d'un `else`, et c'est toute la garantie de ce fichier : un douzième état
+        // ajouté au contrat de session **ne compile pas** tant que quelqu'un n'a pas décidé s'il
+        // garde le téléphone allumé. Avec un `else`, il tombait en silence du côté « endormi »,
+        // aucun test ne rougissait, et la panne — un écran qui s'éteint pendant qu'on monte sur la
+        // balance, ou une batterie vide — ne se voyait qu'à l'usage.
+        ScaleSessionState.Absent,
+        ScaleSessionState.Idle,
+        ScaleSessionState.NotFound,
+        is ScaleSessionState.Stable,
+        is ScaleSessionState.Complete,
+        is ScaleSessionState.OutOfRange,
+        is ScaleSessionState.Unavailable,
+        -> false
     }

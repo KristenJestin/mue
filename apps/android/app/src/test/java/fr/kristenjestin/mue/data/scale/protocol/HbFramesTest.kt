@@ -50,13 +50,36 @@ class HbFramesTest {
         assertEquals(0x67, HbFrames.checksum(frame, 1, frame.size - 2))
     }
 
+    /**
+     * PRD_SCALE 14.2 : la longueur annoncée compte les octets **qui suivent** le champ, fin
+     * comprise et en-tête exclu — soit `taille − 2` sur la trame relevée.
+     *
+     * Vérifié à travers [HbFrames.decode] et non en indexant le tableau du test : lire
+     * `frame[1] == frame.size - 2` n'aurait affirmé qu'une propriété d'une constante écrite dans ce
+     * fichier, sans jamais appeler le décodeur. Ici, c'est bien le décodeur qui doit accepter cette
+     * trame-là, et son voisin `une longueur qui ne correspond pas à la taille est rejetée` prouve
+     * qu'il refuse l'autre moitié.
+     */
     @Test
     fun `la longueur compte les octets qui suivent le champ de longueur`() {
         val frame = hexToBytes(REAL_IMPEDANCE_FRAME)
+        assertEquals(13, frame.size, "la trame de référence de PRD_SCALE 14.5 fait treize octets")
+        assertEquals(frame.size - 2, frame[1].toInt() and 0xFF, "la trame relevée dit `taille − 2`")
 
-        assertEquals(13, frame.size)
-        assertEquals(0x0B, frame[1].toInt() and 0xFF)
-        assertEquals(frame.size - 2, frame[1].toInt() and 0xFF)
+        // C'est bien le décodeur qui doit tenir la convention, et il l'accepte.
+        val decoded = assertIs<HbFrame.Valid>(HbFrames.decode(frame))
+        // Les deux derniers octets sont le contrôle et la fin, donc hors des données.
+        assertEquals(frame.size - 3, decoded.lastDataIndex)
+
+        // Et il refuse l'autre lecture possible — « la longueur compte toute la trame ». Le
+        // contrôle est recalculé pour que ce soit bien la longueur, et rien d'autre, qui décide.
+        val overCounted = frame.copyOf()
+        overCounted[1] = frame.size.toByte()
+        overCounted[overCounted.size - 2] =
+            HbFrames.checksum(overCounted, 1, overCounted.size - 2).toByte()
+
+        val rejected = assertIs<HbFrame.Malformed>(HbFrames.decode(overCounted))
+        assertTrue(rejected.reason.contains("length"), rejected.reason)
     }
 
     @Test

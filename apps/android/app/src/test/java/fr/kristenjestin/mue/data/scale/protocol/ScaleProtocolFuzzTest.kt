@@ -68,45 +68,60 @@ class ScaleProtocolFuzzTest {
     /**
      * Des octets quelconques, de toutes les tailles plausibles pour une notification BLE.
      *
-     * L'assertion vraie de ce test est **l'absence d'exception** : si le décodage levait, la
-     * boucle ne finirait pas. Le décompte final n'est là que pour garantir qu'elle a bien tourné.
+     * Deux garanties, et **aucune des deux n'est le décompte de la boucle** : le décodage ne lève
+     * pas — s'il levait, la boucle ne finirait pas —, et surtout du bruit ne devient jamais une
+     * mesure (BR-SCALE-003). C'est la seconde qui vaut d'être écrite : `Rejected` et `Ignored` sont
+     * les deux seules issues acceptables, et lister les quatre variantes de `ScaleFrameEvent`
+     * n'aurait affirmé que leur existence.
+     *
+     * Sa force reste modeste, et il faut le dire : une suite d'octets tirée au hasard n'atteint
+     * presque jamais le contrôle par OU exclusif, faute de porter l'en-tête et la longueur d'une
+     * trame. Ce sont les deux balayages ci-dessus — troncatures et mutations d'un octet, exhaustifs
+     * sur une trame **réelle** — qui éprouvent réellement la validation.
      */
     @Test
-    fun `des octets aléatoires déterministes ne lèvent jamais`() {
+    fun `des octets aléatoires déterministes ne lèvent jamais ni ne produisent de mesure`() {
         val random = Random(seed = 20260826)
-        var decoded = 0
+        val measured = mutableListOf<String>()
 
         repeat(2_000) {
             val bytes = random.nextBytes(random.nextInt(0, 24))
             val session = Hb9027Session()
 
-            val event = session.onFrame(bytes)
-
-            assertTrue(
-                event is ScaleFrameEvent.Rejected ||
-                    event is ScaleFrameEvent.Ignored ||
-                    event is ScaleFrameEvent.Weight ||
-                    event is ScaleFrameEvent.Impedance,
-                "octets : ${bytes.toHex()}",
-            )
-            decoded++
+            when (session.onFrame(bytes)) {
+                is ScaleFrameEvent.Rejected, ScaleFrameEvent.Ignored -> Unit
+                is ScaleFrameEvent.Weight, is ScaleFrameEvent.Impedance -> measured += bytes.toHex()
+            }
         }
 
-        assertEquals(2_000, decoded)
+        assertTrue(measured.isEmpty(), "du bruit est devenu une mesure : $measured")
     }
 
-    /** La même garantie pour le pilote fictif : lui aussi reçoit des octets qu'il n'a pas choisis. */
+    /**
+     * La même garantie pour le pilote fictif : lui aussi reçoit des octets qu'il n'a pas choisis.
+     *
+     * Le pilote fictif parle un protocole étranger à la famille HB, si bien que la trame réelle
+     * tronquée est pour lui du bruit comme un autre — et une trame HB **entière** aussi, ce que la
+     * dernière assertion vérifie : deux pilotes livrés ensemble ne doivent pas se répondre l'un pour
+     * l'autre (FR-SCALE-030).
+     */
     @Test
-    fun `le pilote fictif ne lève sur aucune entrée`() {
+    fun `le pilote fictif ne lève et ne mesure sur aucune entrée qui ne soit la sienne`() {
         val random = Random(seed = 20260827)
         val session = FakeScaleDriver.newSession()
+        val measured = mutableListOf<String>()
 
-        repeat(1_000) {
-            session.onFrame(random.nextBytes(random.nextInt(0, 12)))
+        fun feed(bytes: ByteArray) {
+            when (session.onFrame(bytes)) {
+                is ScaleFrameEvent.Rejected, ScaleFrameEvent.Ignored -> Unit
+                is ScaleFrameEvent.Weight, is ScaleFrameEvent.Impedance -> measured += bytes.toHex()
+            }
         }
-        for (length in 0 until realFrame.size) {
-            session.onFrame(realFrame.copyOf(length))
-        }
+
+        repeat(1_000) { feed(random.nextBytes(random.nextInt(0, 12))) }
+        for (length in 0..realFrame.size) feed(realFrame.copyOf(length))
+
+        assertTrue(measured.isEmpty(), "le pilote fictif a mesuré ce qui ne le concerne pas : $measured")
     }
 
     /**

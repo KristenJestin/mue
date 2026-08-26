@@ -111,7 +111,10 @@ class ScalesViewModelTest {
         val harness = harness(devices = listOf(scaleDeviceOf(id = "a")))
         harness.viewModel.onScreenVisible()
         harness.discovery.emit(advertisementOf("AA:BB:CC:DD:EE:01", "Fake Scale"))
-        harness.state()
+
+        // Sans cette assertion, la seconde moitié du nom — « oublie ce qui était à portée » — ne
+        // prouverait rien : une présence jamais établie serait indiscernable d'une présence oubliée.
+        assertTrue(harness.state().scales.single().inRange, "la balance doit d'abord être à portée")
 
         harness.viewModel.onScreenHidden()
 

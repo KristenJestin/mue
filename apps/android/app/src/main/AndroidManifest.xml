@@ -97,6 +97,16 @@
         android:name="android.hardware.bluetooth_le"
         android:required="false" />
 
+    <!--
+      `bluetooth_le` does not cover it on its own. `BLUETOOTH` and `BLUETOOTH_ADMIN` above imply
+      `android.hardware.bluetooth` — a different feature — and opting out of the LE one leaves
+      that implication standing, so Play would still have filtered the app off a radio-less
+      device. Two features, two opt-outs; BR-SCALE-011 needs both.
+    -->
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
     <application
         android:name=".MueApplication"
         android:allowBackup="false"

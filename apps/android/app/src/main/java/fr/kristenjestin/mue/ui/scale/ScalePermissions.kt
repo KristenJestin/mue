@@ -160,17 +160,17 @@ internal class ScalePermissionsState internal constructor(
     private val onRequest: () -> Unit,
 ) {
 
-    /**
-     * Nothing stands between Mue and a scan.
+    /*
+     * There is deliberately no `canScan` here.
      *
-     * The three conditions are read together because a screen almost always wants the whole
-     * answer; when it is `false`, the individual flags say which sentence of PRD_SCALE 18.5 to
-     * show, and in that order — permission, then radio, then system location.
+     * There was one, and no screen ever read it: all three read
+     * `ScalePermissionsState.toScanGate()` instead, because the same answer has to decide *both*
+     * whether the scan starts and which sentence of PRD_SCALE 18.5 the screen owes — and a screen
+     * that read one of the two separately could search while claiming it cannot, or the reverse.
+     * `ScalesScreen`'s KDoc states that rule; keeping a second, subtly different answer beside it
+     * was an invitation to reach for the wrong one. The two were not even equivalent:
+     * `toScanGate` weighs `isPermanentlyDenied` first, which `canScan` could not see.
      */
-    val canScan: Boolean
-        get() = isGranted &&
-            isBluetoothEnabled &&
-            (!requiresSystemLocation || isSystemLocationEnabled)
 
     /**
      * Shows the system prompt (FR-SCALE-025: at the first pairing, on a deliberate tap).
