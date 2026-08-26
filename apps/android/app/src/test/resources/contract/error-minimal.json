@@ -1,0 +1,5 @@
+{
+  "code": "server.unavailable",
+  "message": "The server is restarting. Retry after a backoff.",
+  "retryable": true
+}

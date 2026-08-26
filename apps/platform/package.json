@@ -4,5 +4,24 @@
   "private": true,
   "type": "module",
   "description": "TanStack Start entry point delegating /api/*, /mcp and /health/* to Hono",
-  "scripts": {}
+  "scripts": {
+    "dev": "bun run --hot src/serve.ts",
+    "start": "bun run src/serve.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test src",
+    "lint": "vp lint src",
+    "format": "vp fmt src",
+    "format:check": "vp fmt --check src"
+  },
+  "dependencies": {
+    "@mue/contracts": "workspace:*",
+    "@tanstack/react-start": "catalog:",
+    "hono": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:"
+  }
 }

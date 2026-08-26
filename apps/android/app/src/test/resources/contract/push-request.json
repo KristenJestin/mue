@@ -1,0 +1,35 @@
+{
+  "mutations": [
+    {
+      "aggregateId": "2026-08-25",
+      "aggregateType": "measurement",
+      "baseRevision": "3",
+      "clientOccurredAt": "2026-08-25T06:12:04.117Z",
+      "mutationId": "0198f0a1-2b3c-7d4e-8f90-a1b2c3d4e5f6",
+      "op": "upsert",
+      "origin": {
+        "id": "device-7f3c1a04",
+        "type": "android"
+      },
+      "payload": {
+        "date": "2026-08-25",
+        "weightCg": 7845
+      },
+      "payloadSchemaVersion": 1
+    },
+    {
+      "aggregateId": "2026-08-24",
+      "aggregateType": "measurement",
+      "baseRevision": "9",
+      "clientOccurredAt": "2026-08-25T06:12:05.004Z",
+      "mutationId": "0198f0a1-9e8d-7c6b-b5a4-938271605f4e",
+      "op": "delete",
+      "origin": {
+        "id": "device-7f3c1a04",
+        "type": "android"
+      },
+      "payload": null,
+      "payloadSchemaVersion": 1
+    }
+  ]
+}

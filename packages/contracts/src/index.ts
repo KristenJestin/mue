@@ -1,24 +1,13 @@
-import { z } from "zod";
+// The single source of truth for the Mue HTTP contract: Hono routes, TanStack Start
+// server functions, MCP tools and the generated openapi.json all read these schemas,
+// and the hand-written Kotlin DTOs are tested against fixtures emitted from them.
 
-/**
- * Every 64-bit counter crosses the wire as a decimal string. JSON numbers give
- * Kotlin no precision guarantee, and PLATFORM-CONTRACT section 2 calls the value opaque.
- */
-const decimalString = z.string().regex(/^\d+$/, "expected a decimal string");
-
-/**
- * Inner payload of the sync cursor, base64url-wrapped before it leaves the server.
- * Versioned so its shape can change without an API version bump.
- */
-export const cursorPayloadSchema = z.object({
-  v: z.literal(1),
-  seq: decimalString,
-});
-
-export type CursorPayload = z.infer<typeof cursorPayloadSchema>;
-
-/**
- * Per-aggregate optimistic-concurrency counter, deliberately distinct from the
- * per-user journal sequence: conflating the two loses changes.
- */
-export const revisionSchema = decimalString;
+export * from "./cursor";
+export * from "./errors";
+export * from "./health";
+export * from "./measurement";
+export * from "./meta";
+export * from "./mutation";
+export * from "./openapi";
+export * from "./primitives";
+export * from "./sync";

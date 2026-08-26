@@ -1,21 +1,12 @@
-import type { CimdOptions } from "@better-auth/cimd";
-import type { McpOptions } from "@better-auth/mcp";
-import type { BetterAuthOptions } from "better-auth";
-
-/** Better Auth is the identity authority for all three shapes: Web cookie, Android bearer, MCP OAuth. */
-export type MueAuthOptions = BetterAuthOptions;
-
-/** Supplies protected-resource metadata and the OAuth 2.1 + PKCE flow for agents. */
-export type MueMcpOptions = McpOptions;
-
-/**
- * The Client ID Metadata Document profile the agent OAuth link rests on.
- *
- * `fetchClientMetadataResource` is a required option and is deliberately not
- * defaulted here: the transport must resolve the hostname exactly once, reject
- * RFC 6890 special-use addresses, pin the resolved address and refuse redirects.
- * That SSRF boundary is the application's to build at its runtime.
- */
-export type MueCimdOptions = CimdOptions;
-
-export { validateClientIdUrl } from "@better-auth/cimd";
+export { createAuth, type AuthHandle, type CreateAuthOptions, type MueAuth } from "./auth";
+export { readAuthConfig, type AuthConfig, type Env } from "./config";
+export { MUE_SCOPES, OAUTH_SCOPES, SCOPE_DESCRIPTIONS, isMueScope, type MueScope } from "./scopes";
+export {
+  createPinnedMetadataFetch,
+  fetchClientMetadataResource,
+  MetadataFetchError,
+  type HostnameResolver,
+  type PinnedFetchOptions,
+} from "./cimd-transport";
+export { classifyAddress, isPubliclyRoutable, type AddressVerdict } from "./ssrf";
+export { listSessions, listAgents, revokeSession, revokeAgent } from "./administration";

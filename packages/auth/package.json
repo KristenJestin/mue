@@ -10,13 +10,16 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "lint": "vp lint src",
-    "format": "vp fmt src",
-    "format:check": "vp fmt --check src"
+    "lint": "vp lint src && vp -C ../.. lint scripts",
+    "format": "vp fmt src && vp -C ../.. fmt scripts",
+    "format:check": "vp fmt --check src && vp -C ../.. fmt --check scripts",
+    "test": "bun --env-file=../../.env test"
   },
   "dependencies": {
     "@better-auth/cimd": "catalog:",
     "@better-auth/mcp": "catalog:",
-    "better-auth": "catalog:"
+    "@mue/db": "workspace:*",
+    "better-auth": "catalog:",
+    "drizzle-orm": "catalog:"
   }
 }

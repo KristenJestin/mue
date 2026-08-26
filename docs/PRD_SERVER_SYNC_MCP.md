@@ -39,7 +39,7 @@ Les décisions suivantes gouvernent l'ensemble du module :
 8. **L'historique complet reste accessible aux agents.** Les résumés ne remplacent pas les données originales.
 9. **MCP reste indépendant du fournisseur d'IA.** Seuls les transports et schémas MCP standards sont utilisés.
 10. **Le serveur reste strictement privé.** Aucun endpoint public, transfert de port automatique ou pont propre à un fournisseur n'est prévu.
-11. **L'alimentation est un domaine extensible.** Son modèle est proposé par [`PRD_FOOD.md`](./PRD_FOOD.md), qui n'est pas encore arbitré ; il s'ajoutera sans reconstruire le moteur de synchronisation.
+11. **L'alimentation est un domaine extensible.** Son modèle est fixé par [`PRD_FOOD.md`](./PRD_FOOD.md) et s'ajoute sans reconstruire le moteur de synchronisation.
 12. **Aucun export manuel de contexte vers un agent n'est prévu.** Les agents utilisent MCP.
 13. **L'identité est commune.** Better Auth protège le Web, Android et MCP avec un mécanisme adapté à chaque client.
 14. **La plateforme vit dans le même dépôt que l'application Android.** Vite+ est l'entrée unique de l'outillage et orchestre le monorepo sur des workspaces Bun, tandis que Gradle reste responsable d'Android.
@@ -230,13 +230,13 @@ Les échecs utilisent un backoff et ne déclenchent jamais une boucle agressive 
 | Catalogue d'exercices fourni par Mue | Non | Oui | Non | Référence versionnée, pas une donnée personnelle synchronisée. |
 | Minuteur actif ou en pause | Non | Non | Non | État opérationnel propre au téléphone. |
 | Brouillons locaux de révision du minuteur | Non | Non | Non | Restent locaux jusqu'à `Save activity`. |
-| Aliments personnalisés et produits copiés | Après arbitrage | Oui | Oui | Agrégats autonomes proposés par [`PRD_FOOD.md`](./PRD_FOOD.md). |
-| Recettes | Après arbitrage | Oui | Oui | Agrégat complet avec ses ingrédients. |
-| Entrées de journal alimentaire | Après arbitrage | Oui | Oui | Instantané nutritionnel immuable, jamais recalculé par le serveur. |
-| Repas planifiés | Après arbitrage | Oui | Oui | Un repas maximum par date et créneau. |
+| Aliments personnalisés et produits copiés | Oui | Oui | Oui | Agrégats autonomes définis par [`PRD_FOOD.md`](./PRD_FOOD.md). |
+| Recettes | Oui | Oui | Oui | Agrégat complet avec ses ingrédients. |
+| Lignes de journal alimentaire | Oui | Oui | Oui | Une ligne par consommation, avec son instantané nutritionnel. |
+| Propositions de repas | Oui | Oui | Oui | Une proposition maximum par date et moment. |
 | Catalogue d'aliments Ciqual embarqué | Non | Oui | Non | Référence versionnée, pas une donnée personnelle synchronisée. |
 
-Les cinq lignes alimentaires reprennent le modèle proposé par [`PRD_FOOD.md`](./PRD_FOOD.md). Elles décrivent la forme attendue, pas un périmètre validé : cf. sa section 24.
+Les cinq lignes alimentaires reprennent le modèle arrêté par [`PRD_FOOD.md`](./PRD_FOOD.md). Les points encore ouverts de ce module sont listés dans sa section 24 et ne remettent pas en cause ces agrégats.
 
 ### 10.2 Agrégats synchronisés
 
@@ -250,6 +250,8 @@ Les données liées sont synchronisées comme des agrégats cohérents et non co
 - `Recipe`, avec ses ingrédients ;
 - `FoodLogEntry` ;
 - `MealPlanEntry`.
+
+Une ligne de journal est autoportante : elle contient l'instantané nutritionnel de ce qui a été mangé et ne dépend donc pas de la réception préalable de son aliment ou de sa recette.
 
 Les règles propres à ces quatre agrégats sont détaillées en section 21 de [`PRD_FOOD.md`](./PRD_FOOD.md).
 
@@ -558,7 +560,7 @@ Avant la livraison du produit Web complet, les mêmes révocations doivent reste
 
 ## 17. Modèle alimentaire et dépendances entre PRD
 
-Le modèle alimentaire est désormais **proposé** par [`PRD_FOOD.md`](./PRD_FOOD.md), qui reste à arbitrer. Le présent document reste développable indépendamment de lui pour :
+Le modèle alimentaire est arrêté par [`PRD_FOOD.md`](./PRD_FOOD.md). Le présent document reste développable indépendamment de lui pour :
 
 - l'association du téléphone ;
 - l'identité des clients ;
@@ -568,7 +570,7 @@ Le modèle alimentaire est désormais **proposé** par [`PRD_FOOD.md`](./PRD_FOO
 - le serveur MCP générique ;
 - l'audit et les permissions.
 
-[`PRD_FOOD.md`](./PRD_FOOD.md) fournit, dans sa section 21, les éléments qui manquaient à ce document. Ils valent tant que son modèle n'est pas modifié par l'arbitrage décrit dans sa section 24 :
+[`PRD_FOOD.md`](./PRD_FOOD.md) fournit, dans sa section 21, les éléments qui manquaient à ce document :
 
 - les payloads `Food`, `Recipe`, `FoodLogEntry` et `MealPlanEntry` ;
 - leurs règles de validation et de conflit propres ;
@@ -841,7 +843,8 @@ Emplacement des documents : les PRD, le cadrage et les tests manuels rejoignent 
 | Un agent cloud sans chemin réseau peut-il accéder au serveur ? | Non. |
 | Quel transport MCP est visé ? | Streamable HTTP privé sur `/mcp`. SSE est exclu ; stdio est facultatif après la V1. |
 | Quelle révision MCP est visée ? | `2026-07-28`, avec compatibilité négociée `2025-11-25` lorsque le SDK la permet. |
-| Le PRD alimentaire bloque-t-il le serveur ? | Non. [`PRD_FOOD.md`](./PRD_FOOD.md) propose ses agrégats, ses conflits et ses outils MCP ; leur implémentation attend son arbitrage. |
+| Le PRD alimentaire bloque-t-il le serveur ? | Non. [`PRD_FOOD.md`](./PRD_FOOD.md) fixe ses agrégats, ses conflits et ses outils MCP. |
+| Que peut faire un agent sur les données alimentaires ? | Tout ce que peut faire l'utilisateur, y compris modifier une ligne de journal existante. La contrepartie est un audit consultable depuis l'application. |
 | Le minuteur actif est-il synchronisé ? | Non. Seule la séance finalisée l'est. |
 | Framework de plateforme | TanStack Start pour le rendu et Hono pour API, sync, auth, MCP et healthchecks. |
 | Runtime et package manager | Bun, piloté par Vite+. |

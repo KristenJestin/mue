@@ -1,0 +1,14 @@
+{
+  "aggregateId": "2026-08-24",
+  "aggregateType": "measurement",
+  "baseRevision": "9",
+  "clientOccurredAt": "2026-08-25T06:12:05.004Z",
+  "mutationId": "0198f0a1-9e8d-7c6b-b5a4-938271605f4e",
+  "op": "delete",
+  "origin": {
+    "id": "device-7f3c1a04",
+    "type": "android"
+  },
+  "payload": null,
+  "payloadSchemaVersion": 1
+}

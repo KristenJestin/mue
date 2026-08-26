@@ -1,0 +1,8 @@
+{
+  "aggregateId": "2026-08-25",
+  "aggregateType": "measurement",
+  "code": "sync.revision_conflict",
+  "currentRevision": "7",
+  "message": "The measurement for 2026-08-25 has moved on since baseRevision 3.",
+  "retryable": false
+}

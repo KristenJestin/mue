@@ -1,0 +1,6 @@
+{
+  "aggregateType": "measurement",
+  "code": "sync.upgrade_required",
+  "message": "The server holds measurement payloads at schema version 2, which this client did not declare.",
+  "retryable": false
+}
