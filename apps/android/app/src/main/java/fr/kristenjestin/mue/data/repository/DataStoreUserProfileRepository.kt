@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import fr.kristenjestin.mue.data.local.database.HealthProfileDao
+import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
@@ -13,6 +15,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -20,35 +23,63 @@ import java.io.IOException
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 
+/**
+ * The profile of PRD 11.2, now assembled from two stores.
+ *
+ * The display name stays in the Preferences file: sync PRD 10.1 keeps it on the phone, so it
+ * has nothing to be transactional with. The height and the birth date moved to Room, because
+ * sync PRD 19 requires a remote aggregate to be applied and its cursor advanced in one local
+ * transaction and DataStore cannot join one — a `dataStore.edit` that succeeded beside a Room
+ * write that rolled back would leave the phone claiming a height the server never accepted.
+ *
+ * [UserProfileRepository] is unchanged on purpose: every screen and every fake still sees one
+ * profile with three fields, and none of them has to know it now comes from two files.
+ */
 class DataStoreUserProfileRepository(
     private val dataStore: DataStore<Preferences>,
+    private val healthProfileDao: HealthProfileDao,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : UserProfileRepository {
 
-    override val profile: Flow<UserProfile> = dataStore.data
-        // A corrupted or unreadable file must not crash the app; an empty profile is
-        // the honest fallback, and every field is optional anyway.
-        .catch { throwable ->
-            if (throwable is IOException) emit(emptyPreferences()) else throw throwable
-        }
-        .map { it.toUserProfile() }
-        .flowOn(ioDispatcher)
+    override val profile: Flow<UserProfile> = combine(
+        dataStore.data
+            // A corrupted or unreadable file must not crash the app; an empty profile is
+            // the honest fallback, and every field is optional anyway.
+            .catch { throwable ->
+                if (throwable is IOException) emit(emptyPreferences()) else throw throwable
+            }
+            .map { MueValidation.normalizeDisplayName(it[KEY_DISPLAY_NAME]) },
+        healthProfileDao.observe(),
+    ) { displayName, health ->
+        UserProfile(
+            displayName = displayName,
+            heightCm = health?.heightCm,
+            birthDate = health?.birthDate?.toLocalDateOrNull(),
+        )
+    }.flowOn(ioDispatcher)
 
+    /**
+     * Two stores, two writes, and no transaction spanning them — which is exactly why the two
+     * synchronised fields are the ones in Room. A display name written without its height is a
+     * cosmetic loss on a crash; a height written without its cursor would be a lie to the
+     * server.
+     */
     override suspend fun save(profile: UserProfile) {
         withContext(ioDispatcher) {
             dataStore.edit { preferences ->
-                preferences.put(KEY_DISPLAY_NAME, MueValidation.normalizeDisplayName(profile.displayName))
-                preferences.put(KEY_HEIGHT_CM, profile.heightCm)
-                preferences.put(KEY_BIRTH_DATE, profile.birthDate?.toString())
+                preferences.put(
+                    KEY_DISPLAY_NAME,
+                    MueValidation.normalizeDisplayName(profile.displayName),
+                )
             }
+            healthProfileDao.upsert(
+                HealthProfileEntity(
+                    heightCm = profile.heightCm,
+                    birthDate = profile.birthDate?.toString(),
+                )
+            )
         }
     }
-
-    private fun Preferences.toUserProfile(): UserProfile = UserProfile(
-        displayName = MueValidation.normalizeDisplayName(this[KEY_DISPLAY_NAME]),
-        heightCm = this[KEY_HEIGHT_CM],
-        birthDate = this[KEY_BIRTH_DATE]?.toLocalDateOrNull(),
-    )
 
     private fun String.toLocalDateOrNull(): LocalDate? =
         try {
@@ -57,8 +88,14 @@ class DataStoreUserProfileRepository(
             null
         }
 
-    private companion object {
+    companion object {
         val KEY_DISPLAY_NAME = stringPreferencesKey("display_name")
+
+        /**
+         * The two keys version 4 wrote. Nothing reads them for the profile any more —
+         * `HealthProfileSeeding` copies them into Room once — but they are the only record of
+         * a height typed before the upgrade, so they are read by name rather than guessed.
+         */
         val KEY_HEIGHT_CM = intPreferencesKey("height_cm")
         val KEY_BIRTH_DATE = stringPreferencesKey("birth_date")
     }

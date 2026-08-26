@@ -3,9 +3,11 @@ package fr.kristenjestin.mue.data.repository
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import android.content.Context
+import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import fr.kristenjestin.mue.domain.model.UserProfile
 import kotlinx.coroutines.flow.first
@@ -30,6 +32,13 @@ class DataStoreProfileAndPreferencesTest {
     private lateinit var profileRepository: DataStoreUserProfileRepository
     private lateinit var preferencesRepository: DataStoreUserPreferencesRepository
 
+    /**
+     * The profile now spans two stores: the display name stays in DataStore, the height and the
+     * birth date are Room rows (sync PRD 19). The assertions below are unchanged on purpose —
+     * the repository's contract did not move, only where it keeps things.
+     */
+    private lateinit var database: MueDatabase
+
     @Before
     fun createStores() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -37,12 +46,15 @@ class DataStoreProfileAndPreferencesTest {
         preferencesFile = File(context.cacheDir, "test_prefs_${System.nanoTime()}.preferences_pb")
         profileStore = PreferenceDataStoreFactory.create { profileFile }
         preferencesStore = PreferenceDataStoreFactory.create { preferencesFile }
-        profileRepository = DataStoreUserProfileRepository(profileStore)
+        database = Room.inMemoryDatabaseBuilder(context, MueDatabase::class.java).build()
+        profileRepository =
+            DataStoreUserProfileRepository(profileStore, database.healthProfileDao())
         preferencesRepository = DataStoreUserPreferencesRepository(preferencesStore)
     }
 
     @After
     fun deleteStores() {
+        database.close()
         profileFile.delete()
         preferencesFile.delete()
     }

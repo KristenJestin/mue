@@ -3,6 +3,7 @@ package fr.kristenjestin.mue.data.repository
 import fr.kristenjestin.mue.data.local.database.MeasurementDao
 import fr.kristenjestin.mue.data.local.database.toDomain
 import fr.kristenjestin.mue.data.local.database.toEntity
+import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.model.DateWindow
 import fr.kristenjestin.mue.domain.model.Measurement
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
@@ -14,8 +15,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
+/**
+ * [outbox] is defaulted rather than required so every existing construction site — the
+ * container, and the tests that build a repository straight onto an in-memory database — keeps
+ * compiling and keeps journalling. Making the journal opt-in would leave the shipped path
+ * untested by the very tests that exercise this class.
+ */
 class RoomMeasurementRepository(
     private val dao: MeasurementDao,
+    private val outbox: SyncOutbox = SyncOutbox(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : MeasurementRepository {
 
@@ -38,16 +46,31 @@ class RoomMeasurementRepository(
         dao.findByDate(date.toString())?.toDomain()
     }
 
+    /**
+     * The write and its outbox row go in together (sync FR-SYNC-001). A second call after
+     * `upsert` would be a second transaction, and a process death in between would keep the
+     * measurement and lose every trace that it still has to be sent.
+     */
     override suspend fun save(measurement: Measurement) = withContext(ioDispatcher) {
-        dao.upsert(measurement.toEntity())
+        dao.upsertWithMutation(measurement.toEntity(), outbox.measurementUpsert(measurement))
     }
 
+    /**
+     * Moving a measurement to another date changes two aggregates, because the date is the
+     * aggregate id: the old one is deleted and the new one written. Hence two mutations, of
+     * which the delete is spent only when the date really moved.
+     */
     override suspend fun replace(originalDate: LocalDate, measurement: Measurement) =
         withContext(ioDispatcher) {
-            dao.replace(originalDate.toString(), measurement.toEntity())
+            dao.replaceWithMutation(
+                originalDate = originalDate.toString(),
+                entity = measurement.toEntity(),
+                deleteMutation = outbox.measurementDelete(originalDate),
+                upsertMutation = outbox.measurementUpsert(measurement),
+            )
         }
 
     override suspend fun delete(date: LocalDate) = withContext(ioDispatcher) {
-        dao.deleteByDate(date.toString())
+        dao.deleteWithMutation(date.toString(), outbox.measurementDelete(date))
     }
 }

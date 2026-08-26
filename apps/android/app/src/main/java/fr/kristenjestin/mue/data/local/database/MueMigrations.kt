@@ -204,5 +204,69 @@ internal object MueMigrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+    /**
+     * 4 → 5: the three synchronisation tables and the health profile (sync PRD 19).
+     *
+     * Purely additive once more. Not a measurement, not a session and not a draft is read,
+     * written or mentioned, so a phone that has been logging weights since version 1 arrives at
+     * version 5 with every row it had.
+     *
+     * The four tables arrive empty and that is the correct starting state. An empty
+     * `sync_mutations` means nothing is waiting to be sent, an empty `sync_state` means no
+     * server is paired, and an empty `sync_aggregate_state` means the server has acknowledged
+     * nothing — which is exactly true of a phone that has never synchronised.
+     *
+     * `health_profile` is created empty too, and deliberately not filled here. The height and
+     * the birth date are in a Preferences DataStore, and a `SupportSQLiteDatabase` cannot read
+     * one: it is a file this connection knows nothing about, in a format SQL cannot parse. The
+     * copy is therefore a startup task guarded by `sync_state.profile_seeded`, and putting it
+     * here instead would either crash the migration or, worse, silently seed nothing.
+     *
+     * The statements are the ones Room exports for version 5, kept identical on purpose — a
+     * migrated file and a freshly created one have to be the same database, and
+     * `MigrationTestHelper` compares them column by column and index by index.
+     */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `sync_mutations` " +
+                    "(`mutation_id` TEXT NOT NULL, `aggregate_type` TEXT NOT NULL, " +
+                    "`aggregate_id` TEXT NOT NULL, `op` TEXT NOT NULL, `base_revision` INTEGER, " +
+                    "`payload` TEXT, `payload_schema_version` INTEGER NOT NULL, " +
+                    "`created_at` INTEGER NOT NULL, `state` TEXT NOT NULL, " +
+                    "`attempt_count` INTEGER NOT NULL, `last_error_code` TEXT, " +
+                    "`last_error_message` TEXT, PRIMARY KEY(`mutation_id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_sync_mutations_state_created_at` " +
+                    "ON `sync_mutations` (`state`, `created_at`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `sync_aggregate_state` " +
+                    "(`aggregate_type` TEXT NOT NULL, `aggregate_id` TEXT NOT NULL, " +
+                    "`revision` INTEGER, `server_updated_at` INTEGER, " +
+                    "`deleted_at` INTEGER, `last_mutation_id` TEXT, `origin_type` TEXT, " +
+                    "`origin_id` TEXT, PRIMARY KEY(`aggregate_type`, `aggregate_id`))"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `sync_state` " +
+                    "(`id` INTEGER NOT NULL, `server_url` TEXT, `server_name` TEXT, " +
+                    "`account_id` TEXT, `device_id` TEXT, `cursor` TEXT, " +
+                    "`last_success_at` INTEGER, `last_error_code` TEXT, " +
+                    "`last_error_message` TEXT, `profile_seeded` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `health_profile` " +
+                    "(`id` TEXT NOT NULL, `height_cm` INTEGER, `birth_date` TEXT, " +
+                    "PRIMARY KEY(`id`))"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> =
+        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }
