@@ -27,10 +27,17 @@ interface SyncDao : SyncJournalDao {
      * FR-SYNC-007: a `failed` row stays in the table, keeps the user's change, and is simply
      * never selected, so it cannot hold up anything queued behind it.
      *
-     * `rowid` breaks ties on purpose. The two mutations of one edit — the delete of the old
-     * date and the upsert of the new one — are written in the same transaction and can share a
-     * millisecond, and sending the upsert first would have the server apply a deletion to the
-     * row it had just created.
+     * `created_at` is the outbox's **local sequence**, not the wall clock: every insert goes
+     * through [SyncJournalDao.sequenced], which floors the stamp at one past the highest one
+     * already waiting. Ordering on it is therefore safe even across the phone syncing its own
+     * time backwards, which PRD 12.3 and 13.1 require and which a bare
+     * `System.currentTimeMillis()` could not give.
+     *
+     * `rowid` stays as the tie-break. The sequence makes a tie impossible between two rows this
+     * DAO wrote, but a database restored, migrated or written by an older build may still hold
+     * two rows sharing a stamp, and the two mutations of one edit — the delete of the old date
+     * and the upsert of the new one — must not be reordered: sending the upsert first would
+     * have the server apply a deletion to the row it had just created.
      */
     @Query(
         "SELECT * FROM sync_mutations WHERE state = 'pending' " +
@@ -50,6 +57,52 @@ interface SyncDao : SyncJournalDao {
 
     @Query("UPDATE sync_mutations SET state = :state WHERE mutation_id IN (:mutationIds)")
     suspend fun setState(mutationIds: List<String>, state: String)
+
+    /**
+     * Returns every stranded `inflight` row to `pending`, and closes a one-way door.
+     *
+     * [setState] moves rows into `inflight` when a batch leaves the phone, and until this
+     * existed nothing ever moved them back. A process killed between the request and its
+     * response — the ordinary fate of a background sync on Android — left those rows `inflight`
+     * for good: `pendingMutations` does not select them, no later send would ever look at them
+     * again, and the user's change existed on the phone and nowhere else, forever. That is
+     * exactly the loss FR-SYNC-001 forbids.
+     *
+     * It is safe to call unconditionally because sending is idempotent: [SyncMutationEntity]'s
+     * `mutation_id` is FR-SYNC-006's key, so a mutation the server did receive before the crash
+     * comes back as `duplicate` with its stored result rather than as a second application.
+     * Re-sending costs a round trip; not re-sending costs the change.
+     *
+     * `failed` rows are deliberately untouched: FR-SYNC-007 keeps them out of the queue.
+     *
+     * @return how many rows were recovered, so a caller can log a real number.
+     */
+    @Query("UPDATE sync_mutations SET state = 'pending' WHERE state = 'inflight'")
+    suspend fun requeueInflight(): Int
+
+    /**
+     * The revision the server assigned to an accepted mutation, written on acknowledgement.
+     *
+     * Without it the next edit of the same aggregate would quote the revision it had before the
+     * push as its `baseRevision`, and PRD 13.3 makes an update founded on an old revision a
+     * detected conflict — so the second edit of any measurement would be refused for as long as
+     * the phone had not pulled the change back.
+     *
+     * A targeted `UPDATE` and not `putAggregateState`: replacing the row would take `deleted_at`
+     * with it and resurrect a tombstone.
+     */
+    @Query(
+        "UPDATE sync_aggregate_state SET revision = :revision, last_mutation_id = :mutationId, " +
+            "server_updated_at = :serverUpdatedAt " +
+            "WHERE aggregate_type = :aggregateType AND aggregate_id = :aggregateId"
+    )
+    suspend fun recordAcceptedRevision(
+        aggregateType: String,
+        aggregateId: String,
+        revision: Long,
+        mutationId: String,
+        serverUpdatedAt: Long,
+    )
 
     /**
      * A rejected mutation keeps its payload and its error so `Data & sync` can say what the

@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.data.sync
 
+import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.domain.model.Measurement
@@ -14,6 +15,12 @@ import java.util.UUID
  *
  * The id and the clock are injected so a test can assert on an exact row rather than on the
  * shape of one; both defaults are what the app uses.
+ *
+ * [now] is a wall clock and is treated as a *proposal*. The send order may not rest on the
+ * phone's clock (PRD 12.3 and 13.1), so `SyncJournalDao.sequenced` floors every stamp at one
+ * past the highest one already in the outbox, inside the transaction that inserts the row. A
+ * clock that steps backwards between two saves — which is what a phone does when it synchronises
+ * its time — therefore cannot reorder them.
  *
  * A row is written whether or not a server is paired. Making it conditional would put a read of
  * `sync_state` inside every save for a table that grows by one small row a day, and would make
@@ -44,6 +51,32 @@ class SyncOutbox(
         aggregateId = date.toString(),
         op = SyncMutationEntity.OP_DELETE,
         payload = null,
+    )
+
+    /**
+     * The health profile is a single aggregate with a single identity, so the aggregate id is a
+     * constant — [HealthProfileEntity.ROW_ID], the same `'me'` the table itself is keyed by.
+     *
+     * There is no delete counterpart. PRD 13.4 gives the profile no deletion: clearing a height
+     * is an upsert whose payload says null, which the server can merge field by field, while a
+     * tombstone would claim the profile itself ceased to exist — a state the domain does not
+     * have and one that FR-SYNC-005 would then use to block its own resurrection.
+     *
+     * Both fields are nullable and both are always written, so an upsert states the whole
+     * aggregate as PRD 12.2 requires: omitting a null would make "the user cleared their birth
+     * date" indistinguishable from "this client does not know about birth dates".
+     */
+    fun healthProfileUpsert(heightCm: Int?, birthDate: LocalDate?): SyncMutationEntity = mutation(
+        aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+        aggregateId = HealthProfileEntity.ROW_ID,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(
+            HealthProfilePayload.serializer(),
+            HealthProfilePayload(
+                heightCm = heightCm,
+                birthDate = birthDate?.toString(),
+            ),
+        ),
     )
 
     /**
@@ -84,6 +117,26 @@ class SyncOutbox(
 data class MeasurementPayload(
     val date: String,
     val weightCg: Int,
+)
+
+/**
+ * The wire shape of the health profile aggregate (PRD 10.2 and 13.4), versioned by
+ * [PAYLOAD_SCHEMA_VERSION] like every other payload.
+ *
+ * `explicitNulls` is left at its default so both fields are always present: PRD 13.4 lets the
+ * server merge the two fields separately when they were not modified concurrently, and it can
+ * only do that if it can tell "cleared" from "not mentioned".
+ *
+ * `packages/contracts` has no `healthProfile` member in `AGGREGATE_TYPES` yet, so a mutation
+ * carrying this payload has no envelope to travel in and is held back by
+ * `SyncWire.toEnvelope`. It is journalled all the same, which is the point: FR-SYNC-001 is
+ * about not losing the change, and a change kept in the outbox is a change that goes out
+ * unaltered the day the contract grows the branch for it.
+ */
+@Serializable
+data class HealthProfilePayload(
+    val heightCm: Int?,
+    val birthDate: String?,
 )
 
 /** Bumped only when an older client could no longer apply a payload (PRD 12.4). */

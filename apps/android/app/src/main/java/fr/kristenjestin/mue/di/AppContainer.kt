@@ -44,6 +44,9 @@ class AppContainer(private val applicationContext: Context) {
         DataStoreUserProfileRepository(
             applicationContext.userProfileDataStore,
             database.healthProfileDao(),
+            // The same outbox the measurement repository uses. The health profile is a
+            // synchronised aggregate (sync PRD 13.4), so its writes are journalled too.
+            sync.outbox,
         )
     }
 

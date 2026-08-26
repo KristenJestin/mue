@@ -6,9 +6,18 @@ import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.datastore.syncTokenDataStore
 import fr.kristenjestin.mue.data.local.datastore.userProfileDataStore
+import fr.kristenjestin.mue.data.remote.sync.KtorSyncApi
+import fr.kristenjestin.mue.data.remote.sync.SyncApi
 import fr.kristenjestin.mue.data.sync.HealthProfileSeeding
+import fr.kristenjestin.mue.data.sync.RoomSyncStore
+import fr.kristenjestin.mue.data.sync.SyncEngine
 import fr.kristenjestin.mue.data.sync.SyncOutbox
+import fr.kristenjestin.mue.data.sync.SyncStore
 import fr.kristenjestin.mue.data.sync.SyncTokenStore
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Everything server synchronisation needs, registered in one place.
@@ -18,9 +27,13 @@ import fr.kristenjestin.mue.data.sync.SyncTokenStore
  * surface without the shipped container having to move again.
  *
  * Lazy for the same reason as everything in [AppContainer]: a cold start that never
- * synchronises must not pay for a database handle or a Keystore lookup. [outbox] is the one
- * exception — it owns nothing but a UUID generator and a clock, so there is nothing to defer,
- * and the measurement repository needs it on the very first save.
+ * synchronises must not pay for a database handle, a Keystore lookup or an HTTP client.
+ * [outbox] is the one exception — it owns nothing but a UUID generator and a clock, so there is
+ * nothing to defer, and the measurement repository needs it on the very first save.
+ *
+ * [engine] is laziest of all, and deliberately so: constructing it is what runs the `inflight`
+ * recovery, so "engine start" happens when a synchronisation is actually about to be attempted
+ * and not on the launch path of an app the user opened to type a weight.
  */
 class SyncContainer(
     private val applicationContext: Context,
@@ -46,4 +59,32 @@ class SyncContainer(
     val healthProfileSeeding: HealthProfileSeeding by lazy {
         HealthProfileSeeding(database, applicationContext.userProfileDataStore)
     }
+
+    /** One client for the whole process: a second would mean a second connection pool. */
+    val httpClient: HttpClient by lazy { KtorSyncApi.defaultClient() }
+
+    /**
+     * The bearer and the server URL are read *per call* rather than captured, so
+     * `Disconnect server` (PRD 9.3) takes effect on the next request instead of on the next
+     * process — a revoked session that kept synchronising because an object held a copy of its
+     * token would be exactly the leak PRD 16 forbids.
+     */
+    val api: SyncApi by lazy {
+        KtorSyncApi(
+            client = httpClient,
+            baseUrl = { syncDao.syncState()?.serverUrl },
+            token = { tokenStore.read() },
+        )
+    }
+
+    val store: SyncStore by lazy { RoomSyncStore(database) }
+
+    /**
+     * Outlives every screen and every worker invocation: the `inflight` recovery started in the
+     * engine's constructor must finish even if whatever asked for the engine goes away.
+     */
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** One engine per process, so `Sync now` and the periodic worker share its gate. */
+    val engine: SyncEngine by lazy { SyncEngine(store = store, api = api, scope = engineScope) }
 }

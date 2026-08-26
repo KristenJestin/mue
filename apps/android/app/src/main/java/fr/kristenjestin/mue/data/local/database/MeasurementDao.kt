@@ -70,16 +70,21 @@ interface MeasurementDao : SyncJournalDao {
      *
      * The base revision is read here rather than passed in, so it is read under the same lock
      * that writes the row; a revision fetched before the transaction could already be stale.
+     *
+     * [SyncJournalDao.sequenced] is applied for the same reason and in the same place: the send
+     * order is the outbox's local sequence, and a stamp taken outside this transaction could be
+     * overtaken by a concurrent writer or undercut by a clock that stepped backwards.
      */
     @Transaction
     suspend fun upsertWithMutation(entity: MeasurementEntity, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         upsert(entity)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /**
@@ -89,18 +94,21 @@ interface MeasurementDao : SyncJournalDao {
      */
     @Transaction
     suspend fun deleteWithMutation(date: String, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         deleteByDate(date)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
         markAggregateDeleted(
-            aggregateType = mutation.aggregateType,
-            aggregateId = mutation.aggregateId,
-            deletedAt = mutation.createdAt,
-            mutationId = mutation.mutationId,
+            aggregateType = row.aggregateType,
+            aggregateId = row.aggregateId,
+            // The tombstone's instant is the stamp the mutation actually went out with, so the
+            // local record and the mutation that will create the remote one cannot disagree.
+            deletedAt = row.createdAt,
+            mutationId = row.mutationId,
         )
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /**

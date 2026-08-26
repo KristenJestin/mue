@@ -131,9 +131,14 @@ class MeasurementOutboxDaoTest {
     }
 
     /**
-     * An edit that moves a date is two aggregates changing. Both mutations are written in the
-     * same transaction and share [fixedNow] exactly, so only the insertion order can put the
-     * delete first — which is why the outbox orders on `rowid` after `created_at`.
+     * An edit that moves a date is two aggregates changing, and the delete must go out first:
+     * sending the upsert first would have the server apply a deletion to the row it had just
+     * created.
+     *
+     * The wall clock is frozen at [fixedNow], so both mutations propose the same stamp and only
+     * the outbox's local sequence can separate them — `SyncJournalDao.sequenced` floors each
+     * stamp at one past the highest already waiting, which is what makes `created_at` a total
+     * order rather than a reading of the phone's clock (PRD 12.3).
      */
     @Test
     fun movingAMeasurementEnqueuesTheDeleteBeforeTheUpsert() = runTest {
@@ -143,7 +148,7 @@ class MeasurementOutboxDaoTest {
         repository.replace(LocalDate.parse("2026-08-22"), measurement("2026-08-23", 7_420))
 
         val pending = syncDao.pendingMutations(10)
-        assertEquals(listOf(fixedNow, fixedNow), pending.map { it.createdAt })
+        assertEquals(listOf(fixedNow, fixedNow + 1), pending.map { it.createdAt })
         assertEquals(
             listOf(SyncMutationEntity.OP_DELETE, SyncMutationEntity.OP_UPSERT),
             pending.map { it.op },
@@ -180,7 +185,10 @@ class MeasurementOutboxDaoTest {
             SyncAggregateStateEntity.TYPE_MEASUREMENT,
             "2026-08-23",
         )
-        assertEquals(fixedNow, tombstone?.deletedAt)
+        // The tombstone carries the stamp the mutation actually went out with — one past the
+        // upsert that preceded it — so the local record and the mutation cannot disagree.
+        assertEquals(fixedNow + 1, tombstone?.deletedAt)
+        assertEquals(fixedNow + 1, syncDao.mutation("mutation-1")?.createdAt)
         assertEquals("mutation-1", tombstone?.lastMutationId)
     }
 

@@ -24,6 +24,36 @@ interface SyncJournalDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun enqueueMutation(mutation: SyncMutationEntity)
 
+    /** The highest stamp any waiting mutation carries, or null when the outbox is empty. */
+    @Query("SELECT MAX(created_at) FROM sync_mutations")
+    suspend fun highestMutationStamp(): Long?
+
+    /**
+     * The same mutation, stamped with the next value of the outbox's **local sequence**.
+     *
+     * `pendingMutations` sends in `created_at` order, and `created_at` used to be
+     * `System.currentTimeMillis()` alone. PRD 12.3 and 13.1 forbid an order that rests on the
+     * phone's clock, and the `rowid` tie-break added for the same-millisecond case does not
+     * cover the case that actually happens: a phone syncing its time **steps its clock
+     * backwards** between two saves, and the second save is then sent before the first. For a
+     * measurement whose date moved, that is the server applying the deletion to the row it has
+     * just created.
+     *
+     * So the stamp is `max(wall clock, highest stamp in the outbox + 1)`: monotonically
+     * increasing by construction, and still a millisecond count that reads as one. It is
+     * computed from the table rather than from a counter in memory, which is what makes it
+     * survive process death without any recovery step — and there is nothing to recover, since
+     * an empty outbox has no order left to preserve.
+     *
+     * It must be called inside the same transaction as the insert, which is where every caller
+     * already is: reading the maximum in one transaction and inserting in another would let two
+     * concurrent writers read the same maximum and stamp the same value.
+     */
+    suspend fun sequenced(mutation: SyncMutationEntity): SyncMutationEntity {
+        val floor = (highestMutationStamp() ?: 0L) + 1
+        return if (mutation.createdAt >= floor) mutation else mutation.copy(createdAt = floor)
+    }
+
     /**
      * The revision the server last acknowledged, read in the writer's own transaction. Null
      * covers both cases that mean the same thing: no row at all, and a row the server has never

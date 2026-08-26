@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,8 +29,9 @@ import java.time.LocalDate
  * The height and the birth date typed before version 5 have to arrive in Room, and exactly once.
  *
  * This is the step that could not be a Room `Migration`: a `SupportSQLiteDatabase` cannot read a
- * Preferences file. Its guard is a flag in `sync_state`, so the interesting cases are the second
- * run and the phone that has nothing to copy — not the happy path.
+ * Preferences file. It is guarded twice — a preference outside the transaction and the
+ * `sync_state` flag inside it — so the interesting cases are the second run, the phone that has
+ * nothing to copy, and the cold start that must not open the database at all.
  */
 @RunWith(AndroidJUnit4::class)
 class HealthProfileSeedingTest {
@@ -147,6 +149,67 @@ class HealthProfileSeedingTest {
 
         assertEquals(listOf(0), rows)
         assertTrue(database.syncDao().syncState()?.profileSeeded == true)
+    }
+
+    /**
+     * Gap 4, and the only assertion that can show it.
+     *
+     * `MueApplication.onCreate` calls `seedOnce` at every cold start. Reading the guard from
+     * `sync_state` meant **opening Room to learn that there was nothing to do** — a disk open, a
+     * schema check and a migration check on the startup path of every launch, for a task that
+     * runs once ever, in a container whose whole contract is that it is lazy.
+     *
+     * A Room handle is not open until something queries it, so a fresh handle that is still
+     * closed afterwards is proof that nothing did.
+     */
+    @Test
+    fun aStartAfterTheFirstNeverOpensTheDatabase() = runTest {
+        writeLegacyProfile(heightCm = 178, birthDate = "1990-05-04")
+        seeding.seedOnce()
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val untouched = Room.inMemoryDatabaseBuilder(context, MueDatabase::class.java).build()
+        try {
+            HealthProfileSeeding(untouched, profileStore).seedOnce()
+
+            assertFalse(
+                "the guard must be read from DataStore, not from Room",
+                untouched.isOpen,
+            )
+        } finally {
+            untouched.close()
+        }
+    }
+
+    /**
+     * The upgrade path: a phone that seeded under the previous build has the Room flag and not
+     * the preference. It must not copy anything a second time, and it must take the fast path
+     * from then on.
+     */
+    @Test
+    fun aPhoneThatSeededBeforeThePreferenceExistedIsNotSeededAgain() = runTest {
+        writeLegacyProfile(heightCm = 178, birthDate = "1990-05-04")
+        database.syncDao().insertSyncStateIfAbsent(
+            fr.kristenjestin.mue.data.local.database.SyncStateEntity()
+        )
+        database.syncDao().markProfileSeeded()
+        database.healthProfileDao().upsert(HealthProfileEntity(heightCm = 181, birthDate = null))
+
+        seeding.seedOnce()
+
+        assertEquals(181, database.healthProfileDao().get()?.heightCm)
+        assertEquals(true, profileStore.data.first()[HealthProfileSeeding.KEY_SEEDED])
+    }
+
+    /** The preference is written after the transaction, so a seeded phone reads it as done. */
+    @Test
+    fun aSuccessfulSeedRecordsThePreferenceAsWellAsTheRoomFlag() = runTest {
+        writeLegacyProfile(heightCm = 178, birthDate = "1990-05-04")
+
+        seeding.seedOnce()
+
+        assertEquals(true, profileStore.data.first()[HealthProfileSeeding.KEY_SEEDED])
+        assertEquals(true, database.syncDao().syncState()?.profileSeeded)
     }
 
     private suspend fun writeLegacyProfile(heightCm: Int?, birthDate: String?) {

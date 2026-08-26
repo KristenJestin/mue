@@ -126,6 +126,11 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
 
+    // Ktor's own in-memory engine, so the sync client's path, bearer and error mapping are
+    // asserted on the JVM without a socket. Test-only, on the same version as the client above,
+    // so it adds nothing to the APK and nothing to the `force` block's reasoning below.
+    testImplementation(libs.ktor.client.mock)
+
     // Instrumented tests
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
