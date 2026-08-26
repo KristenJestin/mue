@@ -79,7 +79,11 @@ fun MueEffortSlider(
             horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
         ) {
             icon?.invoke()
-            MueText(label, MueTheme.typography.label, color = colors.textTertiary, maxLines = 1)
+            // No maxLines: the caller may pass "Perceived effort · optional", and at twice the
+            // font scale a single line cut it to "Perceived effort · optio…" — losing the one
+            // word that said the field could be skipped. A label growing to two lines costs
+            // nothing here; the row sits alone above the slider.
+            MueText(label, MueTheme.typography.label, color = colors.textTertiary)
         }
 
         Row(

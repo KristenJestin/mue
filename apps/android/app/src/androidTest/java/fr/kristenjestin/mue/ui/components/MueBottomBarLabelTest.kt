@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -303,6 +304,32 @@ class MueBottomBarLabelTest {
         )
     }
 
+    /**
+     * The effort slider's own label, which `Strength session` uses to say the field is optional.
+     *
+     * It was pinned to one line, so at the largest text size `Perceived effort · optional` came
+     * out `Perceived effort · optio…` — the word that went is the one telling the reader they may
+     * skip the control. The row sits alone above the slider, so a second line costs nothing.
+     */
+    @Test
+    fun theEffortLabelSaysItIsOptionalAtTwiceTheFontScale() {
+        setEffortSliders(fontScale = LargestFontScale)
+
+        EffortLabels.forEach { label -> assertWordsUnbroken(layoutOf(label)) }
+    }
+
+    /** The size the slider was already right at: each label on a single line. */
+    @Test
+    fun theEffortLabelKeepsOneLineAtTheOrdinaryFontScale() {
+        setEffortSliders(fontScale = 1f)
+
+        EffortLabels.forEach { label ->
+            val layout = layoutOf(label)
+            assertEquals("«" + label + "» is drawn over " + layout.lineCount + " lines", 1, layout.lineCount)
+            assertNothingDropped(layout)
+        }
+    }
+
     // endregion
 
     // region harness for the shared components
@@ -377,6 +404,28 @@ class MueBottomBarLabelTest {
         }
     }
 
+    /**
+     * The slider as `Strength session` actually mounts it, not as it is easiest to mount.
+     *
+     * Two things the shipped call site adds take width away from the label, and without both the
+     * harness is wider than the screen and sees no defect: the gauge icon and its gutter, and the
+     * sub-screen scaffold's own horizontal padding. A first version of this test omitted them and
+     * passed with the defect still in place — which is the whole failure mode these tests exist
+     * to catch, arriving in the test itself.
+     */
+    private fun setEffortSliders(fontScale: Float) = setNarrowContent(fontScale) {
+        Column(Modifier.padding(horizontal = MueTheme.spacing.screenHorizontal)) {
+            EffortLabels.forEach { label ->
+                MueEffortSlider(
+                    value = null,
+                    onValueChange = {},
+                    label = label,
+                    icon = { MuePreviewIcon(MuePreviewGlyph.DOT, size = 14.dp) },
+                )
+            }
+        }
+    }
+
     private fun setDateRows(fontScale: Float) = setNarrowContent(fontScale) {
         Column {
             MueFieldContainer(
@@ -421,6 +470,9 @@ class MueBottomBarLabelTest {
 
 /** PRD copy for the two loud buttons a font-scale sweep caught losing their ends. */
 private const val ExportLabel = "Export weight data"
+
+/** Both labels the shipped callers pass to [MueEffortSlider]. */
+private val EffortLabels = listOf("Perceived effort", "Perceived effort · optional")
 
 /** Entry's date row, as `EntryScreen` writes it. */
 private const val MeasurementDateLabel = "Measurement date"
