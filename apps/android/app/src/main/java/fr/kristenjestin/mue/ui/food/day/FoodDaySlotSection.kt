@@ -35,9 +35,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
@@ -50,6 +53,7 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.theme.MueTypography
 import java.util.Locale
 
 /** The prototype's glyph tile, grown to the touch minimum of PRD_FOOD 18. */
@@ -69,6 +73,24 @@ private val PlanActionGutter: Dp = 12.dp
 
 /** The bullet the prototype sets between two facts of one line. */
 private val FactBulletSize: Dp = 3.dp
+
+/**
+ * The prototype's moment label: `text-[9px] font-bold tracking-[.12em] uppercase`.
+ *
+ * `eyebrow` drew `BREAKFAST` at 14 sp — the very size of the food names in the cards beneath it —
+ * so a moment shouted as loudly as the things inside it. The prototype puts the label *under* its
+ * own lines in the hierarchy: smaller, bolder and widely tracked, which is what makes an
+ * uppercase word read as a heading rather than as content.
+ *
+ * Built from the shipped `micro` rather than from a raw `sp`, so the module still owns no size of
+ * its own and the label keeps growing with the reader's chosen text size. Only the weight and the
+ * tracking are the prototype's.
+ */
+private fun SlotLabelStyle(type: MueTypography): TextStyle =
+    type.micro.copy(fontWeight = FontWeight.Bold, letterSpacing = SlotLabelTracking)
+
+/** The prototype's `tracking-[.12em]`, which is what spaces an uppercase label out. */
+private val SlotLabelTracking = 0.12.em
 
 /** PRD_FOOD 19: a proposal is outlined rather than filled, and the outline is dashed. */
 private val DashOn: Dp = 6.dp
@@ -156,7 +178,7 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
                 // Locale-independent, for the reason `Food.fold` gives: a Turkish device would
                 // otherwise turn the `i` of `Dinner` into a dotted capital.
                 text = state.label.uppercase(Locale.ROOT),
-                style = type.eyebrow,
+                style = SlotLabelStyle(type),
                 color = colors.textTertiary,
                 modifier = Modifier
                     .padding(start = MueTheme.spacing.sm)
@@ -197,9 +219,9 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
                      */
                     .semantics { hideFromAccessibility() },
             ) {
-                MueText(total, type.bodyStrong, color = colors.textPrimary)
+                MueText(total, type.micro, color = colors.textTertiary)
                 state.proteinLabel?.let {
-                    MueText(it, type.micro, color = colors.textTertiary)
+                    MueText(it, type.micro, color = colors.textQuiet)
                 }
             }
         },
