@@ -58,6 +58,21 @@ internal fun ActivityTimeSheet(
         // The dial carries its own inner padding, exactly as the calendar does, and the full
         // screen gutter on top of it squeezes the 48 dp numbers.
         contentPadding = MueBottomSheetDefaults.contentPadding(horizontal = MueTheme.spacing.lg),
+        /*
+         * The panel is capped at a fraction of the window, and at the largest font size the
+         * clock's own readout and the dial under it grew past that cap: `Use this time` was cut in
+         * half by the bottom of the panel and drew **no glyphs at all**, leaving an unlabelled
+         * amber bar as the only way to confirm a time. Nothing in the suite could see it — the
+         * button was in the tree, with its name and its click action, and only its lower half was
+         * outside the panel.
+         *
+         * Scrolling the body is what `MueBottomSheet` already offers for exactly this, and what
+         * the two catalogue sheets use: the panel keeps its cap and the content reaches its own
+         * end. The dismissing drag moves to the handle and the title, which is the trade that
+         * option carries and the reason it is opt-in. At the ordinary size the content is shorter
+         * than the cap, so the panel wraps it as before and nothing scrolls.
+         */
+        bodyScrolls = true,
     ) {
         // Re-keyed on every opening so the dial always reappears on the stored time rather than
         // on the last choice that was abandoned.

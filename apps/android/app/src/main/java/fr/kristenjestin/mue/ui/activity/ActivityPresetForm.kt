@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.activity
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,11 +21,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -43,6 +46,7 @@ import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueValueChip
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
@@ -58,6 +62,9 @@ private val ClockBoxWidth: Dp = 44.dp
  * and lands on the colon. Measured at the 26 sp of `fieldValue` on a 390 dp screen.
  */
 private val PaceBoxWidth: Dp = 34.dp
+
+/** What a measurement box spends on its own inner gutter, both sides. Mirrors `MueFieldContainer`. */
+private val MetricFieldPadding: Dp = 32.dp
 
 /** A small box still has to be reachable; the container around it is 64 dp tall (PRD 15). */
 private val ClockBoxHeight: Dp = 36.dp
@@ -106,31 +113,84 @@ private fun MetricFields(state: LogActivityUiState, actions: LogActivityActions)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-        Row(
+        /*
+         * The heading and its badge are split by measurement rather than by a `SpaceBetween` row.
+         * Neither carried a weight, so the title was measured first and at whatever it asked for,
+         * and at the largest font size the badge beside it was left one glyph wide: `OPTIONAL`
+         * was drawn `O…`, a single letter where the word that says the whole section may be
+         * skipped should be.
+         */
+        MueSplitRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = MueTheme.spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MueText(
-                text = LogActivityMessages.detailsTitle(state.preset),
-                style = MueTheme.typography.sectionTitle,
-                maxLines = 1,
-            )
-            MueValueChip(LogActivityMessages.OPTIONAL_BADGE)
-        }
+            gap = MueTheme.spacing.sm,
+            stackedGap = MueTheme.spacing.xs,
+            start = {
+                MueText(
+                    text = LogActivityMessages.detailsTitle(state.preset),
+                    style = MueTheme.typography.sectionTitle,
+                )
+            },
+            end = { MueValueChip(LogActivityMessages.OPTIONAL_BADGE) },
+        )
 
-        state.metrics.chunked(COLUMNS).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
-            ) {
-                row.forEach { metric ->
-                    MetricField(metric, actions, Modifier.weight(1f))
+        /*
+         * Two boxes across is 146 dp of a 360 dp screen and a box spends 32 dp of that on its
+         * padding, so at the largest font size `Estimated energy` had nowhere to put the word
+         * `Estimated` and came out `Estim…` — as did `Dista…` and `Repo…` beside it, three of the
+         * four measurements of a treadmill unnameable at once. The grid therefore narrows to one
+         * box a row rather than cutting the words, on the same rule as the preset tiles above it:
+         * every label is laid out at the field's own type style and current font scale, and the
+         * longest word is compared with the box a given column count would give it. At the
+         * ordinary size the four still sit two across, in exactly the rows they sat in.
+         */
+        val gap = MueTheme.spacing.md
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val columns = metricColumns(state.metrics, available = maxWidth, gap = gap)
+            Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                state.metrics.chunked(columns).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                    ) {
+                        row.forEach { metric ->
+                            MetricField(metric, actions, Modifier.weight(1f))
+                        }
+                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
-                repeat(COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
             }
+        }
+    }
+}
+
+/**
+ * How many measurement boxes fit across [available] without a label having to break a word.
+ *
+ * The box a column count would give a label is the row less the gaps between the boxes, divided
+ * by the count, less the field's own horizontal padding and the glyph it carries on the right.
+ * Nothing here is a `dp` breakpoint: the labels are measured exactly as they will be drawn.
+ */
+@Composable
+private fun metricColumns(metrics: List<MetricFieldState>, available: Dp, gap: Dp): Int {
+    val measurer = rememberTextMeasurer()
+    val style = MueTheme.typography.label
+    val density = LocalDensity.current
+
+    return remember(measurer, metrics, style, available, gap, density) {
+        val longestWord = metrics
+            .flatMap { it.kind.label.split(' ') }
+            .maxOfOrNull { word -> measurer.measure(word, style).size.width }
+            ?: return@remember COLUMNS
+
+        with(density) {
+            val row = available.roundToPx()
+            val spent = MetricFieldPadding.roundToPx() + MetricIconSize.roundToPx()
+            (COLUMNS downTo 2).firstOrNull { columns ->
+                val box = (row - gap.roundToPx() * (columns - 1)) / columns
+                box - spent >= longestWord
+            } ?: 1
         }
     }
 }
@@ -197,12 +257,13 @@ private fun MetricField(
         // PRD 11.3: an estimation keeps the provenance of the machine that produced it. Inset
         // like the field's own content, so it reads as a note on that box and not on the row.
         if (metric.source == MetricSource.EQUIPMENT) {
+            // No ceiling: `From equ…` says nothing about where the figure came from,
+            // which is the whole point of PRD 11.3.
             MueText(
                 text = LogActivityMessages.FROM_EQUIPMENT,
                 style = MueTheme.typography.micro,
                 color = MueTheme.colors.textQuiet,
                 modifier = Modifier.padding(start = MueTheme.spacing.lg),
-                maxLines = 1,
             )
         }
     }

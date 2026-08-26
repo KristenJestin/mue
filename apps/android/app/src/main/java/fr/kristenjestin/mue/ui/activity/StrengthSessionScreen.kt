@@ -65,6 +65,7 @@ import fr.kristenjestin.mue.ui.components.MueSetHeaderRow
 import fr.kristenjestin.mue.ui.components.MueSetListActions
 import fr.kristenjestin.mue.ui.components.MueSetMeasure
 import fr.kristenjestin.mue.ui.components.MueSetRow
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSetRowAction
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
@@ -484,32 +485,41 @@ private fun ExercisesHeader(
     onAddExercise: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    /*
+     * The heading and `Add exercise` are split by measurement rather than by a weighted column
+     * beside an unweighted action. The action was measured first and at whatever it asked for, so
+     * at the largest font size the heading was left a ribbon and **cut in the middle of its own
+     * word** — `Exerci` over `ses` — with the count under it reduced to `0 exer…`, which says
+     * neither how many exercises nor how many sets. `onNodeWithText(EXERCISES_TITLE)` matched
+     * throughout: the semantics string is the whole word whatever the glyphs do.
+     */
+    MueSplitRow(
         modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            MueText(
-                text = EXERCISES_TITLE,
-                style = MueTheme.typography.sectionTitle,
-                modifier = Modifier.semantics { heading() },
+        gap = MueTheme.spacing.sm,
+        start = {
+            Column {
+                MueText(
+                    text = EXERCISES_TITLE,
+                    style = MueTheme.typography.sectionTitle,
+                    modifier = Modifier.semantics { heading() },
+                )
+                MueText(
+                    text = "${plural(exerciseCount, "exercise", "exercises")} · " +
+                        plural(setCount, "set", "sets"),
+                    style = MueTheme.typography.micro,
+                    color = MueTheme.colors.textQuiet,
+                )
+            }
+        },
+        end = {
+            MueDashedAction(
+                label = ADD_EXERCISE_LABEL,
+                onClick = onAddExercise,
+                icon = { MueIcon(ActivityIcons.PLUS, tint = MueTheme.contentColor, size = 14.dp) },
+                modifier = Modifier.testTag(ActivityTestTags.ADD_EXERCISE),
             )
-            MueText(
-                text = "${plural(exerciseCount, "exercise", "exercises")} · " +
-                    plural(setCount, "set", "sets"),
-                style = MueTheme.typography.micro,
-                color = MueTheme.colors.textQuiet,
-                maxLines = 1,
-            )
-        }
-        MueDashedAction(
-            label = ADD_EXERCISE_LABEL,
-            onClick = onAddExercise,
-            icon = { MueIcon(ActivityIcons.PLUS, tint = MueTheme.contentColor, size = 14.dp) },
-            modifier = Modifier.testTag(ActivityTestTags.ADD_EXERCISE),
-        )
-    }
+        },
+    )
 }
 
 private fun plural(count: Int, one: String, many: String): String =
@@ -755,7 +765,9 @@ private fun TrackingModePill(
             text = mode.label,
             style = MueTheme.typography.chip,
             color = colors.textSecondary,
-            maxLines = 1,
+            // No ceiling: `Weight & duration` came out `Weight &…` at the largest font size, and a
+            // mode that will not name its second measure is a pill saying nothing. The pill grows
+            // to two lines instead; at the ordinary size it is the single line it always was.
             modifier = Modifier.weight(1f, fill = false),
         )
         if (editable) {

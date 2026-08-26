@@ -159,12 +159,18 @@ private fun ReviewDraftCard(
                     .weight(1f)
                     .padding(horizontal = spacing.md),
             ) {
-                MueText(draft.label, MueTheme.typography.bodyStrong, maxLines = 1)
+                /*
+                 * No ceiling on either line. At the largest font size on a 360 dp phone the
+                 * card read `Treadmill w…` over `Today · 12:20 P…`: the activity unnameable, and
+                 * the meta line cut exactly where `PM` would have told it from `AM`. Both are
+                 * free to take a second line instead, which is what a bigger text size asks for,
+                 * and at the ordinary size both still fit on one.
+                 */
+                MueText(draft.label, MueTheme.typography.bodyStrong)
                 MueText(
                     text = draft.meta,
                     style = MueTheme.typography.micro,
                     color = colors.textTertiary,
-                    maxLines = 1,
                     modifier = Modifier.padding(top = spacing.xs),
                 )
             }

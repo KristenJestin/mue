@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -24,6 +25,7 @@ import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -84,29 +86,35 @@ fun ActivitySessionCard(
                     .weight(1f)
                     .padding(horizontal = spacing.lg),
             ) {
-                Row(
+                /*
+                 * The name and the moment are split by measurement rather than by a
+                 * `SpaceBetween` row. The day carried no weight, so it was measured first and at
+                 * whatever it asked for, and `weight(1f, fill = false)` handed the name what was
+                 * left: on a 360 dp phone `Treadmill walk · Today · 9:15 AM` already came out
+                 * `Tread…` beside `Today` at the ordinary text size, and at twice that size the
+                 * name was a stump on every card in the list. `onNodeWithText(summary.label)`
+                 * matched all of them — the semantics string is the whole name whatever the
+                 * glyphs do — which is why every assertion in `ActivityScreenTest` passed.
+                 *
+                 * Neither half is capped now: while both fit they sit where they always sat, and
+                 * when they do not the moment drops under the name, still end-aligned.
+                 */
+                MueSplitRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MueText(
-                        text = summary.label,
-                        style = type.bodyStrong,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    MueText(
-                        text = ActivityFormat.dayAndTime(
-                            date = summary.startedOn,
-                            time = summary.startedAtTime,
-                            today = today,
-                        ),
-                        style = type.micro,
-                        color = colors.textTertiary,
-                        maxLines = 1,
-                        modifier = Modifier.padding(start = spacing.sm),
-                    )
-                }
+                    gap = spacing.sm,
+                    start = { MueText(text = summary.label, style = type.bodyStrong) },
+                    end = {
+                        MueText(
+                            text = ActivityFormat.dayAndTime(
+                                date = summary.startedOn,
+                                time = summary.startedAtTime,
+                                today = today,
+                            ),
+                            style = type.micro,
+                            color = colors.textTertiary,
+                        )
+                    },
+                )
 
                 FactRow(
                     facts = listOf(ActivityFormat.duration(summary.duration)) +
@@ -124,25 +132,37 @@ fun ActivitySessionCard(
     }
 }
 
-/** The duration and the secondary facts, separated by the prototype's small bullets. */
+/**
+ * The duration and the secondary facts, separated by the prototype's small bullets.
+ *
+ * A `Row` serves its facts in order out of what is left, so the last one takes the whole
+ * shortfall alone: at a doubled font scale on a 360 dp phone `45 min · 4.2 km · ≈280 kcal` was
+ * drawn as `45 min · 4.2 km` and **the energy simply was not there** — squeezed to nothing and
+ * ellipsised away, with no sign on the card that a third fact existed. `onNodeWithText` still
+ * found it; it was in the semantics tree, and only the glyphs were missing.
+ *
+ * A flow row makes the shortfall a line break instead. Each fact carries its own bullet, so a
+ * fact that will not fit moves to the next line *with* the mark that separates it and never
+ * leaves a bullet stranded at the end of a line — the same shape the Food module's own fact row
+ * was given, and for the same reason. On a single line the drawing is the `Row`'s, to the pixel.
+ */
 @Composable
 private fun FactRow(facts: List<String>, modifier: Modifier = Modifier) {
     val colors = MueTheme.colors
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    FlowRow(modifier = modifier.fillMaxWidth()) {
         facts.forEachIndexed { index, fact ->
-            if (index > 0) {
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = MueTheme.spacing.sm)
-                        .size(FactBulletSize)
-                        .clip(MueTheme.shapes.pill)
-                        .background(colors.textQuiet),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (index > 0) {
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = MueTheme.spacing.sm)
+                            .size(FactBulletSize)
+                            .clip(MueTheme.shapes.pill)
+                            .background(colors.textQuiet),
+                    )
+                }
+                MueText(fact, MueTheme.typography.micro, color = colors.textTertiary)
             }
-            MueText(fact, MueTheme.typography.micro, color = colors.textTertiary, maxLines = 1)
         }
     }
 }

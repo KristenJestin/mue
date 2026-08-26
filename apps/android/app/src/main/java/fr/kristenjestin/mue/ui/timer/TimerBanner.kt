@@ -45,6 +45,7 @@ import fr.kristenjestin.mue.domain.model.TimedDraftStatus
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -128,6 +129,56 @@ private fun BannerRow(timer: LiveTimerUiState, notice: TimerNotice?, onOpen: () 
             .padding(horizontal = BannerHorizontal, vertical = BannerVertical),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        /*
+         * The name and the reading are split by measurement rather than by a weighted column
+         * beside two unweighted siblings. The elapsed value and the chevron were measured first
+         * and at whatever they asked for, and at the largest font size `00:01:56` alone took most
+         * of a 360 dp strip: the name of the running activity was drawn `Tread…` on every screen
+         * of the app, since this banner sits above the tab bar everywhere.
+         *
+         * `onNodeWithText(activityLabel)` matched throughout — the semantics string never changed.
+         */
+        MueSplitRow(
+            modifier = Modifier.weight(1f),
+            // The column beside the tile already carries its own gutter, as it did in the row.
+            gap = 0.dp,
+            stackedGap = MueTheme.spacing.xxs,
+            start = { BannerName(timer = timer, notice = notice) },
+            end = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    /*
+                     * PRD 6.4: the elapsed time, or the word `Paused` in its place — never the
+                     * accent colour alone. No live region, for the same reason the chronometer
+                     * has none: this value changes every second while the screen it sits on is
+                     * visible (PRD 11).
+                     */
+                    MueText(
+                        text = timer.bannerValue,
+                        style = type.bodyStrong.copy(fontFeatureSettings = TabularFigures),
+                        color = if (timer.isRunning) colors.accent else colors.textSecondary,
+                        maxLines = 1,
+                        modifier = Modifier.testTag(TimerTestTags.BANNER_VALUE),
+                    )
+
+                    MueIcon(
+                        iconName = MueIcons.CHEVRON_RIGHT,
+                        tint = colors.textQuiet,
+                        size = ChevronSize,
+                        modifier = Modifier.padding(start = MueTheme.spacing.sm),
+                    )
+                }
+            },
+        )
+    }
+}
+
+/** The activity's glyph and its name, with the notice of PRD 6.4 under them when there is one. */
+@Composable
+private fun BannerName(timer: LiveTimerUiState, notice: TimerNotice?) {
+    val colors = MueTheme.colors
+    val type = MueTheme.typography
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(TileSize)
@@ -143,15 +194,12 @@ private fun BannerRow(timer: LiveTimerUiState, notice: TimerNotice?, onOpen: () 
             )
         }
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = MueTheme.spacing.md),
-        ) {
+        Column(modifier = Modifier.padding(horizontal = MueTheme.spacing.md)) {
+            // No ceiling: `Tread…` names nothing, and this strip is the app's only permanent
+            // reminder that a timer is running.
             MueText(
                 text = timer.activityLabel,
                 style = type.bodyStrong,
-                maxLines = 1,
                 modifier = Modifier.testTag(TimerTestTags.BANNER_LABEL),
             )
             notice?.let {
@@ -184,26 +232,6 @@ private fun BannerRow(timer: LiveTimerUiState, notice: TimerNotice?, onOpen: () 
                 )
             }
         }
-
-        /*
-         * PRD 6.4: the elapsed time, or the word `Paused` in its place — never the accent
-         * colour alone. No live region, for the same reason the chronometer has none: this
-         * value changes every second while the screen it sits on is visible (PRD 11).
-         */
-        MueText(
-            text = timer.bannerValue,
-            style = type.bodyStrong.copy(fontFeatureSettings = TabularFigures),
-            color = if (timer.isRunning) colors.accent else colors.textSecondary,
-            maxLines = 1,
-            modifier = Modifier.testTag(TimerTestTags.BANNER_VALUE),
-        )
-
-        MueIcon(
-            iconName = MueIcons.CHEVRON_RIGHT,
-            tint = colors.textQuiet,
-            size = ChevronSize,
-            modifier = Modifier.padding(start = MueTheme.spacing.sm),
-        )
     }
 }
 

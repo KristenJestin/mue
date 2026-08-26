@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,7 +27,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -34,7 +35,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
@@ -43,6 +44,7 @@ import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
@@ -55,6 +57,15 @@ private val IconTileSize: Dp = MueMinTouchTarget
 
 /** The small tile of the add row: decoration inside a target, not a target of its own. */
 private val AddTileSize: Dp = 32.dp
+
+/** The glyph in front of one of a proposal's actions. */
+private val PlanActionIconSize: Dp = 14.dp
+
+/**
+ * Everything an action spends on room other than its own glyphs: the padding either side of it,
+ * and the gap between its glyph and its word. Kept beside them so the two cannot drift.
+ */
+private val PlanActionGutter: Dp = 12.dp
 
 /** The bullet the prototype sets between two facts of one line. */
 private val FactBulletSize: Dp = 3.dp
@@ -120,34 +131,59 @@ internal fun FoodDaySlotSection(
  *
  * The total keeps its handle and its glyphs through that silence, which is what lets a test read
  * what a reader actually sees rather than what a semantics string claims.
+ *
+ * The name and the total are split by [EntryCardBody], for the reason that layout exists: a
+ * plain `Row` measures the unweighted total **first and at whatever width it asks for**, and at
+ * a doubled font scale `≈ 370 kcal` over `≈ 29.1 g protein` left `BREAKFAST` a ribbon it could
+ * only fit by cutting the word in half — `BREAKF` over `AST`, one moment reading as two. The
+ * journal line under it had already been given this fix; the heading above it had not, and
+ * `onNodeWithText("Breakfast")` could not tell, because the semantics string is
+ * [FoodDaySlotUiState.description] whatever the glyphs do.
+ *
+ * A moment with nothing in it has no total to place, and PRD_FOOD 10.4 forbids inventing one, so
+ * that heading stays the single row it always was and keeps the whole width for its name.
  */
 @Composable
 private fun SlotHeading(state: FoodDaySlotUiState) {
     val colors = MueTheme.colors
     val type = MueTheme.typography
 
-    Row(
+    val name: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            MueIcon(iconName = state.iconName, tint = colors.textTertiary, size = 14.dp)
+
+            MueText(
+                // Locale-independent, for the reason `Food.fold` gives: a Turkish device would
+                // otherwise turn the `i` of `Dinner` into a dotted capital.
+                text = state.label.uppercase(Locale.ROOT),
+                style = type.eyebrow,
+                color = colors.textTertiary,
+                modifier = Modifier
+                    .padding(start = MueTheme.spacing.sm)
+                    .clearAndSetSemantics {
+                        contentDescription = state.description
+                        heading()
+                    },
+            )
+        }
+    }
+
+    val total = state.totalLabel
+    if (total == null) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            name()
+        }
+        return
+    }
+
+    EntryCardBody(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MueIcon(iconName = state.iconName, tint = colors.textTertiary, size = 14.dp)
-
-        MueText(
-            // Locale-independent, for the reason `Food.fold` gives: a Turkish device would
-            // otherwise turn the `i` of `Dinner` into a dotted capital.
-            text = state.label.uppercase(Locale.ROOT),
-            style = type.eyebrow,
-            color = colors.textTertiary,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = MueTheme.spacing.sm)
-                .clearAndSetSemantics {
-                    contentDescription = state.description
-                    heading()
-                },
-        )
-
-        state.totalLabel?.let { total ->
+        gap = MueTheme.spacing.sm,
+        name = name,
+        figures = {
             Column(
                 horizontalAlignment = Alignment.End,
                 modifier = Modifier
@@ -166,8 +202,8 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
                     MueText(it, type.micro, color = colors.textTertiary)
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 /**
@@ -246,23 +282,9 @@ internal fun FoodDayEntryCard(
  * drawn as a vertical column of letters. Every assertion still passed: the semantics string is
  * the whole name however the glyphs fall.
  *
- * Three fixes were weighed. A `dp` cap on the figures does not grow with the text, so it is
- * either too tight at scale 1.0 or still too loose at 2.0. A weight on the figures would divide
- * the row by a fixed ratio at *every* scale, including the ordinary one where the row is already
- * right — the name would lose width it does not have to lose, and the figures would gain width
- * they cannot use. Both trade one scale against the other.
- *
- * So the row is kept, and the decision is measured instead. `minIntrinsicWidth` of a paragraph
- * is exactly the width of its longest word — the narrowest the name can be laid out in without
- * breaking one — and `maxIntrinsicWidth` of the figures is the width they want. While the two
- * fit beside each other the layout is the one that shipped, to the pixel. When they no longer
- * do, the figures drop onto their own line under the facts and the name gets the whole width
- * rather than a ribbon. Nothing is capped, nothing is shrunk, and nothing about the ordinary
- * scale changes: at scale 1.0 the widest of the four preview lines still clears the threshold
- * by a fifth of the row.
- *
- * The figures stay end-aligned when they drop, so the eye still finds the energy on the right
- * of the card at either scale.
+ * The measured split that answers it is [MueSplitRow], where its own reasoning is written down.
+ * This name is kept because the card and the moment's heading above it now share that layout,
+ * and only one of the two is a journal line.
  */
 @Composable
 private fun EntryCardBody(
@@ -271,69 +293,8 @@ private fun EntryCardBody(
     gap: Dp,
     modifier: Modifier = Modifier,
 ) {
-    Layout(
-        contents = listOf(name, figures),
-        modifier = modifier,
-    ) { (nameMeasurables, figureMeasurables), constraints ->
-        val nameMeasurable = nameMeasurables.first()
-        val figuresMeasurable = figureMeasurables.first()
-        val gapPx = gap.roundToPx()
-
-        /*
-         * A card is always measured inside a bounded row; the fallback is only so that an
-         * intrinsic pass, which hands out an infinite width, cannot make this crash.
-         */
-        val width = if (constraints.hasBoundedWidth) {
-            constraints.maxWidth
-        } else {
-            nameMeasurable.maxIntrinsicWidth(constraints.maxHeight) + gapPx +
-                figuresMeasurable.maxIntrinsicWidth(constraints.maxHeight)
-        }
-
-        val figuresWidth = figuresMeasurable
-            .maxIntrinsicWidth(constraints.maxHeight)
-            .coerceIn(0, width)
-        val besideName = width - figuresWidth - gapPx
-        val narrowestName = nameMeasurable.minIntrinsicWidth(constraints.maxHeight)
-
-        // Each measurable may be measured once, so the choice is made before either is.
-        if (besideName >= narrowestName) {
-            val namePlaceable = nameMeasurable.measure(constraints.atMostWide(besideName))
-            val figuresPlaceable = figuresMeasurable.measure(constraints.atMostWide(figuresWidth))
-            val height = maxOf(namePlaceable.height, figuresPlaceable.height)
-            layout(width, height) {
-                namePlaceable.placeRelative(0, (height - namePlaceable.height) / 2)
-                figuresPlaceable.placeRelative(
-                    width - figuresPlaceable.width,
-                    (height - figuresPlaceable.height) / 2,
-                )
-            }
-        } else {
-            val namePlaceable = nameMeasurable.measure(constraints.atMostWide(width))
-            val figuresPlaceable = figuresMeasurable.measure(constraints.atMostWide(width))
-            val height = namePlaceable.height + gapPx + figuresPlaceable.height
-            layout(width, height) {
-                namePlaceable.placeRelative(0, 0)
-                figuresPlaceable.placeRelative(
-                    width - figuresPlaceable.width,
-                    namePlaceable.height + gapPx,
-                )
-            }
-        }
-    }
+    MueSplitRow(start = name, end = figures, gap = gap, modifier = modifier)
 }
-
-/**
- * The same constraints, free to be anything up to [maxWidth] wide.
- *
- * `copy(maxWidth = …)` alone would keep a tight `minWidth` and could leave the two crossed over.
- */
-private fun Constraints.atMostWide(maxWidth: Int): Constraints = Constraints(
-    minWidth = 0,
-    maxWidth = maxWidth.coerceAtLeast(0),
-    minHeight = 0,
-    maxHeight = maxHeight,
-)
 
 /**
  * The unconfirmed proposal at the head of a moment (PRD_FOOD 12 and 19).
@@ -393,59 +354,119 @@ private fun PlanCard(
 
         MueDivider()
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            PlanAction(
-                label = FoodDayMessages.I_ATE_THIS,
-                iconName = MueIcons.CHECK,
-                tint = colors.accent,
-                testTag = FoodTestTags.confirmPlan(state.key.slot),
-                onClick = onConfirm,
-                modifier = Modifier.weight(1f),
-            )
-            PlanAction(
-                label = FoodDayMessages.SWAP,
-                iconName = MueIcons.ROTATE_CW,
-                tint = colors.textSecondary,
-                testTag = FoodTestTags.swapPlan(state.key.slot),
-                onClick = onSwap,
-                modifier = Modifier.weight(1f),
-            )
-            PlanAction(
-                label = FoodDayMessages.DISMISS,
-                iconName = MueIcons.CLOSE,
-                tint = colors.textSecondary,
-                testTag = FoodTestTags.dismissPlan(state.key.slot),
-                onClick = onDismiss,
-                modifier = Modifier.weight(1f),
-            )
+        PlanActions(
+            actions = listOf(
+                PlanActionSpec(
+                    label = FoodDayMessages.I_ATE_THIS,
+                    iconName = MueIcons.CHECK,
+                    tint = colors.accent,
+                    testTag = FoodTestTags.confirmPlan(state.key.slot),
+                    onClick = onConfirm,
+                ),
+                PlanActionSpec(
+                    label = FoodDayMessages.SWAP,
+                    iconName = MueIcons.ROTATE_CW,
+                    tint = colors.textSecondary,
+                    testTag = FoodTestTags.swapPlan(state.key.slot),
+                    onClick = onSwap,
+                ),
+                PlanActionSpec(
+                    label = FoodDayMessages.DISMISS,
+                    iconName = MueIcons.CLOSE,
+                    tint = colors.textSecondary,
+                    testTag = FoodTestTags.dismissPlan(state.key.slot),
+                    onClick = onDismiss,
+                ),
+            ),
+        )
+    }
+}
+
+/** One of the proposal's three actions, before it knows whether it will sit in a row or a column. */
+private data class PlanActionSpec(
+    val label: String,
+    val iconName: String,
+    val tint: Color,
+    val testTag: String,
+    val onClick: () -> Unit,
+)
+
+/**
+ * The proposal's three actions, abreast while all three can be read whole and stacked once they
+ * cannot.
+ *
+ * A third of 360 dp is 120 dp, and at a doubled font scale `Dismiss` alone wants more than the
+ * 94 dp that leaves beside its glyph: the word came out **cut in its middle**, `Dismi` over
+ * `ss`, on the one control that destroys a proposal. `onNodeWithText(DISMISS)` never saw it —
+ * the semantics string is the whole word however the glyphs fall.
+ *
+ * Narrowing the type was the rejected alternative, for [MueBottomBar]'s reason: someone who sets
+ * the largest font is asking for large text, and answering with smaller text punishes exactly
+ * the reader who asked. Dropping the labels for glyphs alone was rejected too — a check, a
+ * rotation and a cross say nothing about which of them is irreversible.
+ *
+ * So the row gives way instead, and each action takes the full width of the card. The threshold
+ * is measured rather than guessed: every label is laid out at this row's own type style, at the
+ * current density and font scale, and the widest is compared with a third of the width less what
+ * the glyph and the gaps beside it take. No `dp` breakpoint is written anywhere, so a longer
+ * word, a denser script or a wider phone each move the threshold by themselves — and at the
+ * ordinary scale the three still sit abreast, drawn by the very same `Row` as before.
+ *
+ * [MueBottomBar]: fr.kristenjestin.mue.ui.components.MueBottomBar
+ */
+@Composable
+private fun PlanActions(actions: List<PlanActionSpec>, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        if (planLabelsFitAbreast(actions, share = maxWidth / actions.size.coerceAtLeast(1))) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                actions.forEach { action -> PlanAction(action, Modifier.weight(1f)) }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                actions.forEach { action -> PlanAction(action, Modifier.fillMaxWidth()) }
+            }
+        }
+    }
+}
+
+/**
+ * Whether every label can be drawn whole in [share] of the row, glyph and gaps included.
+ *
+ * The widest label decides for all three: a row with two words and one broken one would still be
+ * a row with a broken word in it.
+ */
+@Composable
+private fun planLabelsFitAbreast(actions: List<PlanActionSpec>, share: Dp): Boolean {
+    val measurer = rememberTextMeasurer()
+    val style = MueTheme.typography.chip
+    val room = with(LocalDensity.current) {
+        (share - PlanActionGutter - PlanActionIconSize).roundToPx()
+    }
+
+    return remember(measurer, actions, style, room) {
+        room > 0 && actions.all { action ->
+            measurer.measure(action.label, style, maxLines = 1).size.width <= room
         }
     }
 }
 
 /** One of the proposal's three actions, at the 48 dp PRD_FOOD 18 requires of every target. */
 @Composable
-private fun PlanAction(
-    label: String,
-    iconName: String,
-    tint: Color,
-    testTag: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun PlanAction(action: PlanActionSpec, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .heightIn(min = MueMinTouchTarget)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(role = Role.Button, onClick = action.onClick)
             .padding(horizontal = MueTheme.spacing.xs)
-            .testTag(testTag),
+            .testTag(action.testTag),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MueIcon(iconName = iconName, tint = tint, size = 14.dp)
+        MueIcon(iconName = action.iconName, tint = action.tint, size = PlanActionIconSize)
         MueText(
-            text = label,
+            text = action.label,
             style = MueTheme.typography.chip,
-            color = tint,
+            color = action.tint,
             modifier = Modifier.padding(start = MueTheme.spacing.xs),
         )
     }
