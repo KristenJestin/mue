@@ -1,0 +1,260 @@
+{
+  "code": "50184453",
+  "errors": [],
+  "product": {
+    "brands": "Marmite",
+    "code": "50184453",
+    "image_front_url": "https://images.openfoodfacts.org/images/products/000/005/018/4453/front_en.126.400.jpg",
+    "nutrition": {
+      "aggregated_set": {
+        "nutrients": {
+          "added-sugars": {
+            "modifier": "~",
+            "source": "estimate",
+            "source_index": 1,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0
+          },
+          "carbohydrates": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 30
+          },
+          "choline": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0
+          },
+          "energy": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "kJ",
+            "value": 1087,
+            "value_computed": 256
+          },
+          "fruits-vegetables-legumes": {
+            "modifier": "~",
+            "source": "estimate",
+            "source_index": 1,
+            "source_per": "100g",
+            "unit": "%",
+            "value": 0.54
+          },
+          "fruits-vegetables-nuts": {
+            "modifier": "~",
+            "source": "estimate",
+            "source_index": 1,
+            "source_per": "100g",
+            "unit": "%",
+            "value": 2.52
+          },
+          "nova-group": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "",
+            "value": 4
+          },
+          "proteins": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 34
+          },
+          "salt": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 10.8,
+            "value_computed": 10.6225
+          },
+          "saturated-fat": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0
+          },
+          "sodium": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 4.249,
+            "value_computed": 4.32
+          },
+          "starch": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0
+          },
+          "sugars": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 1.2
+          },
+          "vitamin-b1": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0.0077
+          },
+          "vitamin-b2": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0.0068
+          },
+          "vitamin-b9": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0.00125
+          },
+          "vitamin-pp": {
+            "source": "packaging",
+            "source_index": 0,
+            "source_per": "100g",
+            "unit": "g",
+            "value": 0.069
+          }
+        },
+        "per": "100g",
+        "preparation": "as_sold"
+      },
+      "input_sets": [
+        {
+          "last_updated_t": 1771443019,
+          "nutrients": {
+            "carbohydrates": {
+              "unit": "g",
+              "value": 30,
+              "value_string": "30"
+            },
+            "choline": {
+              "unit": "g",
+              "value": 0,
+              "value_string": "0"
+            },
+            "nova-group": {
+              "unit": "",
+              "value": 4,
+              "value_string": "4"
+            },
+            "proteins": {
+              "unit": "g",
+              "value": 34,
+              "value_string": "34"
+            },
+            "salt": {
+              "unit": "g",
+              "value": 10.8,
+              "value_computed": 10.6225,
+              "value_string": "10.8"
+            },
+            "saturated-fat": {
+              "unit": "g",
+              "value": 0,
+              "value_string": "0"
+            },
+            "sodium": {
+              "unit": "g",
+              "value": 4.249,
+              "value_computed": 4.32,
+              "value_string": "4.249"
+            },
+            "starch": {
+              "unit": "g",
+              "value": 0,
+              "value_string": "0"
+            },
+            "sugars": {
+              "unit": "g",
+              "value": 1.2,
+              "value_string": "1.2"
+            },
+            "vitamin-b1": {
+              "unit": "g",
+              "value": 0.0077,
+              "value_string": "0.0077"
+            },
+            "vitamin-b2": {
+              "unit": "g",
+              "value": 0.0068,
+              "value_string": "0.0068"
+            },
+            "vitamin-b9": {
+              "unit": "g",
+              "value": 0.00125,
+              "value_string": "0.00125"
+            },
+            "vitamin-pp": {
+              "unit": "g",
+              "value": 0.069,
+              "value_string": "0.069"
+            }
+          },
+          "per": "100g",
+          "per_quantity": 100,
+          "per_unit": "g",
+          "preparation": "as_sold",
+          "source": "packaging"
+        },
+        {
+          "nutrients": {
+            "added-sugars": {
+              "modifier": "~",
+              "unit": "g",
+              "value": 0,
+              "value_string": "0"
+            },
+            "fruits-vegetables-legumes": {
+              "modifier": "~",
+              "unit": "%",
+              "value": 0.54,
+              "value_string": "0.54"
+            },
+            "fruits-vegetables-nuts": {
+              "modifier": "~",
+              "unit": "%",
+              "value": 2.52,
+              "value_string": "2.52"
+            }
+          },
+          "per": "100g",
+          "per_quantity": 100,
+          "per_unit": "g",
+          "preparation": "as_sold",
+          "source": "estimate",
+          "source_description": "Estimate from ingredients"
+        }
+      ]
+    },
+    "product_name": "Yeast Extract",
+    "rev": 144,
+    "serving_quantity": 8,
+    "serving_size": "8 gram"
+  },
+  "result": {
+    "id": "product_found",
+    "lc_name": "Product found",
+    "name": "Product found"
+  },
+  "status": "success",
+  "warnings": []
+}

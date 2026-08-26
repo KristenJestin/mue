@@ -1,0 +1,21 @@
+{
+  "code": "3017620422003",
+  "errors": [
+    {
+      "message": {
+        "id": "invalid_api_version",
+        "name": "Invalid API version"
+      },
+      "impact": {
+        "id": "failure",
+        "name": "Failure"
+      }
+    }
+  ],
+  "result": {
+    "id": "invalid_api_version",
+    "name": "Invalid API version"
+  },
+  "status": "failure",
+  "warnings": []
+}
