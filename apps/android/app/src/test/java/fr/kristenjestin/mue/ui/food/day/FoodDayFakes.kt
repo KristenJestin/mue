@@ -25,14 +25,19 @@ import java.time.LocalDate
 /**
  * In-memory stand-ins for the four stores the `Day` screen reads.
  *
- * The Room implementations do not exist yet — PRD_FOOD 20's tables land in a parallel change —
- * which is exactly why the domain interfaces shipped before any screen did. These fakes are the
- * whole point of that order: the date navigation, the strict totals and the two writes of
- * PRD_FOOD 12 are proved on the JVM, in milliseconds, with no emulator and no database.
+ * The Room implementations exist and are what the screen runs against — `AppContainer.food`
+ * hands them to [FoodDayViewModel.Factory]. These fakes are not a stand-in for something
+ * missing; they are what keeps the ViewModel's own tests on the JVM. Date navigation, the strict
+ * totals and the two writes of PRD_FOOD 12 are proved in milliseconds with no emulator, no
+ * Robolectric and no database, and a bug in a DAO cannot make one of them red.
  *
  * They store what they are given and hand it straight back. Nothing here rounds, groups or sums
  * anything: a fake that computed would be a second implementation of the domain, and the tests
  * would then agree with themselves rather than with the module.
+ *
+ * The Room implementations are covered where they belong — against a real database, in
+ * `data/repository`'s own suites — which is the split that keeps neither side testing the
+ * other's job.
  */
 internal class FakeFoodLogRepository(
     entries: List<FoodLogEntry> = emptyList(),

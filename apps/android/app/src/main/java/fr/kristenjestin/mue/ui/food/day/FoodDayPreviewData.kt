@@ -184,3 +184,31 @@ internal fun previewDayState(
     plans = FoodDayPreviewData.plans(date),
     recipeNames = FoodDayPreviewData.recipeNames,
 )
+
+/**
+ * A day nobody has written anything on (PRD_FOOD 10.4 and 17).
+ *
+ * Four moments, four add buttons, and **no total anywhere** — not a `0`, and not a `—` either.
+ */
+internal fun emptyDayState(
+    date: LocalDate = FoodDayPreviewData.TODAY,
+    today: LocalDate = FoodDayPreviewData.TODAY,
+): FoodDayUiState = FoodDayUiState.of(date = date, today = today)
+
+/**
+ * A day holding **one** line, whose protein is genuinely unknown (PRD_FOOD 13.1 and 13.2).
+ *
+ * The other half of the module's null discipline, and the state that has to be told apart from
+ * [emptyDayState] at a glance. Its snack shows `≈ 420 kcal` beside `— protein`: an energy that
+ * is known, a protein that is not, and a moment that is plainly *recorded* — where the empty day
+ * shows no total at all. A screen that collapsed the two would be reporting an untouched day and
+ * an incomplete one as the same fact.
+ */
+internal fun unknownProteinDayState(
+    date: LocalDate = FoodDayPreviewData.TODAY,
+    today: LocalDate = FoodDayPreviewData.TODAY,
+): FoodDayUiState = FoodDayUiState.of(
+    date = date,
+    today = today,
+    entries = listOf(FoodDayPreviewData.tiramisu(date)),
+)

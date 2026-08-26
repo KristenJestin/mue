@@ -1,14 +1,19 @@
 package fr.kristenjestin.mue.ui.food.day
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,6 +29,7 @@ import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -97,19 +103,92 @@ class FoodDayScreenTest {
      * The heart of PRD_FOOD 13: three facts, three drawings, on one screen.
      *
      * The lunch holds an espresso whose protein is a **known zero**; the snack holds a quick add
-     * whose protein nobody wrote down; the breakfast of an empty day holds nothing at all. The
-     * strings are read off the semantics tree of the total itself — hidden from a screen reader,
-     * kept for exactly this — so what is asserted is what is drawn.
+     * whose protein nobody wrote down; the breakfast holds nothing at all. Each moment is
+     * scrolled to before it is read, because a `LazyColumn` composes what is near the viewport
+     * and an assertion made from the wrong scroll position proves nothing about either.
      */
     @Test
     fun aKnownZeroAndAnUnknownAreDrawnDifferently() {
         setDay(previewDayState())
 
-        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
-
+        scrollTo(FoodTestTags.slot(MealSlot.LUNCH))
         compose.onNodeWithText("≈ 0.0 g protein", useUnmergedTree = true).assertExists()
+
+        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
         compose.onNodeWithText("${FoodLabels.UNKNOWN} protein", useUnmergedTree = true)
             .assertExists()
+
+        // Breakfast holds nothing, so it draws neither of the two.
+        scrollTo(FoodTestTags.slot(MealSlot.BREAKFAST))
+        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.BREAKFAST), useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    /**
+     * PRD_FOOD 13.2, on the glass: **an empty day and an unknown value are not the same screen.**
+     *
+     * This is the assertion the whole null discipline ends on. Everything upstream of it — the
+     * strict sums of `NutritionMath`, the `recordedEnergy` of `DailyNutritionSummary`, the `—` of
+     * `FoodLabels` — is worth nothing if the last layer draws the two alike. The two states are
+     * put on the *same* screen one after the other so that what is compared is what was drawn,
+     * not two runs that might have differed for some other reason.
+     *
+     * A day nobody wrote on shows **no total at all**: four headings, four add buttons, and not a
+     * figure anywhere. A day holding one line whose protein is unknown shows a moment that is
+     * plainly recorded — `≈ 420 kcal` beside `— protein`. Neither of them shows a `0` where
+     * nothing is known.
+     */
+    @Test
+    fun anEmptyDayAndAnUnknownProteinAreNotTheSameScreen() {
+        setDay(emptyDayState())
+
+        /*
+         * Nothing logged: no moment claims a total, and no figure is drawn anywhere. Each
+         * moment is scrolled to before it is read — a `LazyColumn` disposes what is far from
+         * the viewport, and a sweep of the tree from one position would only prove that the
+         * moments it happened to compose were empty.
+         */
+        val empty = MealSlot.ORDERED.flatMap { slot ->
+            scrollTo(FoodTestTags.slot(slot))
+            assertEquals(emptyList<MealSlot>(), momentsShowingATotal())
+            drawnText()
+        }
+        assertTrue(
+            "an untouched day drew an energy: $empty",
+            empty.none { it.contains(FoodLabels.ENERGY_UNIT) },
+        )
+        assertTrue(
+            "an untouched day drew a dash, which is a value it does not have: $empty",
+            empty.none { it.contains(FoodLabels.UNKNOWN) },
+        )
+
+        showDay(unknownProteinDayState())
+        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
+
+        // One line, protein unknown: the moment is recorded, and says so metric by metric.
+        assertEquals(listOf(MealSlot.SNACK), momentsShowingATotal())
+        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.SNACK), useUnmergedTree = true)
+            .assertExists()
+        compose.onNodeWithText("≈ 420 kcal", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("${FoodLabels.UNKNOWN} protein", useUnmergedTree = true)
+            .assertExists()
+
+        val unknown = drawnText()
+        assertTrue(
+            "the unknown day drew no dash at all: $unknown",
+            unknown.any { it.contains(FoodLabels.UNKNOWN) },
+        )
+        // PRD_FOOD 13.2: the unknown protein is a dash. It is never `0.0 g`, and never `0 kcal`.
+        assertTrue(
+            "an unknown was rendered as a zero: $unknown",
+            unknown.none { it == "≈ 0.0 g ${FoodDayFormat.PROTEIN_NOUN}" || it == "≈ 0 kcal" },
+        )
+
+        assertNotEquals(
+            "an untouched day and a day of unknown protein drew the same thing",
+            empty,
+            unknown,
+        )
     }
 
     /** PRD_FOOD 22, metric by metric: an unknown protein leaves the energy a number. */
@@ -280,30 +359,63 @@ class FoodDayScreenTest {
         compose.waitForIdle()
     }
 
+    /**
+     * The day on screen, held in state rather than closed over.
+     *
+     * `setContent` may only be called once per test, and two of the tests below have to compare
+     * *two* days on the same glass — so the state is swapped instead of the content being set
+     * again.
+     */
+    private val shown = mutableStateOf<FoodDayUiState?>(null)
+
     private fun setDay(state: FoodDayUiState, fontScale: Float = 1f) {
+        shown.value = state
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(
                 LocalDensity provides Density(density.density, fontScale),
             ) {
                 MueTheme {
-                    FoodDayScreen(
-                        state = state,
-                        onPreviousDay = { stepped-- },
-                        onNextDay = { stepped++ },
-                        onOpenDatePicker = {},
-                        onDismissDatePicker = {},
-                        onDayPicked = {},
-                        onAddToSlot = { addedTo = it },
-                        onEditEntry = { edited = it },
-                        onConfirmPlan = { confirmed = it },
-                        onSwapPlan = { swapped = it },
-                        onDismissPlan = { dismissed = it },
-                    )
+                    shown.value?.let { day ->
+                        FoodDayScreen(
+                            state = day,
+                            onPreviousDay = { stepped-- },
+                            onNextDay = { stepped++ },
+                            onOpenDatePicker = {},
+                            onDismissDatePicker = {},
+                            onDayPicked = {},
+                            onAddToSlot = { addedTo = it },
+                            onEditEntry = { edited = it },
+                            onConfirmPlan = { confirmed = it },
+                            onSwapPlan = { swapped = it },
+                            onDismissPlan = { dismissed = it },
+                        )
+                    }
                 }
             }
         }
+        compose.waitForIdle()
     }
+
+    /** Puts another day on the same screen, for the comparisons that need both. */
+    private fun showDay(state: FoodDayUiState) {
+        shown.value = state
+        compose.waitForIdle()
+    }
+
+    /** How many of the four moments are currently drawing a total of their own. */
+    private fun momentsShowingATotal(): List<MealSlot> = MealSlot.ORDERED.filter { slot ->
+        compose.onAllNodesWithTag(FoodTestTags.slotTotal(slot), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .isNotEmpty()
+    }
+
+    /** Every string the screen is currently drawing, glyph for glyph. */
+    private fun drawnText(): List<String> =
+        compose.onAllNodes(hasText("", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty() }
+            .map { it.text }
 
     // endregion
 }

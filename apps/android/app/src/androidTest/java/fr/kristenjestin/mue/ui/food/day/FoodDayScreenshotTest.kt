@@ -63,36 +63,42 @@ class FoodDayScreenshotTest {
         capture("food-day-scale2-bottom")
     }
 
-    /** The empty day, which is what the tab opens on before anything has been logged. */
+    /**
+     * The empty day, which is what the tab opens on before anything has been logged.
+     *
+     * Its pair is [theDayWhoseProteinIsUnknown], and the two are the picture of PRD_FOOD 13.2.
+     * `food-day-empty.png` must show four headings with **no figure beside any of them**;
+     * `food-day-unknown-protein.png` must show a snack reading `≈ 420 kcal` and `— protein`.
+     * If those two images ever look alike, the module has lost the difference between "nobody
+     * wrote this down" and "this is zero", and no assertion in the suite will say so.
+     */
     @Test
     fun theEmptyDay() {
-        compose.setContent {
-            MueTheme {
-                FoodDayScreen(
-                    state = FoodDayUiState.of(
-                        date = FoodDayPreviewData.TODAY,
-                        today = FoodDayPreviewData.TODAY,
-                    ),
-                    onPreviousDay = {},
-                    onNextDay = {},
-                    onOpenDatePicker = {},
-                    onDismissDatePicker = {},
-                    onDayPicked = {},
-                    onAddToSlot = {},
-                    onEditEntry = {},
-                    onConfirmPlan = {},
-                    onSwapPlan = {},
-                    onDismissPlan = {},
-                )
-            }
-        }
+        setDay(state = emptyDayState())
 
         capture("food-day-empty")
+
+        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
+        capture("food-day-empty-bottom")
+    }
+
+    /** The other half of PRD_FOOD 13.2: one line, an energy known and a protein that is not. */
+    @Test
+    fun theDayWhoseProteinIsUnknown() {
+        setDay(state = unknownProteinDayState())
+
+        capture("food-day-unknown-protein")
+
+        scrollTo(FoodTestTags.slot(MealSlot.SNACK))
+        capture("food-day-unknown-protein-bottom")
     }
 
     // region harness
 
-    private fun setDay(fontScale: Float) {
+    private fun setDay(
+        fontScale: Float = 1f,
+        state: FoodDayUiState = previewDayState(),
+    ) {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(
@@ -100,7 +106,7 @@ class FoodDayScreenshotTest {
             ) {
                 MueTheme {
                     FoodDayScreen(
-                        state = previewDayState(),
+                        state = state,
                         onPreviousDay = {},
                         onNextDay = {},
                         onOpenDatePicker = {},

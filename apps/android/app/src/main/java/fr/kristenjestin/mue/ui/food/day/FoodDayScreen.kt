@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,10 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -56,14 +51,12 @@ private val StepButtonSize: Dp = MueMinTouchTarget
 private const val DisabledStepAlpha = 0.2f
 
 /**
- * The `Day` screen (PRD_FOOD 10.1), wired to its own state.
+ * The `Day` screen (PRD_FOOD 10.1), wired to the journal.
  *
- * [viewModel] is null until the journal has a store behind it: PRD_FOOD 20's Room tables and the
- * repository implementations land in a parallel change, and the domain interfaces shipped first
- * so that [FoodDayViewModel] could be written and proved against them in the meantime. With no
- * store the screen still opens on today and still walks the week — it simply reads a journal
- * that has nothing in it, which is a real state of this screen (PRD_FOOD 17) rather than an
- * error card. Wiring it is then one argument at this call site, and nothing below it moves.
+ * [viewModel] defaults to the one `AppContainer` builds, exactly as `Log activity` does, and is
+ * a parameter only so a test can hand its own in. There is no storeless variant: the four Room
+ * repositories are registered on `AppContainer.food`, so a screen that quietly drew an empty day
+ * instead of reading them would be a fifth tab that never shows what was eaten.
  */
 @Composable
 internal fun FoodDayRoute(
@@ -71,18 +64,8 @@ internal fun FoodDayRoute(
     onEditEntry: (FoodLogEntryId) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: FoodDayViewModel? = null,
+    viewModel: FoodDayViewModel = foodDayViewModel(),
 ) {
-    if (viewModel == null) {
-        UnstoredFoodDay(
-            onAddToSlot = onAddToSlot,
-            onEditEntry = onEditEntry,
-            onSwapPlan = onSwapPlan,
-            modifier = modifier,
-        )
-        return
-    }
-
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     FoodDayScreen(
         state = state,
@@ -96,46 +79,6 @@ internal fun FoodDayRoute(
         onConfirmPlan = viewModel::onConfirmPlan,
         onSwapPlan = onSwapPlan,
         onDismissPlan = viewModel::onDismissPlan,
-        modifier = modifier,
-    )
-}
-
-/**
- * The same screen with the date held in composition instead of in a ViewModel, for as long as
- * there is no journal to read.
- *
- * It invents nothing: [FoodDayUiState.of] is handed no lines and no proposals, and answers with
- * the four empty moments PRD_FOOD 17 describes.
- */
-@Composable
-private fun UnstoredFoodDay(
-    onAddToSlot: (LocalDate, MealSlot) -> Unit,
-    onEditEntry: (FoodLogEntryId) -> Unit,
-    onSwapPlan: (MealPlanKey) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val today = remember { LocalDate.now() }
-    var date by rememberSaveable { mutableStateOf(today) }
-    var datePicker by rememberSaveable { mutableStateOf(false) }
-    val state = remember(date, datePicker, today) {
-        FoodDayUiState.of(date = date, today = today, isDatePickerVisible = datePicker)
-    }
-
-    FoodDayScreen(
-        state = state,
-        onPreviousDay = { date = date.minusDays(1) },
-        onNextDay = { if (state.canGoForward) date = date.plusDays(1) },
-        onOpenDatePicker = { datePicker = true },
-        onDismissDatePicker = { datePicker = false },
-        onDayPicked = {
-            date = if (it.isAfter(today)) today else it
-            datePicker = false
-        },
-        onAddToSlot = { slot -> onAddToSlot(date, slot) },
-        onEditEntry = onEditEntry,
-        onConfirmPlan = {},
-        onSwapPlan = onSwapPlan,
-        onDismissPlan = {},
         modifier = modifier,
     )
 }
@@ -307,8 +250,6 @@ private fun StepButton(
 
 // region previews
 
-private val PreviewToday: LocalDate = FoodDayPreviewData.TODAY
-
 @Preview(name = "Day — populated", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
 @Composable
 private fun FoodDayScreenPreview() {
@@ -335,7 +276,35 @@ private fun FoodDayScreenPreview() {
 private fun FoodDayEmptyPreview() {
     MuePreviewHost(padding = 0) {
         FoodDayScreen(
-            state = FoodDayUiState.of(date = PreviewToday, today = PreviewToday),
+            state = emptyDayState(),
+            onPreviousDay = {},
+            onNextDay = {},
+            onOpenDatePicker = {},
+            onDismissDatePicker = {},
+            onDayPicked = {},
+            onAddToSlot = {},
+            onEditEntry = {},
+            onConfirmPlan = {},
+            onSwapPlan = {},
+            onDismissPlan = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The pair of the preview above, and the one to look at when PRD_FOOD 13.2 is in question.
+ *
+ * One line, whose protein nobody wrote down. Held beside `Day — nothing logged` it is the whole
+ * rule in two pictures: a day with no line shows no total at all, and a day with an unknown shows
+ * `≈ 420 kcal` beside `— protein`. Neither shows a `0`.
+ */
+@Preview(name = "Day — an unknown protein", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodDayUnknownProteinPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodDayScreen(
+            state = unknownProteinDayState(),
             onPreviousDay = {},
             onNextDay = {},
             onOpenDatePicker = {},

@@ -1,12 +1,15 @@
 package fr.kristenjestin.mue.ui.food.day
 
+import androidx.compose.runtime.Composable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import fr.kristenjestin.mue.MueApplication
 import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.logic.MealSlotRules
 import fr.kristenjestin.mue.domain.logic.NutritionMath
@@ -284,30 +287,35 @@ class FoodDayViewModel(
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
         /**
-         * The factory this screen is created from once the journal has a store behind it.
+         * The journal's four stores, off `AppContainer`, in the arrangement every other screen
+         * of the app uses.
          *
-         * The four repositories are handed in rather than read off `AppContainer`, because none
-         * of them is registered there yet: PRD_FOOD 20's five Room tables land in a parallel
-         * change, and the interfaces shipped first precisely so that this ViewModel could be
-         * written and tested against them in the meantime. Wiring the tab is then one call.
+         * `FoodContainer` holds all four behind one lazy property, so a cold start that never
+         * reaches the Food tab never opens the database. The constructor above still takes the
+         * four *interfaces*, which is what keeps `FoodDayViewModelTest` on the JVM against fakes
+         * rather than against Room — the factory is the only thing that knows about either.
          */
-        fun factory(
-            logs: FoodLogRepository,
-            plans: MealPlanRepository,
-            recipes: RecipeRepository,
-            foods: FoodCatalogueRepository,
-            clock: Clock = Clock.systemDefaultZone(),
-        ): ViewModelProvider.Factory = viewModelFactory {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
+                val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
+                    as MueApplication
                 FoodDayViewModel(
-                    logs = logs,
-                    plans = plans,
-                    recipes = recipes,
-                    foods = foods,
+                    logs = app.container.food.foodLogRepository,
+                    plans = app.container.food.mealPlanRepository,
+                    recipes = app.container.food.recipeRepository,
+                    foods = app.container.food.foodCatalogueRepository,
                     savedStateHandle = createSavedStateHandle(),
-                    clock = clock,
                 )
             }
         }
     }
 }
+
+/**
+ * The `Day` screen's ViewModel, scoped to the Food tab's entry in the hosting activity's store.
+ *
+ * A function rather than a call site repeated in two places: the screen takes it as a default
+ * argument, and a test hands its own instance in instead.
+ */
+@Composable
+fun foodDayViewModel(): FoodDayViewModel = viewModel(factory = FoodDayViewModel.Factory)
