@@ -126,6 +126,11 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
 
+    // Ktor's own in-memory engine, so the sync client's path, bearer and error mapping are
+    // asserted on the JVM without a socket. Test-only, on the same version as the client above,
+    // so it adds nothing to the APK and nothing to the `force` block's reasoning below.
+    testImplementation(libs.ktor.client.mock)
+
     // Instrumented tests
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
@@ -157,10 +162,16 @@ dependencies {
  * would force the pin up and put `MigrationTestHelper` back on a version of the runtime it is
  * not built against. Bumping Ktor past 3.2.x therefore means re-deriving this force and
  * re-running the instrumented suite, not editing one number.
+ *
+ * `kotlinx-serialization-json-io` is listed for completeness: Ktor pulls it as a third artefact
+ * of the same family, and a pin covering two of three holds only until something moves the
+ * third. It resolves to the same version today, so the line is a no-op, which is the point of
+ * writing it now rather than after a skew has produced an `AbstractMethodError` nobody can place.
  */
 configurations.configureEach {
     resolutionStrategy.force(
         "org.jetbrains.kotlinx:kotlinx-serialization-core:${libs.versions.kotlinxSerialization.get()}",
         "org.jetbrains.kotlinx:kotlinx-serialization-json:${libs.versions.kotlinxSerialization.get()}",
+        "org.jetbrains.kotlinx:kotlinx-serialization-json-io:${libs.versions.kotlinxSerialization.get()}",
     )
 }

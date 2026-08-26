@@ -44,6 +44,9 @@ class AppContainer(private val applicationContext: Context) {
         DataStoreUserProfileRepository(
             applicationContext.userProfileDataStore,
             database.healthProfileDao(),
+            // The same outbox the measurement repository uses. The health profile is a
+            // synchronised aggregate (sync PRD 13.4), so its writes are journalled too.
+            sync.outbox,
         )
     }
 
@@ -63,4 +66,11 @@ class AppContainer(private val applicationContext: Context) {
 
     /** Server synchronisation, whole, for the same reason as [timer]. */
     val sync: SyncContainer by lazy { SyncContainer(applicationContext, database) }
+
+    /**
+     * The Food module, whole — its four repositories and the Ciqual seeding — for the same
+     * reason as [timer] and [sync]. It shares [SyncContainer.outbox] rather than minting a
+     * second one, so every aggregate's mutation comes from the same place.
+     */
+    val food: FoodContainer by lazy { FoodContainer(applicationContext, database, sync.outbox) }
 }

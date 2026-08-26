@@ -18,7 +18,11 @@
       "name": "@mue/platform",
       "version": "0.0.0",
       "dependencies": {
+        "@mue/api": "workspace:*",
+        "@mue/auth": "workspace:*",
         "@mue/contracts": "workspace:*",
+        "@mue/db": "workspace:*",
+        "@tanstack/react-router": "1.170.32",
         "@tanstack/react-start": "catalog:",
         "hono": "catalog:",
         "react": "catalog:",
@@ -55,6 +59,10 @@
         "better-auth": "catalog:",
         "drizzle-orm": "catalog:",
       },
+    },
+    "packages/ciqual": {
+      "name": "@mue/ciqual",
+      "version": "0.0.0",
     },
     "packages/contracts": {
       "name": "@mue/contracts",
@@ -257,6 +265,8 @@
     "@mue/api": ["@mue/api@workspace:packages/api"],
 
     "@mue/auth": ["@mue/auth@workspace:packages/auth"],
+
+    "@mue/ciqual": ["@mue/ciqual@workspace:packages/ciqual"],
 
     "@mue/contracts": ["@mue/contracts@workspace:packages/contracts"],
 

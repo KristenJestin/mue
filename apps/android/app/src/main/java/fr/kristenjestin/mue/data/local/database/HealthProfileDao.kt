@@ -4,15 +4,20 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /**
  * The single health profile row. Every query names the row rather than trusting the table to
  * hold exactly one, so a second row could never answer a read by accident. `'me'` is
  * [HealthProfileEntity.ROW_ID].
+ *
+ * It inherits [SyncJournalDao] for the same reason [MeasurementDao] does: sync PRD 13.4 makes
+ * the health profile a synchronised aggregate, so a height typed on the phone has to reach the
+ * outbox in the transaction that writes it, not in a second one a process death can skip.
  */
 @Dao
-interface HealthProfileDao {
+interface HealthProfileDao : SyncJournalDao {
 
     @Query("SELECT * FROM health_profile WHERE id = 'me'")
     fun observe(): Flow<HealthProfileEntity?>
@@ -26,4 +31,31 @@ interface HealthProfileDao {
     /** Used by the one-shot seeding, which must not overwrite a profile already in Room. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIfAbsent(entity: HealthProfileEntity)
+
+    /**
+     * [upsert] with the outbox row it was missing (FR-SYNC-001).
+     *
+     * Until this existed, `health_profile` journalled nothing: `DataStoreUserProfileRepository`
+     * called [upsert] alone, so a height or a birth date changed on the phone was a local write
+     * with no trace that it still had to be sent, and FR-SYNC-001's "une mutation ne peut pas
+     * être perdue" held for measurements only. [SyncAggregateStateEntity.TYPE_HEALTH_PROFILE]
+     * and PRD 13.4 both already said this aggregate was synchronised.
+     *
+     * The profile is one aggregate with one identity — there is exactly one row, keyed
+     * [HealthProfileEntity.ROW_ID] — so there is no tombstone path here: PRD 13.4 gives the
+     * profile no deletion, only fields that become null. Clearing a height is an upsert whose
+     * payload says null, which is a fact the server can merge field by field; a tombstone would
+     * say the profile itself ceased to exist, which is not a state the domain has.
+     */
+    @Transaction
+    suspend fun upsertWithMutation(entity: HealthProfileEntity, mutation: SyncMutationEntity) {
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
+        upsert(entity)
+        insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
+        )
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
+    }
 }

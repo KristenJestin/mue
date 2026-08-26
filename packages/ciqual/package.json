@@ -1,0 +1,22 @@
+{
+  "name": "@mue/ciqual",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generator for the embedded Ciqual catalogue asset (PRD_FOOD 9.1). Reads the ANSES source tables and writes the Android asset; imports nothing from the rest of the monorepo.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "vp lint src tools",
+    "format": "vp fmt src tools",
+    "format:check": "vp fmt --check src tools",
+    "test": "bun test",
+    "source:verify": "bun run src/cli/verify-source.ts",
+    "catalogue:report": "bun run src/cli/build-catalogue.ts --dry-run",
+    "catalogue:build": "bun run src/cli/build-catalogue.ts",
+    "fixtures:rebuild": "bun run tools/make-fixtures.ts"
+  }
+}

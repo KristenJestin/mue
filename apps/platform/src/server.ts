@@ -6,8 +6,15 @@ import { type EdgeOptions, createEdgeApp } from "./edge";
  * The prefixes PRD section 20.2 hands to Hono. A prefix matches the path itself and
  * anything under it, and nothing else: `/mcp` and `/mcp/session` are delegated,
  * `/mcpanel` is not.
+ *
+ * `/.well-known` is not in section 20.2's list and has to be here anyway. RFC 9728
+ * puts the protected-resource metadata at a fixed origin-root path, and an MCP client
+ * fetches it *before* it has any credential — it is the document that tells the client
+ * which authorization server to talk to. Left with TanStack Start, discovery answers
+ * 404 and the OAuth flow of section 15.1 never begins, so no client reaches `/mcp` at
+ * all. `packages/api/src/mcp/route.ts` (`createOAuthDiscoveryApp`) is what answers it.
  */
-export const DELEGATED_PREFIXES = ["/api", "/mcp", "/health"] as const;
+export const DELEGATED_PREFIXES = ["/api", "/mcp", "/health", "/.well-known"] as const;
 
 export function isDelegatedPath(pathname: string): boolean {
   return DELEGATED_PREFIXES.some(
