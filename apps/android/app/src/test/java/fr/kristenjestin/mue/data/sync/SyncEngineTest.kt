@@ -11,6 +11,7 @@ import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertMutationDto
 import fr.kristenjestin.mue.data.remote.sync.OriginDto
 import fr.kristenjestin.mue.data.remote.sync.SyncErrorCodes
 import fr.kristenjestin.mue.data.remote.sync.SyncTransportException
+import fr.kristenjestin.mue.data.remote.sync.WIRE_PUSH_MAX_MUTATIONS
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -102,6 +103,38 @@ class SyncEngineTest {
         assertEquals(1, completed.recovered)
         // And the recovered row really was sent: this is the loss FR-SYNC-001 forbids, closed.
         assertEquals(listOf("m-1"), api.pushRequests.single().mutations.map { it.mutationId })
+    }
+
+    /**
+     * A recovery that failed at engine start is retried, not latched at zero.
+     *
+     * The recovery runs in the constructor, off the caller's thread, and its failure has nowhere
+     * to be thrown to. Swallowing it and remembering "nothing was recovered" would leave the
+     * stranded rows stranded for the whole life of the process — and a process that has just
+     * been restored from a crash is exactly the one holding them. So the failure is remembered
+     * as a failure and the next `sync` tries again.
+     */
+    @Test
+    fun aRecoveryThatFailedAtEngineStartIsRetriedByTheNextSync() = runTest {
+        val store = FakeSyncStore(
+            mutations = listOf(
+                SyncFixtures.measurementUpsert("m-1", state = SyncMutationEntity.STATE_INFLIGHT),
+            ),
+        )
+        store.requeueInflightFailures = 1
+        val api = ScriptedSyncApi()
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
+
+        val completed = assertIs<SyncOutcome.Completed>(engine(store, api).sync())
+
+        assertEquals(2, store.requeueInflightCalls, "the failed attempt is retried, not latched")
+        assertEquals(1, completed.recovered)
+        assertEquals(
+            listOf("m-1"),
+            api.pushRequests.single().mutations.map { it.mutationId },
+            "the stranded row still reaches the server on this run",
+        )
     }
 
     /** Recovery happens once per engine, not once per synchronisation. */
@@ -341,6 +374,50 @@ class SyncEngineTest {
             "a change the contract cannot carry is kept, not refused",
         )
         assertTrue(!completed.hasIssues, "a deferred aggregate is not a `Sync issue`")
+    }
+
+    /**
+     * The blockage the type-filtered queue exists to prevent, at the scale that produces it.
+     *
+     * Every profile save journals a `healthProfile` row (gap 2, FR-SYNC-001) and
+     * `packages/contracts` has no branch for that type, so those rows are `pending` and
+     * undeliverable **for as long as the contract lacks the branch** — they never drain. A send
+     * that took the oldest [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would, once that
+     * many profile saves had accumulated, get back a window with nothing sendable in it, and the
+     * measurement queued behind them would stop going out permanently and silently. That is the
+     * indefinite block FR-SYNC-007 forbids, arriving from the client's side rather than the
+     * server's.
+     *
+     * So the measurement below sits behind a full window of older undeliverable rows, and it
+     * still goes out on the very first run.
+     */
+    @Test
+    fun aFullWindowOfUndeliverableRowsDoesNotStallTheMeasurementBehindThem() = runTest {
+        val blocked = (1..WIRE_PUSH_MAX_MUTATIONS).map { index ->
+            SyncFixtures.healthProfileUpsert("h-$index", createdAt = index.toLong())
+        }
+        val store = FakeSyncStore(
+            mutations = blocked + SyncFixtures.measurementUpsert("m-1", createdAt = 100_000),
+        )
+        val api = ScriptedSyncApi()
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
+
+        val completed = assertIs<SyncOutcome.Completed>(engine(store, api).sync())
+
+        assertEquals(
+            listOf("m-1"),
+            api.pushRequests.single().mutations.map { it.mutationId },
+            "the measurement must not wait behind rows nothing can ever send",
+        )
+        assertEquals(1, completed.applied)
+        assertEquals(WIRE_PUSH_MAX_MUTATIONS, completed.deferred)
+        assertTrue(!completed.hasIssues, "holding a change back is not a `Sync issue`")
+        assertEquals(
+            WIRE_PUSH_MAX_MUTATIONS,
+            store.rowsInState(SyncMutationEntity.STATE_PENDING).size,
+            "and none of them is lost, refused or reordered",
+        )
     }
 
     /** A batch of nothing but deferred rows still pulls: an agent's writes must still arrive. */

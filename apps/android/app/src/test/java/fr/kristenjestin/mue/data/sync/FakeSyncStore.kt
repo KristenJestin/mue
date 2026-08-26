@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.data.sync
 
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
+import fr.kristenjestin.mue.data.remote.sync.SyncWire
 
 /**
  * [SyncStore] in memory, with the same rules the Room implementation enforces in SQL.
@@ -42,9 +43,16 @@ class FakeSyncStore(
 
     fun row(mutationId: String): SyncMutationEntity? = rows[mutationId]
 
+    /** How many of the next [requeueInflight] calls throw, so a failed recovery is testable. */
+    var requeueInflightFailures: Int = 0
+
     override suspend fun requeueInflight(): Int {
         calls += "requeueInflight"
         requeueInflightCalls++
+        if (requeueInflightFailures > 0) {
+            requeueInflightFailures--
+            throw IllegalStateException("the database could not be opened")
+        }
         val stranded = rows.values.filter { it.state == SyncMutationEntity.STATE_INFLIGHT }
         stranded.forEach { rows[it.mutationId] = it.copy(state = SyncMutationEntity.STATE_PENDING) }
         return stranded.size
@@ -56,12 +64,25 @@ class FakeSyncStore(
 
     override suspend fun cursor(): String? = cursor
 
+    /**
+     * Only the sendable aggregate types, exactly as `SyncDao.pendingMutationsOfTypes` selects
+     * them — and the filter is applied *before* [limit], which is the whole point of it: a fake
+     * that took the window first and filtered afterwards would let the engine pass a test that
+     * the database would fail, in precisely the case (a queue full of undeliverable rows) the
+     * filter exists for.
+     */
     override suspend fun pending(limit: Int): List<SyncMutationEntity> {
         calls += "pending"
         return rows.values
             .filter { it.state == SyncMutationEntity.STATE_PENDING }
+            .filter { it.aggregateType in SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES }
             .sortedWith(compareBy({ it.createdAt }, { it.mutationId }))
             .take(limit)
+    }
+
+    override suspend fun deferredCount(): Int = rows.values.count {
+        it.state == SyncMutationEntity.STATE_PENDING &&
+            it.aggregateType !in SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES
     }
 
     override suspend fun markInflight(mutationIds: List<String>) {

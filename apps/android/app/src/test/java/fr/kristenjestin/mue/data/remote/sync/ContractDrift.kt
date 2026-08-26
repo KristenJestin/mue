@@ -55,8 +55,11 @@ object ContractDrift {
         val expected = try {
             json.parseToJsonElement(text)
         } catch (failure: SerializationException) {
+            // [headline] here too: kotlinx appends the whole offending document to a parse
+            // failure, and a fixture that is really a proxy's error page would put an HTML page
+            // in the middle of the test report.
             return listOf(
-                "$file is not JSON: ${failure.message}. " +
+                "$file is not JSON: ${headline(failure)} " +
                     "Re-emit the fixtures with `bun packages/contracts/src/fixtures.ts`.",
             )
         }

@@ -47,7 +47,7 @@ class HealthProfileSeedingTest {
         file = File(context.cacheDir, "test_seed_profile_${System.nanoTime()}.preferences_pb")
         profileStore = PreferenceDataStoreFactory.create { file }
         database = Room.inMemoryDatabaseBuilder(context, MueDatabase::class.java).build()
-        seeding = HealthProfileSeeding(database, profileStore)
+        seeding = HealthProfileSeeding({ database }, profileStore)
     }
 
     @After
@@ -170,7 +170,7 @@ class HealthProfileSeedingTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val untouched = Room.inMemoryDatabaseBuilder(context, MueDatabase::class.java).build()
         try {
-            HealthProfileSeeding(untouched, profileStore).seedOnce()
+            HealthProfileSeeding({ untouched }, profileStore).seedOnce()
 
             assertFalse(
                 "the guard must be read from DataStore, not from Room",

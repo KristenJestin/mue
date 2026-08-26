@@ -57,7 +57,9 @@ class SyncContainer(
      * and overwrite the one the user actually typed.
      */
     val healthProfileSeeding: HealthProfileSeeding by lazy {
-        HealthProfileSeeding(database, applicationContext.userProfileDataStore)
+        // The database is passed as a provider, not as a value: the fast path of `seedOnce` must
+        // not so much as ask for one, and a provider is what lets a JVM test see that it did not.
+        HealthProfileSeeding({ database }, applicationContext.userProfileDataStore)
     }
 
     /** One client for the whole process: a second would mean a second connection pool. */

@@ -40,7 +40,23 @@ interface SyncStore {
     /** The opaque cursor, exactly as the server last sent it. Null before the first pull. */
     suspend fun cursor(): String?
 
+    /**
+     * The next rows to send, oldest first, **restricted to the aggregate types this build can
+     * put on the wire** (`SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES`).
+     *
+     * The restriction belongs here rather than in the engine because it has to happen before the
+     * window is taken: a queue holding [WIRE_PUSH_MAX_MUTATIONS] undeliverable rows would
+     * otherwise return a window with nothing sendable in it and stall every row behind them for
+     * ever, which is the blockage FR-SYNC-007 forbids.
+     */
     suspend fun pending(limit: Int): List<SyncMutationEntity>
+
+    /**
+     * How many `pending` rows this build has no wire branch for — the health profile of PRD 13.4
+     * today. They are journalled, kept, block nothing, and go out unchanged the day
+     * `packages/contracts` grows their branch.
+     */
+    suspend fun deferredCount(): Int
 
     suspend fun markInflight(mutationIds: List<String>)
 
@@ -93,7 +109,10 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
     override suspend fun cursor(): String? = syncDao.syncState()?.cursor
 
     override suspend fun pending(limit: Int): List<SyncMutationEntity> =
-        syncDao.pendingMutations(limit)
+        syncDao.pendingMutationsOfTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES, limit)
+
+    override suspend fun deferredCount(): Int =
+        syncDao.countPendingOfOtherTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES)
 
     override suspend fun markInflight(mutationIds: List<String>) {
         if (mutationIds.isEmpty()) return

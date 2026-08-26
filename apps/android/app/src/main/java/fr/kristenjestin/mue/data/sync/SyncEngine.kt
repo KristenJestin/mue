@@ -49,6 +49,12 @@ import kotlinx.serialization.SerializationException
  *    request.
  * 5. **The cursor advances only after a page is applied**, in the same transaction, and never
  *    past a change this build cannot apply (PRD 12.4).
+ * 6. **A send selects only what it can send.** `health_profile` is journalled at every save and
+ *    `packages/contracts` has no branch for it, so those rows are `pending` and undeliverable
+ *    until the contract grows one. [SyncStore.pending] filters them out *before* the window is
+ *    taken, so however many of them accumulate they can never fill it and stall the measurements
+ *    behind them — FR-SYNC-007's "une mutation invalide ne bloque pas indéfiniment toutes les
+ *    mutations suivantes", applied to a mutation the client rather than the server cannot take.
  *
  * ## The cursor
  *
@@ -69,7 +75,12 @@ class SyncEngine(
     scope: CoroutineScope,
 ) {
 
-    private val recovery = CompletableDeferred<Int>()
+    /**
+     * The result of the recovery started in [init] — the [Result] and not the count, so a
+     * recovery that failed can be told apart from one that found nothing and retried in [sync]
+     * instead of being latched at zero for the life of the process.
+     */
+    private val recovery = CompletableDeferred<Result<Int>>()
 
     /**
      * One synchronisation at a time. `Sync now`, the periodic worker and the foreground trigger
@@ -79,10 +90,7 @@ class SyncEngine(
     private val gate = Mutex()
 
     init {
-        scope.launch {
-            val recovered = runCatching { store.requeueInflight() }.getOrDefault(0)
-            recovery.complete(recovered)
-        }
+        scope.launch { recovery.complete(runCatching { store.requeueInflight() }) }
     }
 
     /**
@@ -94,7 +102,12 @@ class SyncEngine(
      * outbox back before it does.
      */
     suspend fun sync(): SyncOutcome = gate.withLock {
-        val recovered = recovery.await()
+        // A recovery that failed at construction is retried here rather than latched at zero. A
+        // row left `inflight` by a killed process holds a change that exists on the phone and
+        // nowhere else, so swallowing the single attempt to unstick it would strand that change
+        // for the whole life of the process. Retrying is one `UPDATE`, and it is idempotent: its
+        // `WHERE state = 'inflight'` matches nothing once the rows are back.
+        val recovered = recovery.await().getOrElse { store.requeueInflight() }
 
         val serverUrl = store.serverUrl()
         val deviceId = store.deviceId()
@@ -117,13 +130,18 @@ class SyncEngine(
     // --- push -------------------------------------------------------------------------------
 
     private suspend fun push(deviceId: String): PushTally {
+        // Counted before the window is taken and not inside the loop below, because
+        // `store.pending` no longer returns these rows at all: they are of an aggregate type
+        // this build has no wire branch for, and leaving them in the queue a send selects from
+        // is what would eventually stall every measurement behind them (FR-SYNC-007).
+        var deferred = store.deferredCount()
+
         val batch = store.pending(WIRE_PUSH_MAX_MUTATIONS)
-        if (batch.isEmpty()) return PushTally()
+        if (batch.isEmpty()) return PushTally(deferred = deferred)
 
         val origin = SyncWire.androidOrigin(deviceId)
         val sendable = LinkedHashMap<String, MutationEnvelopeDto>(batch.size)
         val byId = batch.associateBy { it.mutationId }
-        var deferred = 0
         var unreadable = 0
 
         for (mutation in batch) {
@@ -143,11 +161,11 @@ class SyncEngine(
             }
 
             if (envelope == null) {
-                // An aggregate this build journals and the contract cannot yet carry — the
-                // health profile of PRD 13.4, whose type `packages/contracts` has no branch for.
-                // Left `pending`: it loses nothing, it blocks nothing, and it goes out unchanged
-                // the day the server understands it. Marking it `failed` would show the user a
-                // `Sync issue` for something they did not do wrong.
+                // A row of a sendable aggregate type that still has no wire shape — an `op` this
+                // build does not recognise, which only a downgrade can produce. Left `pending`
+                // for the same reason as the rows counted above: it loses nothing, it blocks
+                // nothing now that the queue is selected by type, and marking it `failed` would
+                // show the user a `Sync issue` for something they did not do wrong.
                 deferred++
                 continue
             }
@@ -334,7 +352,10 @@ sealed interface SyncOutcome {
         val duplicates: Int,
         /** FR-SYNC-007. Kept, marked, and surfaced as `Sync issue`. */
         val rejected: Int,
-        /** Journalled aggregates the contract has no wire branch for yet. Still `pending`. */
+        /**
+         * Journalled rows the contract has no wire branch for yet — the health profile of PRD
+         * 13.4. Still `pending`, never selected by a send, and blocking nothing behind them.
+         */
         val deferred: Int,
         /** Outbox rows whose stored payload could not be read back. Kept and marked. */
         val unreadable: Int,

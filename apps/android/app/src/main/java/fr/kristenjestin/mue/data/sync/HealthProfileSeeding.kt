@@ -52,7 +52,15 @@ import java.io.IOException
  * braces inside, and the braces are the ones that hold.
  */
 class HealthProfileSeeding(
-    private val database: MueDatabase,
+    /**
+     * A provider and not the database itself, so "the fast path never asks for Room" is a fact a
+     * test can *observe* rather than infer. A [MueDatabase] handed in would be asked for by
+     * whoever constructed this class, and the only remaining evidence would be whether the file
+     * was opened — which takes a device. A provider that throws makes the same guarantee
+     * assertable on the JVM, on every commit, and it costs the shipped path one lambda call on
+     * the one launch that has work to do.
+     */
+    private val database: () -> MueDatabase,
     private val profileDataStore: DataStore<Preferences>,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -71,6 +79,7 @@ class HealthProfileSeeding(
             // without ever asking for a database handle.
             if (legacy[KEY_SEEDED] == true) return@withContext
 
+            val database = database()
             if (database.syncDao().syncState()?.profileSeeded == true) {
                 // Room says it is done and the preference did not. That is an upgrade from the
                 // build that had no preference, so record it and take the fast path next time.

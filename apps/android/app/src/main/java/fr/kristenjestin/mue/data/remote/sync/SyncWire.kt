@@ -43,6 +43,27 @@ object SyncWire {
     )
 
     /**
+     * The `sync_aggregate_state.aggregate_type` values [toEnvelope] has a wire branch for, and
+     * the only ones a send may select.
+     *
+     * Filtering the queue on this list is not an optimisation, it is what keeps FR-SYNC-007's
+     * "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes" true of a
+     * queue that now contains rows nothing can send. The health profile is journalled at every
+     * save (FR-SYNC-001) and `AGGREGATE_TYPES` in `packages/contracts` is `["measurement"]`, so
+     * those rows stay `pending` for as long as the contract lacks the branch — they never drain.
+     * A send that simply took the oldest `WIRE_PUSH_MAX_MUTATIONS` rows would therefore, once
+     * that many profile saves had accumulated, return a window containing nothing sendable, and
+     * every measurement queued behind them would stop going out **permanently**, with no error
+     * anywhere. Selecting by type makes that impossible however many undeliverable rows pile up.
+     *
+     * [toEnvelope] still answers null for a row of a sendable type it cannot shape — an
+     * unrecognised `op`, say — so the two guards are not redundant: this one bounds what the
+     * queue can hide, that one bounds what the wire can be handed.
+     */
+    val SENDABLE_LOCAL_AGGREGATE_TYPES: List<String> =
+        listOf(SyncAggregateStateEntity.TYPE_MEASUREMENT)
+
+    /**
      * One outbox row as the server reads it, or null when this build has no wire shape for it.
      *
      * @throws SerializationException if a stored payload cannot be read back. That is a local

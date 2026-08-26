@@ -29,6 +29,15 @@ class ContractDriftTest {
         val listed = ContractFixtures.manifest().map { it.file }.sorted()
         val onDisk = ContractFixtures.files().filterNot { it == ContractFixtures.MANIFEST }
 
+        // Sixteen files: fifteen instances, each parsed through its Kotlin DTO below, and the
+        // manifest, parsed by `ContractFixtures.manifest`. Every file the contracts package
+        // emits has a reader here — which is exactly what they did not have when they landed.
+        assertEquals(
+            16,
+            ContractFixtures.files().size,
+            "the contracts package emits sixteen files and every one of them is read here",
+        )
+
         assertEquals(
             onDisk,
             listed,

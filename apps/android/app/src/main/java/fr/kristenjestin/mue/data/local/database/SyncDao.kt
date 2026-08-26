@@ -45,6 +45,44 @@ interface SyncDao : SyncJournalDao {
     )
     suspend fun pendingMutations(limit: Int): List<SyncMutationEntity>
 
+    /**
+     * The next mutations to send **of the aggregate types this build can put on the wire**,
+     * oldest first — the query a send actually uses.
+     *
+     * [pendingMutations] is the queue as the user's `Data & sync` screen thinks of it; this is
+     * the queue as the network sees it, and the difference is not cosmetic. `health_profile` is
+     * journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in `packages/contracts` is
+     * `["measurement"]`, so those rows are `pending` and undeliverable *for as long as the
+     * contract lacks the branch* — they never drain. A send that took the oldest rows regardless
+     * of type would, once that many profile saves had accumulated, get back a window holding
+     * nothing sendable, and every measurement behind them would stop going out for good.
+     * FR-SYNC-007 forbids exactly that, so the type is part of the selection rather than a check
+     * made after the rows have already filled the window.
+     *
+     * The types are bound rather than spelled out, unlike `state` above: they are owned by
+     * `SyncWire`, which is where the wire's vocabulary is translated, and a literal here would
+     * be a second place to remember when the contract grows an aggregate.
+     */
+    @Query(
+        "SELECT * FROM sync_mutations WHERE state = 'pending' " +
+            "AND aggregate_type IN (:aggregateTypes) " +
+            "ORDER BY created_at ASC, rowid ASC LIMIT :limit"
+    )
+    suspend fun pendingMutationsOfTypes(
+        aggregateTypes: List<String>,
+        limit: Int,
+    ): List<SyncMutationEntity>
+
+    /**
+     * How many `pending` rows this build has no wire branch for. Kept, blocking nothing, and
+     * reported so a run can say how much it is holding back rather than pretend it is idle.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM sync_mutations WHERE state = 'pending' " +
+            "AND aggregate_type NOT IN (:aggregateTypes)"
+    )
+    suspend fun countPendingOfOtherTypes(aggregateTypes: List<String>): Int
+
     @Query("SELECT * FROM sync_mutations WHERE mutation_id = :mutationId")
     suspend fun mutation(mutationId: String): SyncMutationEntity?
 

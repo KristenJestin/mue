@@ -173,5 +173,10 @@ class ContractDriftDetectorTest {
 
         assertTrue(drift.single().contains("is not JSON"), drift.single())
         assertTrue(drift.single().contains("fixtures.ts"), drift.single())
+        // kotlinx appends the whole offending document to a parse failure. A proxy's error page
+        // in the middle of a test report is how a finding gets scrolled past, so it is trimmed
+        // to the same one line every other failure mode produces.
+        assertTrue(!drift.single().contains("<html>"), drift.single())
+        assertEquals(1, drift.single().lines().size, "one readable line, not a page: ${drift.single()}")
     }
 }
