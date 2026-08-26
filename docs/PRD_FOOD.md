@@ -675,6 +675,24 @@ Il n'existe aucun mode, badge ou interrupteur lié à MCP. Connecté ou non, cha
 - Room reste la source observable de l'interface.
 - Cinq tables sont ajoutées : `food`, `recipe`, `recipe_ingredient`, `food_log_entry`, `meal_plan_entry`.
 - Les migrations sont additives et explicites. `fallbackToDestructiveMigration` reste interdit.
+
+### 20.1 Métadonnées de synchronisation dès la création
+
+Les quatre agrégats de ce module — `food`, `recipe` avec ses ingrédients, `food_log_entry` et `meal_plan_entry` — portent **dès leur première migration** les métadonnées communes définies par la section 12.1 de [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) : identité UUID stable, révision serveur, instants de création et de modification, tombstone, origine et identifiant de la dernière mutation.
+
+Ces colonnes existent même si le serveur n'est pas encore développé, et même si l'utilisateur n'associe jamais de serveur. Elles restent alors simplement inutilisées.
+
+La raison est de séquencement, pas de fonctionnalité. Créer ces tables sans leurs métadonnées obligerait à les migrer plus tard, sur une base contenant déjà un journal alimentaire réel, en plus de la migration que le PRD serveur prévoit déjà pour le poids et l'activité. Deux migrations de synchronisation à deux moments différents, sur deux jeux de tables, pour un résultat identique.
+
+Il en découle une contrainte d'ordre : **le format de ces métadonnées doit être figé avant la première migration de ce module.** Il l'est à l'issue du chemin vertical décrit par la section 24 du PRD serveur, qui l'éprouve sur le poids et l'activité — des données déjà en base, où une erreur de format coûte moins cher. L'implémentation de Food commence après ce jalon, et peut ensuite avancer en parallèle du reste de la plateforme.
+
+Deux autres dépendances suivent le même jalon :
+
+- l'écran `Data & sync`, défini par la section 9.1 du PRD serveur, qui porte la consultation de l'audit exigée par la section 21.4 du présent document ;
+- le journal local de mutations, qui doit accepter les agrégats alimentaires sans modification de son enveloppe.
+
+### 20.2 Autres exigences techniques
+
 - Le sous-ensemble Ciqual est livré comme ressource et inséré au premier démarrage, avec sa version ; une mise à jour ne modifie jamais un aliment personnalisé ni une ligne de journal.
 - Les index couvrent au minimum `food_log_entry(consumedOn, slot, consumedAt)`, `meal_plan_entry(plannedOn, slot)` en unicité, `recipe_ingredient(recipeId)` et la recherche par nom d'aliment.
 - La préférence d'affichage de l'énergie vit dans DataStore et n'est pas synchronisée. Il n'existe aucune préférence liée à MCP ou à l'origine des données.
@@ -820,6 +838,7 @@ Règles communes :
 ### Technique
 
 - [ ] Les migrations Room sont additives et testées sur une base peuplée.
+- [ ] Les cinq tables du module portent les métadonnées de synchronisation dès leur première migration, serveur associé ou non.
 - [ ] Le calcul nutritionnel, conversion de cuisson comprise, est couvert par des tests unitaires indépendants de l'interface.
 - [ ] Aucune image n'est stockée dans Room.
 - [ ] La suppression d'une recette utilisateur supprime ses fichiers image.
@@ -867,7 +886,9 @@ Règles communes :
 | Précision affichée | Ordre de grandeur, toujours précédé de `≈`. |
 | Fonctionnement hors ligne | Total, sauf le scan. |
 | Compte utilisateur requis | Non. |
-| Le module dépend-il du serveur ? | Non. Il le prépare. |
+| Le module dépend-il du serveur ? | À l'exécution, non : il fonctionne seul. Au développement, oui : voir la ligne suivante. |
+| Quand l'implémentation de Food peut-elle commencer ? | Après le chemin vertical du PRD serveur, qui fige le format des métadonnées de synchronisation. Ensuite, en parallèle du reste de la plateforme. |
+| Les cinq tables portent-elles les métadonnées de synchronisation dès le départ ? | Oui, même sans serveur associé, pour ne pas migrer deux fois une base contenant déjà un journal réel. |
 
 ## 24. Ce qui reste à arbitrer
 
