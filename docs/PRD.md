@@ -68,6 +68,8 @@ Mue doit proposer :
 - Catégorisation pédiatrique de l'IMC.
 - Diagnostic ou recommandation médicale.
 
+> **Cette liste borne la V1, pas le produit.** Trois de ces exclusions ont depuis leur propre PRD validé : la synchronisation et le compte utilisateur dans [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md), le suivi alimentaire dans [`PRD_FOOD.md`](./PRD_FOOD.md), l'activité physique dans [`PRD_ACTIVITIES.md`](./PRD_ACTIVITIES.md). Elles restent hors périmètre de la V1, et en sont sorties depuis.
+
 ## 6. Utilisateur cible
 
 La V1 s'adresse à une personne anglophone utilisant un téléphone Android et souhaitant observer son évolution de poids sans utiliser un système complexe de régime ou de coaching.
