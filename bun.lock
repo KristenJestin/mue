@@ -22,6 +22,7 @@
         "@mue/auth": "workspace:*",
         "@mue/contracts": "workspace:*",
         "@mue/db": "workspace:*",
+        "@tanstack/react-router": "1.170.32",
         "@tanstack/react-start": "catalog:",
         "hono": "catalog:",
         "react": "catalog:",

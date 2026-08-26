@@ -1,3 +1,4 @@
+import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 /**
@@ -9,19 +10,13 @@ import { useEffect, useMemo, useState } from "react";
  * and hands the same signed query back. The signature is what makes that safe -- a
  * tampered `scope` or `redirect_uri` fails verification on the server.
  *
- * Set `MUE_CONSENT_PAGE=/oauth-consent` so Better Auth redirects here; the default in
- * `packages/auth/src/config.ts` is `/consent`.
+ * The file is named for the route it serves. `readAuthConfig().consentPage` defaults to
+ * `/consent`, so with file-based routing the default configuration now resolves to a
+ * page that exists; `MUE_CONSENT_PAGE` only has to be set to move it somewhere else.
  *
- * Two things this page is deliberately not:
- *
- *  - it is not an authorization. Section 16 is explicit that a browser-side guard is
- *    never authorisation: every decision here is re-checked by Better Auth against the
- *    session cookie and the signed query.
- *  - it is not a route registration. `apps/platform` has no route tree, no client entry
- *    and no `@tanstack/react-router` dependency yet, so `createFileRoute` cannot be
- *    imported without adding a package that is not in the root catalog. The component
- *    is the shape a Start route wants, so the whole of the change is one line:
- *    `export const Route = createFileRoute("/oauth-consent")({ component: OAuthConsentPage })`.
+ * This page is deliberately not an authorization. Section 16 is explicit that a
+ * browser-side guard never is: every decision here is re-checked by Better Auth against
+ * the session cookie and the signed query.
  */
 
 /**
@@ -127,11 +122,20 @@ async function decide(
   return url;
 }
 
+export const Route = createFileRoute("/consent")({ component: OAuthConsentPage });
+
 export function OAuthConsentPage(): React.ReactElement {
-  const request = useMemo(
-    () => readConsentRequest(typeof window === "undefined" ? "" : window.location.search),
-    [],
-  );
+  /**
+   * The router's location, not `window.location`.
+   *
+   * This page is server-rendered now that it is mounted, and `window` does not exist
+   * there. Reading it during render produced an empty request on the server and a
+   * populated one in the browser: React would discard the server tree on that mismatch,
+   * and until it did, the first thing the owner saw of an authorization request was
+   * "Nothing to authorize". The router carries the same query on both sides.
+   */
+  const searchStr = useRouterState({ select: (state) => state.location.searchStr });
+  const request = useMemo(() => readConsentRequest(searchStr), [searchStr]);
 
   const [clientName, setClientName] = useState<string | null>(null);
   const [granted, setGranted] = useState<readonly string[]>(request?.scopes ?? []);
@@ -184,53 +188,56 @@ export function OAuthConsentPage(): React.ReactElement {
         </p>
       )}
 
-      <fieldset disabled={busy}>
-        <legend>What it may do</legend>
-        <ul>
-          {request.scopes.map((scope) => {
-            const fixed = MACHINERY_SCOPES.has(scope);
-            return (
-              <li key={scope}>
-                <label>
-                  <input
-                    type="checkbox"
-                    name="scope"
-                    value={scope}
-                    checked={granted.includes(scope)}
-                    disabled={fixed}
-                    onChange={() => {
-                      toggle(scope);
-                    }}
-                  />{" "}
-                  {SCOPE_LABELS[scope] ?? scope}
-                  {isDangerous(scope) && <strong> — this one cannot be undone</strong>}
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      </fieldset>
-
-      {problem !== null && <p role="alert">{problem}</p>}
-
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
           submit(true);
         }}
       >
-        Allow
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          submit(false);
-        }}
-      >
-        Refuse
-      </button>
+        <fieldset disabled={busy}>
+          <legend>What it may do</legend>
+          <ul>
+            {request.scopes.map((scope) => {
+              const fixed = MACHINERY_SCOPES.has(scope);
+              return (
+                <li key={scope}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      name="scope"
+                      value={scope}
+                      checked={granted.includes(scope)}
+                      disabled={fixed}
+                      onChange={() => {
+                        toggle(scope);
+                      }}
+                    />{" "}
+                    {SCOPE_LABELS[scope] ?? scope}
+                    {isDangerous(scope) && <strong> — this one cannot be undone</strong>}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+
+        {/* Allow is the submit so the keyboard does what the mouse does; refusing is
+            never the default action of a form the owner may have opened by accident. */}
+        <button type="submit" className="primary" disabled={busy}>
+          Allow
+        </button>{" "}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            submit(false);
+          }}
+        >
+          Refuse
+        </button>
+      </form>
+
+      {problem !== null && <p role="alert">{problem}</p>}
     </main>
   );
 }
