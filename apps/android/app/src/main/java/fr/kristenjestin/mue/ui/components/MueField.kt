@@ -41,6 +41,22 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 /**
  * Rounded container holding a small grey label above a value. Used both for editable fields
  * and for read-only rows that open a picker, hence the optional [onClick].
+ *
+ * The label and the value are allowed to take a second line, and the trailing slot beside them
+ * steps onto its own line rather than squeezing them.
+ *
+ * Both used to be pinned to `maxLines = 1`, which at a doubled font scale turned Entry's date row
+ * into `Measureme…` over `August 26, …` with `Change` still beside it: the name of the field and
+ * the date it holds, **both** cut, on the one control that says which day is about to be
+ * recorded. The same row carries `Start time · optional` and `Distance` on the activity form, and
+ * they came out `Start ti…` and `Dista…`. `onNodeWithText("Measurement date")` matched every one
+ * of them, because the semantics string is the whole label whatever reaches the glass.
+ *
+ * A second line is what a bigger text size is *for*, so the ceiling simply goes; the row grows
+ * taller and says everything it has to say. The trailing slot is then measured rather than
+ * trusted — see [MueSplitRow] — so `Change` sits beside the value while both fit and drops under
+ * it, still end-aligned, when they no longer do. At the ordinary scale every one of these labels
+ * fits on one line beside its action, and the layout is the one that shipped, to the pixel.
  */
 @Composable
 fun MueFieldContainer(
@@ -88,18 +104,33 @@ fun MueFieldContainer(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            MueText(label, MueTheme.typography.label, color = colors.textTertiary, maxLines = 1)
-            content()
+        val body: @Composable (Modifier) -> Unit = { bodyModifier ->
+            Column(
+                modifier = bodyModifier,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                MueText(label, MueTheme.typography.label, color = colors.textTertiary)
+                content()
+            }
         }
-        trailing?.let {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                content = it,
+
+        if (trailing == null) {
+            body(Modifier.weight(1f))
+        } else {
+            MueSplitRow(
+                modifier = Modifier.weight(1f),
+                // No gap while the two sit abreast: the weighted column this replaces kept
+                // none either, and a row that used to touch its action must go on touching it.
+                gap = 0.dp,
+                stackedGap = 8.dp,
+                start = { body(Modifier) },
+                end = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        content = trailing,
+                    )
+                },
             )
         }
     }
@@ -214,7 +245,7 @@ fun MuePickerField(
             }
         },
     ) {
-        MueText(value, MueTheme.typography.bodyStrong, maxLines = 1)
+        MueText(value, MueTheme.typography.bodyStrong)
     }
 }
 
