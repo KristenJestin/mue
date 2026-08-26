@@ -79,13 +79,6 @@ private const val HAPTICS_BODY =
     "Short vibrations while adjusting the scale and when a measurement is saved."
 private const val NOT_SET = "Not set"
 
-/** Manque à `ScaleMessages` : ce que la ligne `Scales` de `Profile` ouvre, pour l'accessibilité. */
-private const val MANAGE_SCALES = "Manage your scales"
-
-/** Manque à `ScaleMessages` : à quoi sert une balance associée, en une ligne, sur `Profile`. */
-private const val SCALES_ROW_BODY =
-    "Pair a Bluetooth scale and your weight arrives on its own when you step on it."
-
 /**
  * `Profile`: the health profile, the BMI it feeds, the preferences and the CSV export.
  *
@@ -482,7 +475,7 @@ private fun ScalesSection(pairedScaleCount: Int, onOpenScales: () -> Unit) {
             shape = MueTheme.shapes.field,
             contentPadding = PaddingValues(spacing.lg),
             onClick = onOpenScales,
-            onClickLabel = MANAGE_SCALES,
+            onClickLabel = ScaleMessages.MANAGE_YOUR_SCALES,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -495,7 +488,7 @@ private fun ScalesSection(pairedScaleCount: Int, onOpenScales: () -> Unit) {
                         style = MueTheme.typography.bodyStrong,
                     )
                     MueText(
-                        text = SCALES_ROW_BODY,
+                        text = ScaleMessages.SCALES_ROW_BODY,
                         style = MueTheme.typography.caption,
                         color = MueTheme.colors.textSecondary,
                         modifier = Modifier.padding(top = spacing.xxs),

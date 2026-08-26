@@ -44,19 +44,6 @@ import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.Instant
 
-/** Manque à `ScaleMessages` : l'intitulé du bloc d'identité, au-dessus du modèle et du contact. */
-private const val ABOUT_TITLE = "About this scale"
-
-/** Manque à `ScaleMessages` : ce que le bloc technique est, et ce qu'il n'est pas. */
-private const val DIAGNOSTICS_NOTE =
-    "Nothing to change here. These are the values Mue reads when it looks for this scale."
-
-/** Manque à `ScaleTestTags` : la fiche montre la présence comme la liste. */
-private const val DETAIL_STATUS_TAG = "scale:detailStatus"
-
-/** Manque à `ScaleTestTags` : la section de renommage, distincte de son champ. */
-private const val RENAME_SECTION_TAG = "scale:renameSection"
-
 /**
  * La fiche d'une balance (FR-SCALE-013, 014), câblée au même ViewModel que la liste.
  *
@@ -160,7 +147,7 @@ internal fun ScaleDetailContent(
             Spacer(Modifier.height(spacing.md))
 
             Column(
-                modifier = Modifier.testTag(RENAME_SECTION_TAG),
+                modifier = Modifier.testTag(ScaleTestTags.RENAME_SECTION),
                 verticalArrangement = Arrangement.spacedBy(spacing.md),
             ) {
                 MueText(ScaleMessages.RENAME_THIS_SCALE, MueTheme.typography.sectionTitle)
@@ -191,7 +178,7 @@ internal fun ScaleDetailContent(
             }
 
             MueSurfaceCard(contentPadding = PaddingValues(spacing.cardPadding)) {
-                MueText(ABOUT_TITLE, MueTheme.typography.sectionTitle)
+                MueText(ScaleMessages.ABOUT_THIS_SCALE, MueTheme.typography.sectionTitle)
                 DetailRow(ScaleMessages.MODEL_LABEL, scale.modelName, spacing.md)
                 DetailRow(
                     label = ScaleMessages.LAST_SEEN_LABEL,
@@ -204,7 +191,7 @@ internal fun ScaleDetailContent(
                     color = MueTheme.colors.textTertiary,
                     modifier = Modifier
                         .padding(top = spacing.sm)
-                        .testTag(DETAIL_STATUS_TAG)
+                        .testTag(ScaleTestTags.DETAIL_STATUS)
                         .semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
@@ -215,7 +202,7 @@ internal fun ScaleDetailContent(
             ) {
                 MueText(ScaleMessages.DIAGNOSTICS_TITLE, MueTheme.typography.sectionTitle)
                 MueText(
-                    text = DIAGNOSTICS_NOTE,
+                    text = ScaleMessages.DIAGNOSTICS_NOTE,
                     style = MueTheme.typography.caption,
                     color = MueTheme.colors.textTertiary,
                     modifier = Modifier.padding(top = spacing.xs),

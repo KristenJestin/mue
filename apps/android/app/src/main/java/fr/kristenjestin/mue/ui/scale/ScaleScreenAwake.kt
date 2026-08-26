@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.data.scale.ble
+package fr.kristenjestin.mue.ui.scale
 
 import fr.kristenjestin.mue.domain.model.ScaleSessionState
 
@@ -18,10 +18,16 @@ import fr.kristenjestin.mue.domain.model.ScaleSessionState
  * sont pas dans la liste, `NotFound` non plus, et un écran qui n'est plus visible a déjà appelé
  * `ScaleSessionSource.stop()`.
  *
- * **Le maintien lui-même appartient à l'écran**, pas à la couche data : c'est une propriété de la
- * fenêtre Android (`FLAG_KEEP_SCREEN_ON`, ou `Modifier` équivalent côté Compose), et rien dans un
- * dépôt ne doit tenir une référence de fenêtre. Cette fonction est la moitié qui peut être écrite
- * ici et testée sans Android ; l'autre moitié est une ligne de l'écran `Entry`.
+ * **Le maintien lui-même appartient à l'écran** : c'est une propriété de la fenêtre Android
+ * (`View.keepScreenOn`), et rien dans un repository ne doit tenir une référence de fenêtre. Cette
+ * dérivation a d'abord été écrite dans `data/scale/ble` faute de mieux ; elle est ici parce que la
+ * règle est une règle d'interface et que rien de la couche de liaison ne la lit.
+ *
+ * **C'est la seule implémentation de cette règle.** `EntryViewModel` la lit une fois, à l'endroit
+ * unique où un état de liaison devient de l'interface, et la pose dans
+ * `EntryScaleUiState.keepScreenOn` ; `EntryScreen` recopie ce booléen dans la fenêtre. Aucune
+ * branche de l'écran ne décide de l'éveil pour son compte — sans quoi les trois conditions d'arrêt
+ * de FR-SCALE-020 seraient à vérifier une par une dans dix endroits, et la dixième serait fausse.
  */
 internal val ScaleSessionState.keepsScreenAwake: Boolean
     get() = when (this) {

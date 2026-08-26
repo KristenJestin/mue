@@ -34,14 +34,15 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.Instant
 import java.util.Locale
 
-/** Sépare le dernier contact de l'état de présence sur une seule ligne. */
+/**
+ * Sépare le dernier contact de l'état de présence sur une seule ligne.
+ *
+ * **Volontairement pas dans `ScaleMessages`** : ce n'est pas une phrase adressée à quelqu'un, c'est
+ * la mise en page d'une ligne qui en porte deux. Il vit donc à côté de [statusLine], la seule
+ * fonction qui l'emploie. Le point médian de PRD_SCALE 18.5, lui, fait partie de trois citations
+ * littérales et reste écrit dans les constantes qui le citent.
+ */
 private const val STATUS_SEPARATOR = " · "
-
-/** Manque à `ScaleMessages` : ce que fait l'ouverture d'une ligne, pour l'accessibilité. */
-private const val OPEN_SCALE_LABEL = "Open this scale"
-
-/** Manque à `ScaleMessages` : le titre de la liste, sous le nom de l'écran. */
-private const val PAIRED_SCALES_TITLE = "Your scales"
 
 /**
  * `Profile > Scales`, câblé (FR-SCALE-010, 013, PRD_SCALE 18.1).
@@ -123,7 +124,7 @@ internal fun ScalesContent(
                 state.isEmpty -> ScalesEmptyState(onAddScale = onAddScale)
 
                 else -> {
-                    MueText(PAIRED_SCALES_TITLE, MueTheme.typography.sectionTitle)
+                    MueText(ScaleMessages.YOUR_SCALES, MueTheme.typography.sectionTitle)
                     Column(
                         modifier = Modifier.testTag(ScaleTestTags.LIST),
                         verticalArrangement = Arrangement.spacedBy(spacing.md),
@@ -194,7 +195,7 @@ private fun PairedScaleRow(scale: PairedScale, onClick: () -> Unit) {
         shape = MueTheme.shapes.field,
         contentPadding = PaddingValues(spacing.lg),
         onClick = onClick,
-        onClickLabel = OPEN_SCALE_LABEL,
+        onClickLabel = ScaleMessages.OPEN_THIS_SCALE,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {

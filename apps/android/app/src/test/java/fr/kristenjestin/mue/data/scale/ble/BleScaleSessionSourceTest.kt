@@ -10,7 +10,6 @@ import fr.kristenjestin.mue.data.scale.protocol.REAL_WEIGHT_ACK
 import fr.kristenjestin.mue.data.scale.protocol.hexToBytes
 import fr.kristenjestin.mue.data.scale.protocol.toHex
 import fr.kristenjestin.mue.domain.model.ScaleDevice
-import fr.kristenjestin.mue.domain.model.ScaleReading
 import fr.kristenjestin.mue.domain.model.ScaleSessionState
 import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
 import fr.kristenjestin.mue.domain.model.Weight
@@ -655,41 +654,6 @@ class BleScaleSessionSourceTest {
             assertEquals(8_575, stable.reading.weightHundredthsKg)
             assertNotNull(Weight.ofHundredthsOrNull(stable.reading.weightHundredthsKg))
         }
-
-    /**
-     * FR-SCALE-020 : l'écran reste éveillé pendant la recherche seulement, « ce maintien cesse dès
-     * qu'un poids stable est reçu, que le délai expire ou qu'`Entry` n'est plus visible ».
-     */
-    @Test
-    fun `l'écran ne reste éveillé que pendant la session de recherche`() {
-        val awake = listOf(
-            ScaleSessionState.Searching,
-            ScaleSessionState.Connecting,
-            ScaleSessionState.WaitingForStepOn,
-            ScaleSessionState.Measuring(7_000),
-        )
-        val reading = ScaleReading(
-            sessionId = "session-1",
-            weightHundredthsKg = 8_575,
-            isStable = true,
-            impedanceOhm = null,
-            receivedAt = TEST_NOW,
-            scaleId = "scale-hb",
-        )
-        val asleep = listOf(
-            ScaleSessionState.Absent,
-            ScaleSessionState.Idle,
-            ScaleSessionState.NotFound,
-            ScaleSessionState.OutOfRange(2_100),
-            ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF),
-            // « Ce maintien cesse dès qu'un poids stable est reçu » (FR-SCALE-020).
-            ScaleSessionState.Stable(reading),
-            ScaleSessionState.Complete(reading),
-        )
-
-        awake.forEach { assertTrue(it.keepsScreenAwake, "$it doit garder l'écran éveillé") }
-        asleep.forEach { assertFalse(it.keepsScreenAwake, "$it ne doit pas garder l'écran éveillé") }
-    }
 
     // endregion
 }

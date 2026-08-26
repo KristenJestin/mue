@@ -1,5 +1,9 @@
 package fr.kristenjestin.mue.ui.scale
 
+import fr.kristenjestin.mue.domain.logic.BodyCompositionResult
+import fr.kristenjestin.mue.ui.progress.BodyCompositionMetric
+import java.util.Locale
+
 /**
  * Every word the scale module puts on screen, in one place.
  *
@@ -18,6 +22,17 @@ package fr.kristenjestin.mue.ui.scale
  *   threshold, no judgement passed on the reader;
  * - **the physical gesture stays the main one** (7.4) — the user steps on a scale, they do not
  *   drive a connection, and the words follow.
+ *
+ * The module lands on four surfaces — `Entry`, `Progress`, `Profile` and the `Scales` screen it
+ * creates (PRD_SCALE 8) — and every one of them reads its words from here, including the ones on
+ * `Progress`: a body-composition sentence declared next to the card that renders it is a sentence
+ * the next screen will write again, slightly differently. That is why this file names
+ * [BodyCompositionMetric], which lives in `ui/progress` and already takes its own labels from
+ * here. The two packages know each other by design; only one of them decides on the wording.
+ *
+ * What stays out: the separators and units that are **layout**, not language — `" · "` between two
+ * facts of one line, `%`, `kg`, `kcal` after a number. They live beside the formatting they belong
+ * to. Their spoken forms, which a screen reader actually says, are here.
  */
 internal object ScaleMessages {
 
@@ -36,6 +51,16 @@ internal object ScaleMessages {
     /** FR-SCALE-010, word for word: the action that opens the pairing flow. */
     const val ADD_A_SCALE: String = "Add a scale"
 
+    /** What the `Scales` row of `Profile` opens, said for the benefit of a screen reader. */
+    const val MANAGE_YOUR_SCALES: String = "Manage your scales"
+
+    /**
+     * What a paired scale is for, in one line, on `Profile` (PRD_SCALE 8). It describes the
+     * gesture and nothing else: stepping on a scale is the whole interaction (PRD_SCALE 7.4).
+     */
+    const val SCALES_ROW_BODY: String =
+        "Pair a Bluetooth scale and your weight arrives on its own when you step on it."
+
     // endregion
 
     // region The scales screen, empty (PRD_SCALE 18.1)
@@ -49,6 +74,12 @@ internal object ScaleMessages {
     const val SCALES_EMPTY_BODY: String =
         "A paired scale puts your weight on the ruler when you step on it, and can estimate " +
             "body composition. Weighing in by hand works exactly as it does now."
+
+    /** The heading above the list, once there is one. The screen is already called `Scales`. */
+    const val YOUR_SCALES: String = "Your scales"
+
+    /** What opening a row does, for a screen reader: the row is a card, not a labelled button. */
+    const val OPEN_THIS_SCALE: String = "Open this scale"
 
     // endregion
 
@@ -90,6 +121,46 @@ internal object ScaleMessages {
     const val SCAN_FOUND_NOTHING: String =
         "No scale found. Step on yours to wake it up, then scan again."
 
+    /**
+     * Before the first scan of the screen has run. It says the screen is ready and waiting, not
+     * that something failed — the difference matters, because that is also what the line reads
+     * for the instant between opening the screen and the scan starting on its own.
+     */
+    const val SCAN_NOT_STARTED: String = "Ready when you are"
+
+    /** The deliberate tap FR-SCALE-025 puts the permission request behind, and nowhere else. */
+    const val ALLOW_BLUETOOTH: String = "Allow Bluetooth"
+
+    /** FR-SCALE-011: this address is already paired, so the row says under which name. */
+    fun alreadyPairedAs(name: String): String = "Already paired as $name"
+
+    /** FR-SCALE-001: the hint on the row itself, before any question is asked. */
+    fun mightBe(name: String): String = "Might be $name"
+
+    // endregion
+
+    // region Reattaching a scale that changed address (FR-SCALE-001)
+
+    /**
+     * FR-SCALE-001: proposed, never silent. Two identical scales in one home must not merge
+     * behind their owner's back, and this is the one case where the right answer depends on
+     * something the application cannot see.
+     */
+    const val REATTACH_TITLE: String = "Is this the same scale?"
+
+    /**
+     * Both answers are constructive, so the body says what each one keeps. The battery sentence
+     * is the one that makes the question answerable: it names the ordinary event that produces
+     * a new address (PRD_SCALE 10.1), instead of leaving the reader to guess at a fault.
+     */
+    fun reattachBody(name: String): String =
+        "Mue knows a scale called $name that is no longer answering at the address it had. A " +
+            "battery change is enough to do that. Reattaching keeps its name and every " +
+            "measurement it produced; adding it separately keeps both scales."
+
+    const val REATTACH: String = "Reattach"
+    const val ADD_AS_A_NEW_SCALE: String = "Add as a new scale"
+
     // endregion
 
     // region One scale (FR-SCALE-012, FR-SCALE-013, FR-SCALE-014)
@@ -99,8 +170,19 @@ internal object ScaleMessages {
     const val RENAME_THIS_SCALE: String = "Rename this scale"
     const val SAVE_NAME: String = "Save name"
 
+    /** The block that groups the model, the last contact and the in-range state. */
+    const val ABOUT_THIS_SCALE: String = "About this scale"
+
     /** FR-SCALE-013: the model a driver recognised, beside the name the user gave. */
     const val MODEL_LABEL: String = "Model"
+
+    /**
+     * PRD_SCALE 9.2: what the model reads as once its driver is no longer shipped. A scale paired
+     * by an older build may reference a driver that has since been removed; the case has to be
+     * readable rather than fatal, and above all the scale must stay in the list — one that cannot
+     * be seen is one that cannot be forgotten (FR-SCALE-014).
+     */
+    const val UNKNOWN_MODEL: String = "Unknown model"
 
     /** FR-SCALE-013: the date of the last successful contact. */
     const val LAST_SEEN_LABEL: String = "Last seen"
@@ -118,6 +200,14 @@ internal object ScaleMessages {
 
     /** FR-SCALE-013: the technical block, grouped and presented as diagnostics. */
     const val DIAGNOSTICS_TITLE: String = "Technical details"
+
+    /**
+     * FR-SCALE-013 in one sentence: this block is something to read, never something to set. It
+     * is written out because the layout alone — no field, no chevron, no touch target — is a
+     * claim a screen reader cannot see.
+     */
+    const val DIAGNOSTICS_NOTE: String =
+        "Nothing to change here. These are the values Mue reads when it looks for this scale."
     const val DIAGNOSTICS_ADDRESS: String = "Bluetooth address"
     const val DIAGNOSTICS_ADVERTISED_NAME: String = "Advertised name"
     const val DIAGNOSTICS_DRIVER: String = "Driver"
@@ -261,11 +351,44 @@ internal object ScaleMessages {
         "These are estimates from a foot-to-foot measurement. The change over time says more " +
             "than any single figure."
 
+    /**
+     * What opens the detailed caution of `BodyCompositionFormula` (FR-BODY-005, PRD_SCALE 13.3).
+     *
+     * A question, not a warning: the text behind it explains where the figures come from, it does
+     * not caution against anything.
+     */
+    const val HOW_ESTIMATED: String = "How these are estimated"
+
     /** FR-BODY-005: no second composition in the period, so there is no change to show. */
     const val NO_VALUE: String = "—"
 
     /** FR-BODY-005: the main value carries its own date, so it is not read as the last weigh-in. */
     const val MEASURED_ON_LABEL: String = "Measured on"
+
+    /**
+     * FR-BODY-005: the date of the displayed value stays visible, without which it would pass for
+     * the last weigh-in — which it is not, since weigh-ins without impedance are skipped when
+     * choosing it.
+     */
+    fun measuredOn(date: String): String = "$MEASURED_ON_LABEL $date"
+
+    /** The change, undated, when there is no earlier composition to name. */
+    const val CHANGE_LABEL: String = "Change"
+
+    /** The change with what it is measured against: a change without its date says nothing. */
+    fun changeSince(date: String): String = "$CHANGE_LABEL since $date"
+
+    /**
+     * The units, spoken (PRD_SCALE 20). The written `%`, `kg` and `kcal` stay in
+     * `BodyCompositionMetric` beside the number formatting they belong to; these three are read
+     * aloud, so they are words the module puts to a reader and belong here.
+     *
+     * `%` is announced `percent`, not "percent sign" — which is what a screen reader makes of the
+     * character on its own.
+     */
+    const val SPOKEN_PERCENT: String = "percent"
+    const val SPOKEN_KILOGRAMS: String = "kilograms"
+    const val SPOKEN_KILOCALORIES: String = "kilocalories"
 
     // endregion
 
@@ -286,9 +409,27 @@ internal object ScaleMessages {
      * completing the profile is not only about future weigh-ins.
      */
     const val PROFILE_INCOMPLETE_TITLE: String = "Body composition needs your profile"
-    const val PROFILE_INCOMPLETE_BODY: String =
-        "Estimates need your height, your date of birth and your sex. Mue kept the impedance it " +
-            "already measured, so past weigh-ins can be completed too."
+
+    /**
+     * PRD_SCALE 18.4: what is missing, by name.
+     *
+     * Written from [BodyCompositionResult.ProfileInput] rather than hard-coded, so someone who
+     * left out only their sex is not asked again for a height they already gave.
+     *
+     * **This is the only place the sentence exists.** [PROFILE_INCOMPLETE_BODY] is the same
+     * function applied to all three inputs, not a second copy of the wording: the PRD quotes the
+     * three-input form, and a second literal would be a second thing to keep in step.
+     */
+    fun profileIncompleteBody(missing: Set<BodyCompositionResult.ProfileInput>): String {
+        val named = BodyCompositionResult.ProfileInput.entries
+            .filter { it in missing }
+            .map(::profileInputPhrase)
+        return "Estimates need ${joinWithAnd(named)}. $IMPEDANCE_KEPT"
+    }
+
+    /** PRD_SCALE 18.4, word for word: nothing of the profile is filled in yet. */
+    val PROFILE_INCOMPLETE_BODY: String =
+        profileIncompleteBody(BodyCompositionResult.ProfileInput.entries.toSet())
 
     const val OPEN_PROFILE: String = "Open profile"
 
@@ -371,6 +512,59 @@ internal object ScaleMessages {
 
     /** PRD_SCALE 20: the scale state, exposed to accessibility services as a labelled region. */
     const val SCALE_STATUS_LABEL: String = "Scale status"
+
+    /**
+     * PRD_SCALE 20: the main value, read with its unit spelled out and its date.
+     *
+     * Only the two labels are lowercased, never the date: `Aug 20, 2026` put through `lowercase`
+     * becomes `aug 20, 2026`, which speech synthesisers read as a word.
+     *
+     * Takes the metric rather than its label and spoken unit as two separate strings: they are
+     * adjacent parameters of the same type, and an announcement that swaps them is exactly the
+     * kind of mistake no test would catch and no reader could unhear.
+     */
+    fun valueDescription(metric: BodyCompositionMetric, value: String, date: String): String =
+        "${metric.label} ${ESTIMATE.lowercase(Locale.ROOT)} $value ${metric.spokenUnit}, " +
+            "${MEASURED_ON_LABEL.lowercase(Locale.ROOT)} $date"
+
+    /** PRD_SCALE 20: a period with no composition, said rather than left to a silent dash. */
+    fun valueUnavailableDescription(metric: BodyCompositionMetric): String =
+        "${metric.label} estimate unavailable for this period"
+
+    /** PRD_SCALE 20: the change, read with what it compares itself to. */
+    fun changeDescription(
+        metric: BodyCompositionMetric,
+        change: String,
+        previousDate: String,
+    ): String = "${changeSince(previousDate)}, $change ${metric.spokenUnit}"
+
+    /** PRD_SCALE 20: why the change is a dash. A fact, not something missing. */
+    const val NO_PREVIOUS_DESCRIPTION: String = "No earlier estimate in this period"
+
+    // endregion
+
+    // region The wording of a sentence, not sentences of their own
+
+    /**
+     * The second sentence of [PROFILE_INCOMPLETE_BODY], repeated word for word while the first is
+     * made specific by [profileIncompleteBody].
+     */
+    private const val IMPEDANCE_KEPT: String =
+        "Mue kept the impedance it already measured, so past weigh-ins can be completed too."
+
+    /** The name of each missing input, as the `Profile` screen calls it. */
+    private fun profileInputPhrase(input: BodyCompositionResult.ProfileInput): String =
+        when (input) {
+            BodyCompositionResult.ProfileInput.HEIGHT -> "your height"
+            BodyCompositionResult.ProfileInput.BIRTH_DATE -> "your date of birth"
+            BodyCompositionResult.ProfileInput.SEX -> "your sex"
+        }
+
+    /** `a`, `a and b`, `a, b and c` — no comma before the `and`, as everywhere else in Mue. */
+    private fun joinWithAnd(items: List<String>): String = when (items.size) {
+        0, 1 -> items.joinToString()
+        else -> items.dropLast(1).joinToString(", ") + " and " + items.last()
+    }
 
     // endregion
 }

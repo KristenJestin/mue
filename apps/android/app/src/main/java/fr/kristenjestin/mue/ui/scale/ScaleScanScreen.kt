@@ -36,34 +36,6 @@ import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
-/** Manque à `ScaleMessages` : ce que fait le geste qui déclenche la demande de permission. */
-private const val ALLOW_BLUETOOTH = "Allow Bluetooth"
-
-/** Manque à `ScaleMessages` : un appareil déjà appairé, retrouvé par le scan. */
-private fun alreadyPairedAs(name: String): String = "Already paired as $name"
-
-/** Manque à `ScaleMessages` : l'indice de rattachement, sur la ligne (FR-SCALE-001). */
-private fun mightBe(name: String): String = "Might be $name"
-
-/** Manque à `ScaleMessages` : la question du rattachement d'adresse (FR-SCALE-001). */
-private const val REATTACH_TITLE = "Is this the same scale?"
-private fun reattachBody(name: String): String =
-    "Mue knows a scale called $name that is no longer answering at the address it had. A " +
-        "battery change is enough to do that. Reattaching keeps its name and every measurement " +
-        "it produced; adding it separately keeps both scales."
-private const val REATTACH_CONFIRM = "Reattach"
-private const val REATTACH_AS_NEW = "Add as a new scale"
-
-/** Manque à `ScaleMessages` : la ligne d'état pendant qu'aucun scan n'a encore tourné. */
-private const val SCAN_NOT_STARTED = "Ready when you are"
-
-/** Manquent à `ScaleTestTags`. */
-private const val ALLOW_PERMISSION_TAG = "scale:allowPermission"
-private const val SCAN_STATUS_TAG = "scale:scanStatus"
-private const val REATTACH_PROPOSAL_TAG = "scale:reattachProposal"
-private const val REATTACH_CONFIRM_TAG = "scale:reattachConfirm"
-private const val REATTACH_DECLINE_TAG = "scale:reattachDecline"
-
 /**
  * Le flux d'appairage, câblé (FR-SCALE-011, 012, 025).
  *
@@ -235,12 +207,12 @@ private fun ColumnScope.ScanResults(
         text = when {
             state.scanning -> ScaleMessages.SCANNING
             state.started -> ScaleMessages.SCAN_FINISHED
-            else -> SCAN_NOT_STARTED
+            else -> ScaleMessages.SCAN_NOT_STARTED
         },
         style = MueTheme.typography.label,
         color = MueTheme.colors.textTertiary,
         modifier = Modifier
-            .testTag(SCAN_STATUS_TAG)
+            .testTag(ScaleTestTags.SCAN_STATUS)
             .semantics { liveRegion = LiveRegionMode.Polite },
     )
 
@@ -305,8 +277,8 @@ private fun ColumnScope.ScanResults(
 private fun RecognisedDeviceRow(device: DiscoveredScale, onClick: () -> Unit) {
     val spacing = MueTheme.spacing
     val note = when {
-        device.alreadyPairedAs != null -> alreadyPairedAs(device.alreadyPairedAs)
-        device.reattachTo != null -> mightBe(device.reattachTo.displayName)
+        device.alreadyPairedAs != null -> ScaleMessages.alreadyPairedAs(device.alreadyPairedAs)
+        device.reattachTo != null -> ScaleMessages.mightBe(device.reattachTo.displayName)
         else -> null
     }
     MueSurfaceCard(
@@ -399,10 +371,10 @@ private fun ScanGateCard(
     when (gate) {
         ScanGate.PERMISSION_NEEDED -> {
             explanation = ScaleMessages.PERMISSION_EXPLANATION
-            actionLabel = ALLOW_BLUETOOTH
+            actionLabel = ScaleMessages.ALLOW_BLUETOOTH
             action = onRequestPermission
             cardTag = ScaleTestTags.PERMISSION_EXPLANATION
-            actionTag = ALLOW_PERMISSION_TAG
+            actionTag = ScaleTestTags.ALLOW_PERMISSION
         }
 
         ScanGate.PERMISSION_DENIED -> {
@@ -469,23 +441,29 @@ private fun ReattachProposalDialog(
     val colors = MueTheme.colors
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.testTag(REATTACH_PROPOSAL_TAG),
-        title = { MueText(REATTACH_TITLE, MueTheme.typography.sectionTitle) },
+        modifier = Modifier.testTag(ScaleTestTags.REATTACH_PROPOSAL),
+        title = { MueText(ScaleMessages.REATTACH_TITLE, MueTheme.typography.sectionTitle) },
         text = {
             MueText(
-                text = reattachBody(proposal.candidate.displayName),
+                text = ScaleMessages.reattachBody(proposal.candidate.displayName),
                 style = MueTheme.typography.body,
                 color = colors.textSecondary,
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, modifier = Modifier.testTag(REATTACH_CONFIRM_TAG)) {
-                MueText(REATTACH_CONFIRM, MueTheme.typography.button, color = colors.accent)
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag(ScaleTestTags.REATTACH_CONFIRM),
+            ) {
+                MueText(ScaleMessages.REATTACH, MueTheme.typography.button, color = colors.accent)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDecline, modifier = Modifier.testTag(REATTACH_DECLINE_TAG)) {
-                MueText(REATTACH_AS_NEW, MueTheme.typography.button, color = colors.textSecondary)
+            TextButton(
+                onClick = onDecline,
+                modifier = Modifier.testTag(ScaleTestTags.REATTACH_DECLINE),
+            ) {
+                MueText(ScaleMessages.ADD_AS_A_NEW_SCALE, MueTheme.typography.button, color = colors.textSecondary)
             }
         },
         containerColor = colors.canvasElevated,

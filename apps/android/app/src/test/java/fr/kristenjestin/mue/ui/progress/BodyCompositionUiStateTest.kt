@@ -407,46 +407,16 @@ class BodyCompositionUiStateTest {
 
     // endregion
 
-    // region les mots
+    // region ce qui manque au profil (FR-BODY-001, PRD_SCALE 18.4)
 
     /**
-     * PRD_SCALE 18.4 : le message nomme ce qui manque. Avec les trois entrées absentes, il
-     * reproduit **exactement** la formulation partagée de `ScaleMessages`, de sorte que la version
-     * spécifique ne soit qu'un raffinement de la référence et jamais une réécriture.
+     * La formulation elle-même a rejoint `ScaleMessages`, où vit désormais toute la langue du
+     * module, et `ScaleMessagesTest` la verrouille — y compris le fait que la phrase des trois
+     * entrées manquantes et `PROFILE_INCOMPLETE_BODY` sont une seule et même chose. Ce qui reste
+     * ici est ce que cet état sait vraiment : lesquelles des trois entrées manquent.
+     *
+     * FR-BODY-001 : une taille hors du domaine de saisie se traite comme une taille absente.
      */
-    @Test
-    fun `avec les trois entrées manquantes le message reprend le texte partagé`() {
-        val message = BodyCompositionMessages.profileIncompleteBody(
-            BodyCompositionResult.ProfileInput.entries.toSet(),
-        )
-
-        assertEquals(ScaleMessages.PROFILE_INCOMPLETE_BODY, message)
-    }
-
-    @Test
-    fun `le message ne réclame que ce qui manque réellement`() {
-        val message = BodyCompositionMessages.profileIncompleteBody(
-            setOf(BodyCompositionResult.ProfileInput.SEX),
-        )
-
-        assertTrue(message.startsWith("Estimates need your sex."))
-        assertFalse(message.contains("your height"))
-        assertFalse(message.contains("your date of birth"))
-    }
-
-    @Test
-    fun `deux entrées manquantes sont jointes par un seul and`() {
-        val message = BodyCompositionMessages.profileIncompleteBody(
-            setOf(
-                BodyCompositionResult.ProfileInput.HEIGHT,
-                BodyCompositionResult.ProfileInput.SEX,
-            ),
-        )
-
-        assertTrue(message.startsWith("Estimates need your height and your sex."))
-    }
-
-    /** FR-BODY-001 : une taille hors du domaine de saisie se traite comme une taille absente. */
     @Test
     fun `une taille hors domaine compte comme une taille manquante`() {
         val missing = BodyCompositionUiState.missingProfileInputsOf(PROFILE.copy(heightCm = 12))

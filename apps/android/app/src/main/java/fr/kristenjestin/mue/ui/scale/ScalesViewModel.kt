@@ -156,7 +156,7 @@ internal class ScalesViewModel(
         displayName = displayName,
         // Un pilote retiré depuis l'appairage se lit, il ne fait pas disparaître la balance :
         // une balance invisible serait une balance qu'on ne peut plus oublier (PRD_SCALE 9.2).
-        modelName = drivers.byId(driverId)?.modelName ?: PairedScale.UNKNOWN_MODEL_NAME,
+        modelName = drivers.byId(driverId)?.modelName ?: ScaleMessages.UNKNOWN_MODEL,
         driverId = driverId,
         address = address,
         advertisedName = advertisedName,
@@ -177,7 +177,9 @@ internal class ScalesViewModel(
                 ScalesViewModel(
                     scales = app.container.scale.scaleRepository,
                     drivers = app.container.scale.scaleDrivers,
-                    discovery = scaleDiscovery(app),
+                    // La **même** instance que `ScaleScanViewModel.Factory` : le comptage
+                    // d'ouvertures de `TransportScaleDiscovery` n'a de sens que partagé.
+                    discovery = app.container.scale.scaleDiscovery,
                 )
             }
         }

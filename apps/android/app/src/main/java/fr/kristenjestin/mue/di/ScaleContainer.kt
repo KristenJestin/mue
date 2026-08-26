@@ -12,6 +12,8 @@ import fr.kristenjestin.mue.data.scale.protocol.MueScaleDrivers
 import fr.kristenjestin.mue.domain.model.ScaleDriverRegistry
 import fr.kristenjestin.mue.domain.repository.ScaleRepository
 import fr.kristenjestin.mue.domain.repository.ScaleSessionSource
+import fr.kristenjestin.mue.ui.scale.ScaleDiscovery
+import fr.kristenjestin.mue.ui.scale.TransportScaleDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -78,11 +80,45 @@ class ScaleContainer(
      * Une seule instance, partagée : `BluetoothLeScanner` accepte plusieurs rappels simultanés, et
      * deux transports parallèles ne feraient que dupliquer la même absence d'état.
      *
-     * L'adaptation vers `ui.scale.ScaleDiscovery` — comptage de références, démarrage et arrêt
-     * appariés — appartient à `ui/scale`, et non ici : une dépendance de la couche data vers la
-     * couche interface serait à l'envers.
+     * L'adaptation vers [ScaleDiscovery] — comptage de références, démarrage et arrêt appariés —
+     * reste écrite dans `ui/scale` ; c'est [scaleDiscovery] qui l'instancie, une seule fois.
      */
     internal val scaleTransport: ScaleTransport by lazy { AndroidScaleTransport(applicationContext) }
+
+    /**
+     * L'unique scan partagé du processus (FR-SCALE-011, 013).
+     *
+     * **Une seule instance, et c'est une contrainte de correction.** `TransportScaleDiscovery`
+     * compte les ouvertures pour que le scan survive à la transition entre `Profile > Scales` et le
+     * flux d'appairage, que `AnimatedContent` compose ensemble le temps d'une animation. Deux
+     * adaptateurs compteraient chacun les leurs et ouvriraient deux scans BLE simultanés, ce qui
+     * reviendrait à écrire le comptage pour ne pas s'en servir : les deux fabriques de ViewModel de
+     * `ui/scale` lisent donc cette propriété-ci, et ne construisent jamais la leur.
+     *
+     * **Pourquoi `di` nomme un type de `ui` plutôt que l'inverse.** [ScaleDiscovery] est le port
+     * que les écrans de balance définissent pour le scan, et `TransportScaleDiscovery` en est
+     * l'adaptateur. Le mettre dans `data/scale/ble` aurait forcé la couche data à importer la
+     * couche interface — une inversion qui n'existe nulle part ailleurs dans ce dépôt, alors que
+     * `ui` importe déjà `data` (`ScaleMatching`, `ScaleTransport`). Ici, au contraire, la
+     * dépendance est celle d'une **racine de composition** : sans framework de DI (contrat §2),
+     * `AppContainer` est l'endroit dont le métier est précisément de connaître toutes les couches
+     * pour les assembler. Une racine de composition qui n'aurait pas le droit de nommer ce qu'elle
+     * assemble n'en serait pas une.
+     *
+     * `Main.immediate`, comme [scaleSessionSource] : le compte d'ouvertures de l'adaptateur n'a
+     * aucune synchronisation et n'en a pas besoin tant qu'il reste confiné au fil d'où les écrans
+     * appellent `start()` et `stop()`. `immediate` évite en prime un saut de dispatch entre le
+     * `start()` d'un écran et l'ouverture du scan.
+     *
+     * Paresseux : construit à la première fabrique de ViewModel qui en a besoin, c'est-à-dire à
+     * l'ouverture de `Profile > Scales`, jamais au démarrage de l'application.
+     */
+    internal val scaleDiscovery: ScaleDiscovery by lazy {
+        TransportScaleDiscovery(
+            scaleTransport,
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+        )
+    }
 
     /**
      * La source d'une pesée reçue, telle que l'écran `Entry` l'observe (PRD_SCALE 21.2).

@@ -318,7 +318,10 @@ internal class ScaleScanViewModel(
                 ScaleScanViewModel(
                     scales = app.container.scale.scaleRepository,
                     drivers = app.container.scale.scaleDrivers,
-                    discovery = scaleDiscovery(app),
+                    // La **même** instance que `ScalesViewModel.Factory` : `Profile > Scales` et ce
+                    // flux sont composés ensemble le temps d'une transition, et c'est le comptage
+                    // partagé qui empêche l'écran qui s'en va de couper le scan de celui qui arrive.
+                    discovery = app.container.scale.scaleDiscovery,
                 )
             }
         }

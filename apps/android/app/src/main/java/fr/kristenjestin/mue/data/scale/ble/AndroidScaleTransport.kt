@@ -1,6 +1,5 @@
 package fr.kristenjestin.mue.data.scale.ble
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -13,12 +12,9 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
-import android.content.pm.PackageManager
-import android.location.LocationManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat
 import fr.kristenjestin.mue.data.scale.protocol.bluetoothUuid16
 import fr.kristenjestin.mue.domain.model.ScaleAdvertisement
 import fr.kristenjestin.mue.domain.model.ScaleGattProfile
@@ -102,18 +98,13 @@ internal class AndroidScaleTransport(
         get() = ContextCompat.getSystemService(context, BluetoothManager::class.java)?.adapter
 
     /**
-     * Les trois conditions de PRD_SCALE 16.1 et 18.5, dans l'ordre où l'interface les explique.
+     * Les trois conditions de PRD_SCALE 16.1 et 18.5, telles que [ScaleAvailability] les énonce.
      *
-     * Permission d'abord, radio ensuite, localisation système en dernier : c'est l'ordre que
-     * `ScalePermissionsState.canScan` retient déjà côté Compose, et deux ordres différents pour un
-     * même diagnostic produiraient deux messages différents pour une même situation.
+     * Rien n'est décidé ici : `ScalePermissionsState` lit le même objet pour choisir laquelle des
+     * phrases de PRD_SCALE 18.5 montrer, et c'est ce partage qui garantit qu'un écran n'expliquera
+     * jamais une cause pendant que cette liaison en refuse une autre.
      */
-    override fun availability(): ScaleUnavailableReason? = when {
-        !hasScanPermissions() -> ScaleUnavailableReason.PERMISSION_MISSING
-        adapter?.isEnabled != true -> ScaleUnavailableReason.BLUETOOTH_OFF
-        !isSystemLocationEnabled() -> ScaleUnavailableReason.SYSTEM_LOCATION_OFF
-        else -> null
-    }
+    override fun availability(): ScaleUnavailableReason? = ScaleAvailability.reason(context)
 
     override fun scan(): Flow<ScaleAdvertisement> = callbackFlow {
         val scanner = adapter?.bluetoothLeScanner
@@ -162,44 +153,6 @@ internal class AndroidScaleTransport(
         val device = runCatching { adapter?.getRemoteDevice(advertisement.address) }.getOrNull()
             ?: throw ScaleTransportException("unknown device ${advertisement.address}")
         return AndroidScaleLink(profile, log).open(context, device)
-    }
-
-    /**
-     * Les permissions d'exécution que ce niveau d'API exige (PRD_SCALE 16.1).
-     *
-     * **Ce contrôle existe déjà, à l'identique, dans `ui/scale/ScalePermissions.kt`.** Il est
-     * réécrit ici et non appelé là-bas parce que la couche data ne doit pas importer la couche
-     * interface : la dépendance irait à l'envers, et le module balance deviendrait impossible à
-     * tester sans Compose. La duplication est signalée plutôt que masquée ; la sortie propre serait
-     * que la version *sans Compose* fasse autorité et que l'état Compose la consulte.
-     */
-    // Les deux constantes d'Android 12 sont compilées comme des chaînes littérales et ne sont lues
-    // que sur un appareil qui les connaît : c'est ce test de version qui choisit la liste.
-    @SuppressLint("InlinedApi")
-    private fun hasScanPermissions(): Boolean {
-        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        return required.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    /**
-     * La localisation système, exigence de la plateforme avant l'API 31 (PRD_SCALE 16.1).
-     *
-     * Distincte de la permission : les deux peuvent être accordées pendant que l'interrupteur
-     * général est éteint, et dans ce cas le scanner ne rend rien du tout plutôt qu'une erreur — ce
-     * que PRD_SCALE 18.5 exige d'expliquer au lieu de le laisser passer pour une absence de balance.
-     * Toujours vrai à partir d'Android 12, où la condition n'existe plus.
-     */
-    private fun isSystemLocationEnabled(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return true
-        val manager = ContextCompat.getSystemService(context, LocationManager::class.java)
-            ?: return false
-        return LocationManagerCompat.isLocationEnabled(manager)
     }
 
     /**

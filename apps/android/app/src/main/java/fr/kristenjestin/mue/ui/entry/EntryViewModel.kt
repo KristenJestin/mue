@@ -24,6 +24,7 @@ import fr.kristenjestin.mue.domain.repository.MeasurementRepository
 import fr.kristenjestin.mue.domain.repository.ScaleSessionSource
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
+import fr.kristenjestin.mue.ui.scale.keepsScreenAwake
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -399,31 +400,66 @@ class EntryViewModel(
      * Écrit comme un `when` exhaustif sur [ScaleSessionState] plutôt que comme une suite de
      * drapeaux : les états s'excluent, et un `when` que le compilateur vérifie est ce qui garantit
      * qu'un état ajouté plus tard ne restera pas silencieusement invisible.
+     *
+     * **L'éveil de l'écran se décide une seule fois, à la fin, et jamais dans une branche**
+     * (FR-SCALE-020). C'est [keepsScreenAwake] qui énonce la règle, une bonne fois pour toutes ;
+     * les deux sorties anticipées ci-dessous sont les deux seuls cas où il n'y a rien à écrire du
+     * tout, et elles disent pourquoi.
      */
-    private fun onScaleState(state: ScaleSessionState) = when (state) {
-        ScaleSessionState.Absent -> _uiState.update { it.copy(scale = EntryScaleUiState.ABSENT) }
-        ScaleSessionState.Idle -> updateScale {
-            it.copy(indicator = null, liveHundredths = null, keepScreenOn = false)
+    private fun onScaleState(state: ScaleSessionState) {
+        when (state) {
+            /*
+             * Le seul état sans balance. Il repasse par [_uiState] directement et non par
+             * [updateScale], qui marquerait l'appairage : sur un `Entry` sans balance, rien de ce
+             * module n'existe (PRD_SCALE 18.1).
+             */
+            ScaleSessionState.Absent -> {
+                _uiState.update { it.copy(scale = EntryScaleUiState.ABSENT) }
+                return
+            }
+
+            // Une trame de la session close est ignorée **sans rien changer**, l'éveil de l'écran
+            // compris (BR-SCALE-012, BR-SCALE-013).
+            is ScaleSessionState.Stable -> {
+                if (state.reading.isStale()) return
+                acceptReading(state.reading, impedanceRefused = false)
+            }
+
+            is ScaleSessionState.Complete -> {
+                if (state.reading.isStale()) return
+                acceptReading(state.reading, state.impedanceRefused)
+            }
+
+            ScaleSessionState.Idle -> updateScale {
+                it.copy(indicator = null, liveHundredths = null)
+            }
+
+            ScaleSessionState.Searching -> searching(EntryScaleIndicator.SEARCHING)
+            ScaleSessionState.Connecting -> searching(EntryScaleIndicator.CONNECTING)
+            ScaleSessionState.WaitingForStepOn -> searching(EntryScaleIndicator.STEP_ON)
+            is ScaleSessionState.Measuring ->
+                searching(EntryScaleIndicator.MEASURING, state.hundredthsKg)
+
+            is ScaleSessionState.OutOfRange -> outOfRange()
+            ScaleSessionState.NotFound -> settled(EntryScaleStatus.NOT_FOUND)
+            is ScaleSessionState.Unavailable -> unavailable(state.reason)
         }
 
-        ScaleSessionState.Searching -> searching(EntryScaleIndicator.SEARCHING)
-        ScaleSessionState.Connecting -> searching(EntryScaleIndicator.CONNECTING)
-        ScaleSessionState.WaitingForStepOn -> searching(EntryScaleIndicator.STEP_ON)
-        is ScaleSessionState.Measuring ->
-            searching(EntryScaleIndicator.MEASURING, state.hundredthsKg)
-        is ScaleSessionState.Stable -> acceptReading(state.reading, impedanceRefused = false)
-        is ScaleSessionState.Complete -> acceptReading(state.reading, state.impedanceRefused)
-        is ScaleSessionState.OutOfRange -> outOfRange()
-        ScaleSessionState.NotFound -> settled(EntryScaleStatus.NOT_FOUND)
-        is ScaleSessionState.Unavailable -> unavailable(state.reason)
+        /*
+         * FR-SCALE-020, en une ligne et à un seul endroit : l'écran veille pendant le scan, la
+         * connexion, l'attente que l'utilisateur monte et le flux instable qui suit ; le maintien
+         * cesse dès qu'un poids stable est reçu, que le délai expire ou qu'`Entry` n'est plus
+         * visible — les deux premiers parce qu'ils sortent de cette liste, le troisième par
+         * [onEntryHidden].
+         */
+        updateScale { it.copy(keepScreenOn = state.keepsScreenAwake) }
     }
 
+    /** PRD_SCALE 9.4 : une trame en retard porte l'identifiant de la session qu'on vient de clore. */
+    private fun ScaleReading.isStale(): Boolean = sessionId == closedSessionId
+
     /**
-     * Les quatre états qui précèdent une valeur : indication discrète et écran éveillé.
-     *
-     * L'écran reste éveillé pendant toute cette phase et pas au-delà (FR-SCALE-020) : c'est là que
-     * l'utilisateur pose son téléphone pour monter sur la balance, et c'est le seul moment où
-     * l'appareil doit veiller pour une raison qu'il ne peut pas deviner autrement.
+     * Les quatre états qui précèdent une valeur : l'indication discrète, et rien d'autre.
      *
      * [liveHundredths] n'est jamais posé sur la règle. PRD_SCALE 11 veut que le flux soit
      * *visible* et n'engage rien ; le poser sur la règle en ferait la valeur qu'un appui sur
@@ -435,7 +471,6 @@ class EntryViewModel(
                 indicator = indicator,
                 liveHundredths = liveHundredths,
                 status = null,
-                keepScreenOn = true,
             )
         }
 
@@ -452,11 +487,10 @@ class EntryViewModel(
      * pas — aurait dupliqué la logique de reprise en main, qui est la seule chose de cet écran
      * qu'il ne faut pas se tromper à écrire deux fois.
      *
-     * Une trame de la session close est ignorée sans rien changer (BR-SCALE-012, BR-SCALE-013).
+     * Une trame de la session close n'arrive jamais ici : [onScaleState] la filtre avant, pour que
+     * l'ignorer ne change **rien du tout** (BR-SCALE-012, BR-SCALE-013).
      */
     private fun acceptReading(reading: ScaleReading, impedanceRefused: Boolean) {
-        if (reading.sessionId == closedSessionId) return
-
         // BR-SCALE-002 : `ofHundredthsClamped` ne valide jamais une mesure reçue (contrat §2), et
         // `ofKilogramsOrNull` est le seul constructeur qui arrondisse au pas de PRD BR-003 avant
         // de refuser hors domaine. La couche de liaison arrondit déjà ; le faire aussi ici coûte
@@ -495,8 +529,6 @@ class EntryViewModel(
                     // enregistrement anticipé n'arrive pas ici du tout — sa session est close.
                     barefootHint = impedanceRefused,
                     announcement = EntryScaleAnnouncement.MEASUREMENT_RECEIVED,
-                    // FR-SCALE-020 : le maintien cesse dès qu'un poids stable est reçu.
-                    keepScreenOn = false,
                 ),
             )
         }
@@ -510,7 +542,7 @@ class EntryViewModel(
      * de la main sur le plateau produit une mesure parfaitement stable autour de 18 kg.
      */
     private fun outOfRange() = updateScale {
-        it.copy(indicator = null, liveHundredths = null, outOfRange = true, keepScreenOn = false)
+        it.copy(indicator = null, liveHundredths = null, outOfRange = true)
     }
 
     /**
@@ -528,7 +560,7 @@ class EntryViewModel(
 
     /** Fin de session sans mesure : une ligne actionnable, et rien de bloqué (BR-SCALE-011). */
     private fun settled(status: EntryScaleStatus) = updateScale {
-        it.copy(indicator = null, liveHundredths = null, status = status, keepScreenOn = false)
+        it.copy(indicator = null, liveHundredths = null, status = status)
     }
 
     /**
@@ -553,7 +585,6 @@ class EntryViewModel(
                 liveHundredths = null,
                 status = status.takeUnless { spent },
                 announcement = if (announce) EntryScaleAnnouncement.UNAVAILABLE else it.announcement,
-                keepScreenOn = false,
             )
         }
     }
@@ -677,20 +708,19 @@ class EntryViewModel(
                     preferences = app.container.userPreferencesRepository,
                     savedState = createSavedStateHandle(),
                     /*
-                     * La couche de liaison n'est pas encore exposée par le conteneur.
+                     * L'unique point de contact entre `Entry` et le Bluetooth (PRD_SCALE 21.2).
                      *
-                     * `ScaleContainer` porte aujourd'hui `scaleRepository` et rien d'autre ; la
-                     * source de session de PRD_SCALE 21.2 y arrivera sous la forme d'une
-                     * propriété `by lazy` de plus, et cette ligne deviendra alors
-                     * `scaleSession = app.container.scale.scaleSessionSource`.
+                     * Paresseux dans le conteneur : le lire ici n'ouvre ni la base, ni la radio.
+                     * `BleScaleSessionSource` ne fait rien avant `start()`, que seul le cycle de
+                     * vie de l'écran déclenche (`onEntryVisible`), et sans balance enregistrée ce
+                     * `start()` lui-même est sans effet — aucun scan, aucune permission demandée.
                      *
-                     * En attendant, `null` est un état correct et non un trou : il se lit comme
-                     * `ScaleSessionState.Absent`, c'est-à-dire aucun scan, aucune permission
-                     * demandée et un écran `Entry` strictement identique à celui du PRD socle
-                     * (PRD_SCALE 18.1). Tout le comportement de 12.2 est couvert par les tests
-                     * JVM, qui pilotent l'interface directement.
+                     * `null` reste un cas légitime du constructeur et non un vestige : c'est ainsi
+                     * que les tests JVM pilotent l'écran sans Bluetooth, et c'est aussi ce que lit
+                     * un `Entry` dont le module balance n'est pas câblé — exactement
+                     * `ScaleSessionState.Absent`, donc l'écran du PRD socle (PRD_SCALE 18.1).
                      */
-                    scaleSession = null,
+                    scaleSession = app.container.scale.scaleSessionSource,
                 )
             }
         }

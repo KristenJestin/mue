@@ -65,7 +65,7 @@ class ScalesViewModelTest {
         )
 
         val scale = harness.state().scales.single()
-        assertEquals(PairedScale.UNKNOWN_MODEL_NAME, scale.modelName)
+        assertEquals(ScaleMessages.UNKNOWN_MODEL, scale.modelName)
     }
 
     // endregion

@@ -88,7 +88,7 @@ internal fun BodyCompositionHeader(
 
         state.latest?.let { composition ->
             MueText(
-                text = BodyCompositionMessages.measuredOn(ProgressFormat.date(composition.date)),
+                text = ScaleMessages.measuredOn(ProgressFormat.date(composition.date)),
                 style = type.micro,
                 color = colors.textTertiary,
                 modifier = Modifier.padding(top = spacing.sm),
@@ -98,7 +98,7 @@ internal fun BodyCompositionHeader(
         // Le texte détaillé de PRD_SCALE 13.3, à un geste. Un lien plutôt qu'un bouton pleine
         // largeur : la prudence accompagne la lecture, elle ne la précède pas.
         MueText(
-            text = BodyCompositionMessages.HOW_ESTIMATED,
+            text = ScaleMessages.HOW_ESTIMATED,
             style = type.caption,
             color = colors.accent,
             modifier = Modifier
@@ -165,8 +165,8 @@ internal fun BodyCompositionCard(
             start = {
                 MueText(
                     text = state.previous
-                        ?.let { BodyCompositionMessages.changeSince(ProgressFormat.date(it.date)) }
-                        ?: BodyCompositionMessages.CHANGE_LABEL,
+                        ?.let { ScaleMessages.changeSince(ProgressFormat.date(it.date)) }
+                        ?: ScaleMessages.CHANGE_LABEL,
                     style = type.label,
                     color = colors.textTertiary,
                 )
@@ -228,7 +228,7 @@ internal fun IncompleteProfileCard(
     MueSurfaceCard(modifier = modifier.testTag(ScaleTestTags.INCOMPLETE_PROFILE)) {
         MueText(ScaleMessages.PROFILE_INCOMPLETE_TITLE, MueTheme.typography.sectionTitle)
         MueText(
-            text = BodyCompositionMessages.profileIncompleteBody(missing),
+            text = ScaleMessages.profileIncompleteBody(missing),
             style = MueTheme.typography.body,
             color = MueTheme.colors.textSecondary,
             modifier = Modifier.padding(top = spacing.sm),
@@ -295,7 +295,7 @@ internal fun DetailedCautionSheet(visible: Boolean, onDismissRequest: () -> Unit
     MueBottomSheet(
         visible = visible,
         onDismissRequest = onDismissRequest,
-        title = BodyCompositionMessages.HOW_ESTIMATED,
+        title = ScaleMessages.HOW_ESTIMATED,
         bodyScrolls = true,
     ) {
         Column(
@@ -321,8 +321,8 @@ private fun valueDescription(
     value: String,
     latest: BodyComposition?,
 ): String = latest
-    ?.let { BodyCompositionMessages.valueDescription(metric, value, ProgressFormat.date(it.date)) }
-    ?: BodyCompositionMessages.valueUnavailableDescription(metric)
+    ?.let { ScaleMessages.valueDescription(metric, value, ProgressFormat.date(it.date)) }
+    ?: ScaleMessages.valueUnavailableDescription(metric)
 
 /** PRD_SCALE 20 : et de son écart, qui sans sa date ne dirait pas sur quoi il porte. */
 private fun changeDescription(
@@ -330,8 +330,8 @@ private fun changeDescription(
     change: String,
     previous: BodyComposition?,
 ): String = previous
-    ?.let { BodyCompositionMessages.changeDescription(metric, change, ProgressFormat.date(it.date)) }
-    ?: BodyCompositionMessages.NO_PREVIOUS_DESCRIPTION
+    ?.let { ScaleMessages.changeDescription(metric, change, ProgressFormat.date(it.date)) }
+    ?: ScaleMessages.NO_PREVIOUS_DESCRIPTION
 
 // region Previews
 

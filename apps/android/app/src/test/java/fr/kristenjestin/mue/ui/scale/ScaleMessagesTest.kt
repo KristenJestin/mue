@@ -1,5 +1,7 @@
 package fr.kristenjestin.mue.ui.scale
 
+import fr.kristenjestin.mue.domain.logic.BodyCompositionResult
+import fr.kristenjestin.mue.ui.progress.BodyCompositionMetric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,6 +23,7 @@ class ScaleMessagesTest {
 
     @Test
     fun `les libelles du flux d'appairage sont ceux du PRD`() {
+        assertEquals("Scales", ScaleMessages.SCALES)
         assertEquals("Add a scale", ScaleMessages.ADD_A_SCALE)
         assertEquals("Forget this scale", ScaleMessages.FORGET_THIS_SCALE)
         assertEquals("Never connected", ScaleMessages.NEVER_CONNECTED)
@@ -28,7 +31,9 @@ class ScaleMessagesTest {
 
     @Test
     fun `les etats de mesure sont ceux du PRD`() {
+        assertEquals("Connecting", ScaleMessages.CONNECTING)
         assertEquals("Step on the scale", ScaleMessages.STEP_ON_THE_SCALE)
+        assertEquals("Measuring", ScaleMessages.MEASURING)
         assertEquals("Save measurement", ScaleMessages.SAVE_MEASUREMENT)
         assertEquals(
             "This measurement is outside the range Mue records",
@@ -104,6 +109,106 @@ class ScaleMessagesTest {
         assertEquals(
             "74.3 kg received from your scale",
             ScaleMessages.measurementReceived("74.3 kg"),
+        )
+    }
+
+    /**
+     * The sentence of PRD_SCALE 18.4 exists **once**.
+     *
+     * [ScaleMessages.PROFILE_INCOMPLETE_BODY] is the three-input form of
+     * [ScaleMessages.profileIncompleteBody] and not a second literal, so this asserts an identity
+     * rather than a coincidence: were the wording ever forked in two, the specific sentence and
+     * the general one would drift apart on the same screen.
+     */
+    @Test
+    fun `la phrase du profil incomplet n'existe qu'une fois`() {
+        assertEquals(
+            ScaleMessages.PROFILE_INCOMPLETE_BODY,
+            ScaleMessages.profileIncompleteBody(
+                BodyCompositionResult.ProfileInput.entries.toSet(),
+            ),
+        )
+        assertEquals(
+            "Estimates need your height, your date of birth and your sex. Mue kept the impedance " +
+                "it already measured, so past weigh-ins can be completed too.",
+            ScaleMessages.PROFILE_INCOMPLETE_BODY,
+        )
+    }
+
+    /**
+     * PRD_SCALE 18.4 names only what is actually missing, and the list reads as a sentence at one,
+     * two and three items — no comma before the `and`, as everywhere else in Mue.
+     */
+    @Test
+    fun `seules les entrees manquantes sont nommees`() {
+        assertEquals(
+            "Estimates need your sex. " +
+                "Mue kept the impedance it already measured, so past weigh-ins can be " +
+                "completed too.",
+            ScaleMessages.profileIncompleteBody(setOf(BodyCompositionResult.ProfileInput.SEX)),
+        )
+        assertTrue(
+            ScaleMessages.profileIncompleteBody(
+                setOf(
+                    BodyCompositionResult.ProfileInput.HEIGHT,
+                    BodyCompositionResult.ProfileInput.SEX,
+                ),
+            ).startsWith("Estimates need your height and your sex."),
+        )
+    }
+
+    /**
+     * The lines a scan builds around a name (FR-SCALE-001, FR-SCALE-011). Each one has to read as
+     * a sentence with the name inside it, not as a label with a value glued on.
+     */
+    @Test
+    fun `les lignes du scan portent le nom de la balance`() {
+        assertEquals(
+            "Already paired as Bathroom scale",
+            ScaleMessages.alreadyPairedAs("Bathroom scale"),
+        )
+        assertEquals("Might be Bathroom scale", ScaleMessages.mightBe("Bathroom scale"))
+        assertTrue(
+            ScaleMessages.reattachBody("Bathroom scale")
+                .startsWith("Mue knows a scale called Bathroom scale that is no longer answering"),
+        )
+    }
+
+    /**
+     * FR-BODY-005: a change and a value are meaningless without the date they belong to, so both
+     * carry it and neither says it twice.
+     */
+    @Test
+    fun `l'ecart et la valeur portent leur date`() {
+        assertEquals("Change since Aug 20, 2026", ScaleMessages.changeSince("Aug 20, 2026"))
+        assertEquals("Measured on Aug 20, 2026", ScaleMessages.measuredOn("Aug 20, 2026"))
+    }
+
+    /**
+     * PRD_SCALE 20: the four cards are announced with their unit spelled out, the label lowercased
+     * and the date left alone — `Aug 20, 2026` lowercased reads as one word to a synthesiser.
+     */
+    @Test
+    fun `l'annonce d'une carte epelle son unite et garde sa date`() {
+        assertEquals(
+            "Body fat estimate 22.4 percent, measured on Aug 20, 2026",
+            ScaleMessages.valueDescription(
+                BodyCompositionMetric.BODY_FAT,
+                value = "22.4",
+                date = "Aug 20, 2026",
+            ),
+        )
+        assertEquals(
+            "Resting energy estimate unavailable for this period",
+            ScaleMessages.valueUnavailableDescription(BodyCompositionMetric.RESTING_ENERGY),
+        )
+        assertEquals(
+            "Change since Aug 20, 2026, +0.3 kilograms",
+            ScaleMessages.changeDescription(
+                BodyCompositionMetric.FAT_FREE_MASS,
+                change = "+0.3",
+                previousDate = "Aug 20, 2026",
+            ),
         )
     }
 }

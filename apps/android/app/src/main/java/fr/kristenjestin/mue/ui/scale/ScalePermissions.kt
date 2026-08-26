@@ -1,15 +1,11 @@
 package fr.kristenjestin.mue.ui.scale
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -24,12 +20,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.MueApplication
+import fr.kristenjestin.mue.data.scale.ble.ScaleAvailability
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -53,70 +48,32 @@ import kotlinx.coroutines.launch
  *
  * BR-SCALE-011 is the rule underneath all of it: every function of Mue stays available with no
  * Bluetooth and no permission granted, so nothing here may gate a weigh-in typed by hand.
+ *
+ * **Conditions 1 to 3 are not detected here.** They are read from [ScaleAvailability], the same
+ * object `AndroidScaleTransport` consults before it opens a session, and that is deliberate: a
+ * screen explaining one cause while the link refuses another is the one failure this module could
+ * not diagnose from a bug report. Only the two things that need Compose stay here — the fourth
+ * condition, which needs a persisted flag and the current activity, and the intents that turn each
+ * of the four into a gesture.
  */
 internal object ScalePermissions {
 
-    /**
-     * The permissions this API level actually needs (PRD_SCALE 16.1).
-     *
-     * From Android 12 the pair is `BLUETOOTH_SCAN` — declared `neverForLocation`, because Mue
-     * reads a scan result only to recognise a scale — and `BLUETOOTH_CONNECT`. Up to Android 11
-     * neither exists; `BLUETOOTH` and `BLUETOOTH_ADMIN` are granted at install and the only
-     * thing left to ask for at runtime is `ACCESS_FINE_LOCATION`, which the platform requires of
-     * any BLE scan on those releases.
-     *
-     * `minSdk` is 26, so both branches ship and both have to be tested (PRD_SCALE 16.1).
-     */
-    // The two Android 12 constants are compiled in as literal strings. They are only ever read
-    // on a device that has them, because this list is chosen by the very check lint is warning
-    // about; on Android 11 the `else` branch is taken and neither constant is touched.
-    @SuppressLint("InlinedApi")
-    val REQUIRED: List<String> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
+    /** What this API level asks for (PRD_SCALE 16.1), decided once by [ScaleAvailability]. */
+    val REQUIRED: List<String> = ScaleAvailability.REQUIRED_PERMISSIONS
 
-    /**
-     * Whether system location has to be switched on as well (PRD_SCALE 16.1 and 18.5).
-     *
-     * True up to Android 11 only. This is a second, distinct condition from the location
-     * *permission*: both can be granted while the master switch is off, and in that case the
-     * platform's scanner returns nothing at all rather than an error.
-     */
-    val REQUIRES_SYSTEM_LOCATION: Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+    /** Whether system location gates the scan on this device (PRD_SCALE 16.1 and 18.5). */
+    val REQUIRES_SYSTEM_LOCATION: Boolean = ScaleAvailability.REQUIRES_SYSTEM_LOCATION
 
     /** Every permission of [REQUIRED] is held. Re-read on every return to the app. */
-    fun isGranted(context: Context): Boolean = REQUIRED.all { isGranted(context, it) }
+    fun isGranted(context: Context): Boolean = ScaleAvailability.hasPermissions(context)
 
-    private fun isGranted(context: Context, permission: String): Boolean =
-        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-
-    /**
-     * The radio is on.
-     *
-     * Null adapter means the device has no Bluetooth at all — the manifest declares the feature
-     * optional for exactly that case — and reads the same as "off" here: PRD_SCALE 18.5 offers
-     * to switch it on, and BR-SCALE-011 leaves the rest of Mue untouched either way.
-     */
+    /** The radio is on (PRD_SCALE 18.5). */
     fun isBluetoothEnabled(context: Context): Boolean =
-        ContextCompat.getSystemService(context, BluetoothManager::class.java)
-            ?.adapter
-            ?.isEnabled == true
+        ScaleAvailability.isBluetoothEnabled(context)
 
-    /**
-     * System location is on, which before API 31 is a precondition of scanning.
-     *
-     * Always `true` from Android 12, where the requirement is gone: a caller can read this
-     * unconditionally and only act on it when [REQUIRES_SYSTEM_LOCATION] is set.
-     */
-    fun isSystemLocationEnabled(context: Context): Boolean {
-        if (!REQUIRES_SYSTEM_LOCATION) return true
-        val manager = ContextCompat.getSystemService(context, LocationManager::class.java)
-            ?: return false
-        return LocationManagerCompat.isLocationEnabled(manager)
-    }
+    /** System location is on, which before API 31 is a precondition of scanning. */
+    fun isSystemLocationEnabled(context: Context): Boolean =
+        ScaleAvailability.isSystemLocationEnabled(context)
 
     /**
      * The system's way to switch the radio on (PRD_SCALE 18.5, `Bluetooth is off · Enable`).
@@ -130,7 +87,7 @@ internal object ScalePermissions {
      */
     fun enableBluetoothIntent(context: Context): Intent =
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            isGranted(context, Manifest.permission.BLUETOOTH_CONNECT)
+            ScaleAvailability.isGranted(context, Manifest.permission.BLUETOOTH_CONNECT)
         ) {
             Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
         } else {

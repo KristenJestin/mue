@@ -1,14 +1,11 @@
 package fr.kristenjestin.mue.ui.scale
 
-import fr.kristenjestin.mue.MueApplication
 import fr.kristenjestin.mue.data.scale.ble.ScaleTransport
 import fr.kristenjestin.mue.data.scale.ble.ScaleTransportException
 import fr.kristenjestin.mue.domain.model.ScaleAdvertisement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -26,9 +23,11 @@ import kotlinx.coroutines.launch
  * le symptôme serait une liste vide pendant trente secondes sans que rien ne l'explique.
  *
  * Cet adaptateur est donc la seule chose que [ScaleDiscovery] ajoute au transport : un compte
- * d'ouvertures, et une seule collecte tant qu'il n'est pas retombé à zéro. `ScaleContainer` désigne
- * nommément `ui/scale` comme l'endroit où cette adaptation doit vivre — une dépendance de la couche
- * data vers la couche interface serait à l'envers.
+ * d'ouvertures, et une seule collecte tant qu'il n'est pas retombé à zéro. Il est écrit ici, à côté
+ * du port qu'il réalise — le mettre dans `data/scale/ble` ferait importer la couche interface par
+ * la couche data, ce qui n'arrive nulle part ailleurs dans ce dépôt. Il n'est **instancié** qu'à un
+ * seul endroit, `ScaleContainer.scaleDiscovery`, dont le KDoc porte la justification complète : une
+ * seconde instance ouvrirait un second scan BLE et rendrait le comptage inopérant.
  *
  * **Une panne de scan ne s'affiche jamais** (PRD_SCALE 18.5). Un
  * [ScaleTransportException] ferme la collecte en silence : l'écran voit une absence d'annonces,
@@ -86,28 +85,3 @@ internal class TransportScaleDiscovery(
     }
 }
 
-/**
- * L'unique scan partagé du processus.
- *
- * **Point de raccordement, pas une décision d'architecture.** Sa place est une propriété `by lazy`
- * de `ScaleContainer`, aux côtés de `scaleTransport` et de `scaleSessionSource` ; elle n'y est pas
- * parce que ce fichier n'a pas le droit de modifier le conteneur. Les deux fabriques de ce paquet
- * doivent pourtant partager la **même** instance : deux adaptateurs compteraient chacun leurs
- * ouvertures et ouvriraient deux scans BLE simultanés, ce qui reviendrait à écrire le comptage pour
- * ne pas s'en servir.
- *
- * Construit sur le fil principal, à la première fabrique de ViewModel qui en a besoin — c'est-à-dire
- * à l'ouverture de `Profile > Scales`, jamais au démarrage de l'application.
- */
-private var shared: ScaleDiscovery? = null
-
-internal fun scaleDiscovery(application: MueApplication): ScaleDiscovery =
-    shared ?: TransportScaleDiscovery(
-        transport = application.container.scale.scaleTransport,
-        /*
-         * `Main.immediate`, comme la source de session : [TransportScaleDiscovery.openCount] est
-         * confiné au fil dont les écrans l'appellent, et `immediate` évite en prime un saut de
-         * dispatch entre le `start()` d'un écran et l'ouverture du scan.
-         */
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-    ).also { shared = it }

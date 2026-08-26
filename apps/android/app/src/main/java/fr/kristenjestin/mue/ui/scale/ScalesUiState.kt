@@ -7,9 +7,6 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 
-/** Le modèle n'est plus livré : la balance reste utilisable à lire, jamais à piloter. */
-private const val UNKNOWN_MODEL = "Unknown model"
-
 /**
  * Une balance appairée, telle que `Profile > Scales` la montre (FR-SCALE-013).
  *
@@ -21,10 +18,10 @@ private const val UNKNOWN_MODEL = "Unknown model"
  * [id] n'est jamais affiché (PRD_SCALE 9.3). Il ne sert qu'à nommer la ligne pour un test et à
  * désigner la balance dans les actions.
  *
- * @property modelName Le nom du modèle du pilote, ou [UNKNOWN_MODEL] si ce pilote n'existe plus.
- *   Une balance appairée par une version antérieure peut référencer un pilote retiré depuis : le
- *   cas doit se lire, pas planter (PRD_SCALE 9.2), et surtout pas disparaître de la liste — une
- *   balance qu'on ne voit plus est une balance qu'on ne peut plus oublier.
+ * @property modelName Le nom du modèle du pilote, ou [ScaleMessages.UNKNOWN_MODEL] si ce pilote
+ *   n'existe plus. Une balance appairée par une version antérieure peut référencer un pilote retiré
+ *   depuis : le cas doit se lire, pas planter (PRD_SCALE 9.2), et surtout pas disparaître de la
+ *   liste — une balance qu'on ne voit plus est une balance qu'on ne peut plus oublier.
  * @property inRange Vue par le scan pendant que l'écran est ouvert. Hors de portée est l'état
  *   normal d'une balance endormie (PRD_SCALE 18.2) : ce n'est jamais une anomalie, et l'écran ne
  *   le présente pas comme telle.
@@ -39,12 +36,7 @@ internal data class PairedScale(
     val advertisedName: String,
     val lastSeenAt: Instant?,
     val inRange: Boolean,
-) {
-    companion object {
-        /** Ce que porte la fiche quand le pilote a disparu du registre. */
-        const val UNKNOWN_MODEL_NAME: String = UNKNOWN_MODEL
-    }
-}
+)
 
 /**
  * Tout ce que `Profile > Scales` dessine (FR-SCALE-010, 013, 014, PRD_SCALE 18.1).

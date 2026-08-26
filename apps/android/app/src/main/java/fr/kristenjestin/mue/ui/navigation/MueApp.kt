@@ -114,7 +114,14 @@ fun MueApp() {
     ) { destination ->
         when (destination) {
             MueDestination.ENTRY -> EntryScreen(Modifier.fillMaxSize())
-            MueDestination.PROGRESS -> ProgressScreen(Modifier.fillMaxSize())
+
+            // PRD_SCALE 18.4. Le bloc « profil incomplet » de la composition corporelle propose
+            // d'aller compléter le profil ; le châssis est le seul endroit qui sache changer
+            // d'onglet, et sans cette ligne le bouton serait à l'écran sans rien faire.
+            MueDestination.PROGRESS -> ProgressScreen(
+                modifier = Modifier.fillMaxSize(),
+                onOpenProfile = { selection.select(MueDestination.PROFILE) },
+            )
             MueDestination.ACTIVITY -> ActivityNavHost(
                 modifier = Modifier.fillMaxSize(),
                 onRouteChanged = { route -> activityRouteKey = route.key },

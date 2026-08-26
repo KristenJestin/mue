@@ -104,7 +104,7 @@ class ProgressBodyCompositionScreenTest {
 
         val previousDate = ProgressFormat.date(requireNotNull(composition.previous).date)
         scrollTo(ScaleTestTags.BODY_FAT_CARD)
-        compose.onNodeWithText(BodyCompositionMessages.changeSince(previousDate)).assertExists()
+        compose.onNodeWithText(ScaleMessages.changeSince(previousDate)).assertExists()
 
         BodyCompositionMetric.entries.forEach { metric ->
             scrollTo(metric.testTag)
@@ -113,7 +113,7 @@ class ProgressBodyCompositionScreenTest {
             val minus = ProgressFormat.signedEstimate(-1.0).first()
             assertTrue("$metric: $change", change.first() == '+' || change.first() == minus)
             compose.onNodeWithContentDescription(
-                BodyCompositionMessages.changeDescription(metric, change, previousDate),
+                ScaleMessages.changeDescription(metric, change, previousDate),
             ).assertExists()
         }
     }
@@ -128,7 +128,7 @@ class ProgressBodyCompositionScreenTest {
         BodyCompositionMetric.entries.forEach { metric ->
             scrollTo(metric.testTag)
             compose.onNodeWithContentDescription(
-                BodyCompositionMessages.valueDescription(
+                ScaleMessages.valueDescription(
                     metric,
                     metric.value(composition.latest),
                     date,
@@ -144,9 +144,9 @@ class ProgressBodyCompositionScreenTest {
         setContent(state(composition = single))
 
         scrollTo(ScaleTestTags.BODY_FAT_CARD)
-        compose.onNodeWithText(BodyCompositionMessages.CHANGE_LABEL).assertExists()
+        compose.onNodeWithText(ScaleMessages.CHANGE_LABEL).assertExists()
         compose.onNodeWithContentDescription(
-            BodyCompositionMessages.NO_PREVIOUS_DESCRIPTION,
+            ScaleMessages.NO_PREVIOUS_DESCRIPTION,
         ).assertExists()
     }
 
@@ -162,7 +162,7 @@ class ProgressBodyCompositionScreenTest {
         BodyCompositionMetric.entries.forEach { metric ->
             scrollTo(metric.testTag)
             compose.onNodeWithContentDescription(
-                BodyCompositionMessages.valueUnavailableDescription(metric),
+                ScaleMessages.valueUnavailableDescription(metric),
             ).assertExists()
         }
     }
@@ -178,7 +178,7 @@ class ProgressBodyCompositionScreenTest {
 
         scrollTo(ScaleTestTags.COMPOSITION_SECTION)
         compose.onNodeWithText(
-            BodyCompositionMessages.measuredOn(
+            ScaleMessages.measuredOn(
                 ProgressFormat.date(requireNotNull(composition.latest).date),
             ),
         ).assertIsDisplayed()
@@ -257,7 +257,7 @@ class ProgressBodyCompositionScreenTest {
         scrollTo(ScaleTestTags.INCOMPLETE_PROFILE)
         compose.onNodeWithText(ScaleMessages.PROFILE_INCOMPLETE_TITLE).assertIsDisplayed()
         compose.onNodeWithText(
-            BodyCompositionMessages.profileIncompleteBody(
+            ScaleMessages.profileIncompleteBody(
                 setOf(BodyCompositionResult.ProfileInput.SEX),
             ),
         ).assertIsDisplayed()

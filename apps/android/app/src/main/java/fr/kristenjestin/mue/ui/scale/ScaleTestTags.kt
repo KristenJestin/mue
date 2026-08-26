@@ -51,6 +51,19 @@ internal object ScaleTestTags {
 
     const val SCAN_SCREEN: String = "scale:scanScreen"
 
+    /**
+     * `Looking for scales nearby`, `Scan finished`, ou l'attente avant le premier scan. Une seule
+     * ligne pour les trois : c'est son texte qui les distingue, comme pour [ENTRY_STATUS].
+     */
+    const val SCAN_STATUS: String = "scale:scanStatus"
+
+    /**
+     * Le geste qui déclenche la demande de permission, et lui seul (FR-SCALE-025). Distinct de
+     * [PERMISSION_EXPLANATION], qui est la carte : un test doit pouvoir vérifier que la carte est
+     * là **sans** que rien ne se demande tant que ce bouton n'est pas activé.
+     */
+    const val ALLOW_PERMISSION: String = "scale:allowPermission"
+
     /** The recognised devices, listed first with the model a driver identified. */
     const val RECOGNISED_DEVICES: String = "scale:recognisedDevices"
 
@@ -73,12 +86,32 @@ internal object ScaleTestTags {
      */
     fun device(address: String): String = "scale:device:$address"
 
+    /**
+     * La question du rattachement d'adresse et ses deux réponses (FR-SCALE-001).
+     *
+     * Les deux réponses sont constructives — l'une conserve l'historique, l'autre appaire un
+     * second appareil — donc aucune n'est « celle qui annule » et chacune a besoin de son propre
+     * repère.
+     */
+    const val REATTACH_PROPOSAL: String = "scale:reattachProposal"
+    const val REATTACH_CONFIRM: String = "scale:reattachConfirm"
+    const val REATTACH_DECLINE: String = "scale:reattachDecline"
+
     // endregion
 
     // region One scale (FR-SCALE-012, FR-SCALE-013, FR-SCALE-014)
 
     /** The card for a single paired scale: name, model, last contact, and what can be done. */
     const val DETAIL: String = "scale:detail"
+
+    /**
+     * `In range` / `Not in range` sur la fiche. Distinct de [rowStatus] : la même phrase peut être
+     * composée deux fois pendant une transition entre la liste et la fiche.
+     */
+    const val DETAIL_STATUS: String = "scale:detailStatus"
+
+    /** La section de renommage entière, distincte de [RENAME_FIELD] qui n'en est que le champ. */
+    const val RENAME_SECTION: String = "scale:renameSection"
 
     const val RENAME_FIELD: String = "scale:renameField"
     const val RENAME_CONFIRM: String = "scale:renameConfirm"
