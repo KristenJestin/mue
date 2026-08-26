@@ -2,7 +2,16 @@ package fr.kristenjestin.mue.data.sync
 
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
+import fr.kristenjestin.mue.domain.model.Food
+import fr.kristenjestin.mue.domain.model.FoodAggregates
+import fr.kristenjestin.mue.domain.model.FoodId
+import fr.kristenjestin.mue.domain.model.FoodLogEntry
+import fr.kristenjestin.mue.domain.model.FoodLogEntryId
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
+import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.Measurement
+import fr.kristenjestin.mue.domain.model.RecipeDetail
+import fr.kristenjestin.mue.domain.model.RecipeId
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -42,6 +51,76 @@ class SyncOutbox(
     fun measurementDelete(date: LocalDate): SyncMutationEntity = mutation(
         aggregateType = SyncAggregateStateEntity.TYPE_MEASUREMENT,
         aggregateId = date.toString(),
+        op = SyncMutationEntity.OP_DELETE,
+        payload = null,
+    )
+
+    /**
+     * The four food aggregates of PRD_FOOD 21.2, minted here beside the measurement rather than
+     * in a second outbox of their own. One mint point is what keeps `mutation_id`, the pending
+     * state and the payload schema version identical for every aggregate the engine will later
+     * drain, and `FoodAggregates` already names the four types the generic
+     * `sync_aggregate_state` keys them by — so the Food module adds no synchronisation column to
+     * any of its five tables (PRD_FOOD 20.1, answered by storage that already exists).
+     */
+    fun foodUpsert(food: Food): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_FOOD,
+        aggregateId = food.id.value,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(FoodPayload.serializer(), food.toPayload()),
+    )
+
+    fun foodDelete(id: FoodId): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_FOOD,
+        aggregateId = id.value,
+        op = SyncMutationEntity.OP_DELETE,
+        payload = null,
+    )
+
+    /** PRD_FOOD 21.2: the recipe **with** its ingredients, in one payload, or not at all. */
+    fun recipeUpsert(detail: RecipeDetail): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_RECIPE,
+        aggregateId = detail.id.value,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(RecipePayload.serializer(), detail.toPayload()),
+    )
+
+    fun recipeDelete(id: RecipeId): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_RECIPE,
+        aggregateId = id.value,
+        op = SyncMutationEntity.OP_DELETE,
+        payload = null,
+    )
+
+    fun foodLogUpsert(entry: FoodLogEntry): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+        aggregateId = entry.id.value,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(FoodLogEntryPayload.serializer(), entry.toPayload()),
+    )
+
+    fun foodLogDelete(id: FoodLogEntryId): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+        aggregateId = id.value,
+        op = SyncMutationEntity.OP_DELETE,
+        payload = null,
+    )
+
+    /**
+     * A proposition is identified by `(date, moment)` on both sides (PRD_FOOD 21.3), so
+     * `MealPlanKey.aggregateId` is the aggregate id and no id has to be invented for it — the
+     * same argument that makes a measurement's date its own identity.
+     */
+    fun mealPlanUpsert(entry: MealPlanEntry): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_MEAL_PLAN_ENTRY,
+        aggregateId = entry.aggregateId,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(MealPlanEntryPayload.serializer(), entry.toPayload()),
+    )
+
+    fun mealPlanDelete(key: MealPlanKey): SyncMutationEntity = mutation(
+        aggregateType = FoodAggregates.TYPE_MEAL_PLAN_ENTRY,
+        aggregateId = key.aggregateId,
         op = SyncMutationEntity.OP_DELETE,
         payload = null,
     )

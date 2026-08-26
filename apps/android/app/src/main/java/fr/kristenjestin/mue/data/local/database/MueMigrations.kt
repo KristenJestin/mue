@@ -267,6 +267,139 @@ internal object MueMigrations {
         }
     }
 
+    /**
+     * 5 → 6: the five additive tables of the Food module (PRD_FOOD 20).
+     *
+     * Additive once more, and the strongest case of it so far: not one of the thirteen tables
+     * already in the file is read, written or even named. A phone that has been logging weights
+     * since version 1 arrives at version 6 with every measurement, every session, every draft and
+     * every pending mutation exactly as version 5 left them.
+     *
+     * **No synchronisation column is created here, and that is the decision this migration
+     * exists to record.** PRD_FOOD 20.1 asks each of these five tables to carry the sync PRD's
+     * section 12.1 metadata from its first migration — identity, revision, timestamps, tombstone,
+     * origin, last mutation. Version 5 already shipped that metadata, once, in
+     * `sync_aggregate_state`, keyed by `(aggregate_type, aggregate_id)`; `FoodAggregates` already
+     * declares the four type names this module contributes to it. Copying seven columns into five
+     * more tables would give one fact six places to disagree, and would put a tombstone on a row
+     * that no longer exists — which is exactly what the generic table was built to avoid.
+     *
+     * The reason 20.1 gives for its own rule is served better this way, not worse. It fears
+     * migrating a populated food journal a second time to add sync columns. A journal that never
+     * holds sync columns can never need that migration; the sixth aggregate, and the seventh,
+     * cost `sync_aggregate_state` nothing at all.
+     *
+     * `meal_plan_entry` is keyed by `(planned_on, slot)` rather than by a UUID, which is also why
+     * PRD_FOOD 20.2's "unicité" on that pair needs no index of its own: SQLite backs the primary
+     * key with one. See `MealPlanEntryEntity` for why the composite key and not an id.
+     *
+     * No catalogue is seeded here. The Ciqual subset is an asset, and a `SupportSQLiteDatabase`
+     * cannot open one — `CiqualSeeding` does it at startup, guarded by a version rather than by a
+     * lifecycle, so that a fresh install and an upgrading phone install the same catalogue.
+     *
+     * The statements are the ones Room exports for version 6, kept identical on purpose — a
+     * migrated file and a freshly created one have to be the same database, and
+     * `MigrationTestHelper` compares them column by column and index by index.
+     */
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `food` " +
+                    "(`id` TEXT NOT NULL, `name` TEXT NOT NULL, `name_folded` TEXT NOT NULL, " +
+                    "`source` TEXT NOT NULL, `reference_unit` TEXT NOT NULL, `brand` TEXT, " +
+                    "`brand_folded` TEXT, `barcode` TEXT, `source_id` TEXT, " +
+                    "`source_version` TEXT, `serving_label` TEXT, " +
+                    "`serving_thousandths` INTEGER, `cooked_ratio_thousandths` INTEGER, " +
+                    "`raw_label` TEXT NOT NULL, `cooked_label` TEXT NOT NULL, `image_ref` TEXT, " +
+                    "`created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, " +
+                    "`energy_milli_kcal` INTEGER, `protein_milligrams` INTEGER, " +
+                    "`carbs_milligrams` INTEGER, `fat_milligrams` INTEGER, " +
+                    "`fibre_milligrams` INTEGER, PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_food_name_folded` ON `food` (`name_folded`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_food_barcode` ON `food` (`barcode`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_food_source_source_id` " +
+                    "ON `food` (`source`, `source_id`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `recipe` " +
+                    "(`id` TEXT NOT NULL, `name` TEXT NOT NULL, `name_folded` TEXT NOT NULL, " +
+                    "`type` TEXT NOT NULL, `base_servings` INTEGER NOT NULL, `description` TEXT, " +
+                    "`prep_time_minutes` INTEGER, `steps` TEXT NOT NULL, `image_ref` TEXT, " +
+                    "`is_favourite` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, " +
+                    "`updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_recipe_name_folded` " +
+                    "ON `recipe` (`name_folded`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `recipe_ingredient` " +
+                    "(`id` TEXT NOT NULL, `recipe_id` TEXT NOT NULL, `food_id` TEXT NOT NULL, " +
+                    "`quantity_thousandths` INTEGER NOT NULL, `unit` TEXT NOT NULL, " +
+                    "`position` INTEGER NOT NULL, `food_name` TEXT, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`recipe_id`) REFERENCES `recipe`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_recipe_ingredient_recipe_id` " +
+                    "ON `recipe_ingredient` (`recipe_id`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_recipe_ingredient_food_id` " +
+                    "ON `recipe_ingredient` (`food_id`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `food_log_entry` " +
+                    "(`id` TEXT NOT NULL, `consumed_on` TEXT NOT NULL, " +
+                    "`consumed_at` TEXT NOT NULL, `slot` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                    "`title` TEXT NOT NULL, `estimation` TEXT NOT NULL, `source_ref` TEXT, " +
+                    "`amount_label` TEXT, `quantity_thousandths` INTEGER, `quantity_unit` TEXT, " +
+                    "`portions_thousandths` INTEGER, `weighed_cooked` INTEGER NOT NULL, " +
+                    "`planned_on` TEXT, `plan_slot` TEXT, `created_at` INTEGER NOT NULL, " +
+                    "`updated_at` INTEGER NOT NULL, `energy_milli_kcal` INTEGER, " +
+                    "`protein_milligrams` INTEGER, `carbs_milligrams` INTEGER, " +
+                    "`fat_milligrams` INTEGER, `fibre_milligrams` INTEGER, PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS " +
+                    "`index_food_log_entry_consumed_on_slot_consumed_at` " +
+                    "ON `food_log_entry` (`consumed_on`, `slot`, `consumed_at`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_food_log_entry_source_ref` " +
+                    "ON `food_log_entry` (`source_ref`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_food_log_entry_planned_on_plan_slot` " +
+                    "ON `food_log_entry` (`planned_on`, `plan_slot`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `meal_plan_entry` " +
+                    "(`planned_on` TEXT NOT NULL, `slot` TEXT NOT NULL, " +
+                    "`recipe_id` TEXT NOT NULL, " +
+                    "`planned_servings_thousandths` INTEGER NOT NULL, " +
+                    "`consumed_log_entry_id` TEXT, `created_at` INTEGER NOT NULL, " +
+                    "`updated_at` INTEGER NOT NULL, PRIMARY KEY(`planned_on`, `slot`), " +
+                    "FOREIGN KEY(`recipe_id`) REFERENCES `recipe`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_meal_plan_entry_recipe_id` " +
+                    "ON `meal_plan_entry` (`recipe_id`)"
+            )
+        }
+    }
+
     val ALL: Array<Migration> =
-        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 }

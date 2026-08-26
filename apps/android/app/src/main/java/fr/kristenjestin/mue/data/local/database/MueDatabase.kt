@@ -30,6 +30,11 @@ import androidx.room.RoomDatabase
         SyncAggregateStateEntity::class,
         SyncStateEntity::class,
         HealthProfileEntity::class,
+        FoodEntity::class,
+        RecipeEntity::class,
+        RecipeIngredientEntity::class,
+        FoodLogEntryEntity::class,
+        MealPlanEntryEntity::class,
     ],
     version = MueDatabase.VERSION,
     exportSchema = true,
@@ -48,6 +53,14 @@ abstract class MueDatabase : RoomDatabase() {
 
     abstract fun healthProfileDao(): HealthProfileDao
 
+    abstract fun foodDao(): FoodDao
+
+    abstract fun recipeDao(): RecipeDao
+
+    abstract fun foodLogDao(): FoodLogDao
+
+    abstract fun mealPlanDao(): MealPlanDao
+
     companion object {
         const val NAME = "mue.db"
 
@@ -56,8 +69,12 @@ abstract class MueDatabase : RoomDatabase() {
          * 3: the six additive tables of the Activities module (PRD 16.2).
          * 4: the two additive tables of the Activity Timer (timer PRD 9).
          * 5: the three synchronisation tables and the health profile (sync PRD 19).
+         * 6: the five additive tables of the Food module (PRD_FOOD 20), carrying no
+         *    synchronisation column of their own — `sync_aggregate_state` already keys that
+         *    metadata by aggregate type, and PRD_FOOD 20.1's own reason for asking is served
+         *    better by a table that never has to be migrated again.
          */
-        const val VERSION = 5
+        const val VERSION = 6
 
         fun build(context: Context): MueDatabase =
             Room.databaseBuilder(context.applicationContext, MueDatabase::class.java, NAME)
