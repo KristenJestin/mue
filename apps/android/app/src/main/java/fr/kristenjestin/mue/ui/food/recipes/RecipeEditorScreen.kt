@@ -40,6 +40,7 @@ import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -333,7 +334,7 @@ private fun IngredientEditor(state: RecipeEditorUiState, actions: RecipeEditorAc
 /**
  * One ingredient row: what it is, how much of it, what it is worth, and how to remove it.
  *
- * The name and the contribution are split by [RecipeSplitRow] rather than by a weighted `Row`,
+ * The name and the contribution are split by [MueSplitRow] rather than by a weighted `Row`,
  * so `≈ 541 kcal` at a doubled font scale drops onto its own line instead of squeezing the name
  * into a ribbon that breaks mid-word.
  *
@@ -372,16 +373,17 @@ private fun IngredientRow(
             }
         }
 
-        // FR-FOOD-010: with the figures hidden there is no second half to split against.
-        val energy = state.energyLabel
-        if (energy == null) {
-            name()
-        } else {
-            RecipeSplitRow(
-                start = name,
-                end = { MueText(energy, MueTheme.typography.bodyStrong) },
-            )
-        }
+        MueSplitRow(
+            start = name,
+            // FR-FOOD-010: nothing on the right at all when the figures are hidden, which
+            // `MueSplitRow` draws as the whole width belonging to the left.
+            end = {
+                state.energyLabel?.let { energy ->
+                    MueText(energy, MueTheme.typography.bodyStrong)
+                }
+            },
+            gap = MueTheme.spacing.md,
+        )
 
         MueDivider()
 
@@ -429,15 +431,17 @@ private fun PerServingPreview(state: RecipeEditorUiState) {
         contentPadding = PaddingValues(MueTheme.spacing.md),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
     ) {
-        RecipeSplitRow(
+        MueSplitRow(
             start = { MueText(block.title, type.label, color = colors.textTertiary) },
             end = { MueText(block.energyLabel, type.bodyStrong) },
+            gap = MueTheme.spacing.md,
         )
         MueDivider()
         block.macros.forEach { macro ->
-            RecipeSplitRow(
+            MueSplitRow(
                 start = { MueText(macro.name, type.micro, color = colors.textTertiary) },
                 end = { MueText(macro.value, type.micro) },
+                gap = MueTheme.spacing.md,
             )
         }
     }

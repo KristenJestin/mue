@@ -42,6 +42,7 @@ import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -373,20 +374,22 @@ private fun NutritionCard(state: RecipeNutritionUiState, testTag: String) {
         contentPadding = PaddingValues(MueTheme.spacing.md),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
     ) {
-        RecipeSplitRow(
+        MueSplitRow(
             start = {
                 // No `heading()`: the card is announced whole, so its parts are not addressed.
                 MueText(text = state.title, style = type.label, color = colors.textTertiary)
             },
             end = { MueText(state.energyLabel, type.bodyStrong) },
+            gap = MueTheme.spacing.md,
         )
 
         MueDivider()
 
         state.macros.forEach { macro ->
-            RecipeSplitRow(
+            MueSplitRow(
                 start = { MueText(macro.name, type.micro, color = colors.textTertiary) },
                 end = { MueText(macro.value, type.micro) },
+                gap = MueTheme.spacing.md,
             )
         }
     }
@@ -443,17 +446,20 @@ private fun IngredientList(state: RecipeDetailUiState) {
                     }
                 }
 
-                // FR-FOOD-010: with the figures hidden there is no second half to split against,
-                // so the row is simply the name and its quantity.
-                val energy = ingredient.energyLabel
-                if (energy == null) {
-                    facts()
-                } else {
-                    RecipeSplitRow(
-                        start = facts,
-                        end = { MueText(energy, MueTheme.typography.bodyStrong) },
-                    )
-                }
+                MueSplitRow(
+                    start = facts,
+                    /*
+                     * FR-FOOD-010: with the figures hidden there is nothing on the right at all,
+                     * which `MueSplitRow` draws as the whole width belonging to the left rather
+                     * than as a blank half.
+                     */
+                    end = {
+                        ingredient.energyLabel?.let { energy ->
+                            MueText(energy, MueTheme.typography.bodyStrong)
+                        }
+                    },
+                    gap = MueTheme.spacing.md,
+                )
             }
         }
     }
