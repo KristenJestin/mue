@@ -86,6 +86,9 @@ internal fun ScaleDetailScreen(
     ScaleDetailContent(
         scale = scale,
         nameInput = draft ?: scale?.displayName.orEmpty(),
+        // FR-SCALE-013 : la seule ligne du bloc technique qui décrive Android plutôt que la
+        // balance. Lue, jamais demandée — `rememberScalePermissions()` est passif.
+        requiredPermissions = permissions.required,
         forgetTarget = state.forgetTarget,
         onNameChange = { draft = it },
         onSaveName = { name ->
@@ -107,11 +110,18 @@ internal fun ScaleDetailScreen(
  * bouton, ni chevron, et sa note le dit en une phrase. L'adresse Bluetooth y figure parce que c'est
  * la seule chose qui permette de distinguer deux appareils identiques ; elle ne quitte jamais le
  * téléphone et n'apparaît dans aucun export (PRD_SCALE 16.2).
+ *
+ * @param requiredPermissions Ce que cette version d'Android exige avant tout scan (PRD_SCALE 16.1).
+ *   Quatrième ligne du bloc, et la seule qui décrive le téléphone plutôt que la balance — c'est
+ *   aussi pour cela qu'elle vient en dernier. Elle ne dit pas si les permissions sont accordées :
+ *   ce que l'utilisateur peut faire de celles qui manquent est écrit ailleurs, sur `Scales` et dans
+ *   le flux d'appairage (PRD_SCALE 18.5), et cette carte-ci ne propose jamais rien.
  */
 @Composable
 internal fun ScaleDetailContent(
     scale: PairedScale?,
     nameInput: String,
+    requiredPermissions: List<String>,
     forgetTarget: PairedScale?,
     onNameChange: (String) -> Unit,
     onSaveName: (String) -> Unit,
@@ -214,6 +224,11 @@ internal fun ScaleDetailContent(
                     topPadding = spacing.sm,
                 )
                 DetailRow(ScaleMessages.DIAGNOSTICS_DRIVER, scale.driverId, spacing.sm)
+                DetailRow(
+                    label = ScaleMessages.DIAGNOSTICS_PERMISSIONS,
+                    value = ScaleMessages.permissionNames(requiredPermissions),
+                    topPadding = spacing.sm,
+                )
             }
 
             MueSecondaryButton(
@@ -324,6 +339,7 @@ private fun ScaleDetailPreview() {
         ScaleDetailContent(
             scale = PreviewScale,
             nameInput = PreviewScale.displayName,
+            requiredPermissions = ScalePermissions.REQUIRED,
             forgetTarget = null,
             onNameChange = {},
             onSaveName = {},

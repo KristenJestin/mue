@@ -235,6 +235,52 @@ class EntryScaleScreenTest {
         )
     }
 
+    /**
+     * PRD_SCALE 20 : « l'état de la balance est exposé aux services d'accessibilité ».
+     *
+     * Exposé veut dire nommé : sans libellé de zone, une ligne qui dit `Connecting` ne dit pas de
+     * quoi elle parle. Et il ne s'agit que d'un libellé — cette ligne-ci porte le flux instable,
+     * qui change plusieurs fois par seconde, donc elle n'est **pas** une région active. C'est la
+     * seconde moitié de la même phrase du PRD : jamais à chaque trame reçue.
+     */
+    @Test
+    fun the_scale_state_is_a_named_region_that_does_not_speak_on_every_frame() {
+        state = state.copy(
+            scale = EntryScaleUiState(
+                paired = true,
+                indicator = EntryScaleIndicator.MEASURING,
+                liveHundredths = 6_600,
+            ),
+        )
+        start()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.PaneTitle,
+                ScaleMessages.SCALE_STATUS_LABEL,
+            )
+        )
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assert(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion).not()
+        )
+    }
+
+    /** PRD_SCALE 20 : la ligne qui prend sa place porte le même libellé de zone. */
+    @Test
+    fun the_actionable_status_carries_the_same_region_label() {
+        state = state.copy(
+            scale = EntryScaleUiState(paired = true, status = EntryScaleStatus.BLUETOOTH_OFF),
+        )
+        start()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.PaneTitle,
+                ScaleMessages.SCALE_STATUS_LABEL,
+            )
+        )
+    }
+
     /** BR-SCALE-001 : le flux instable est visible et n'est jamais posé sur la règle. */
     @Test
     fun an_unstable_stream_never_reaches_the_ruler() {

@@ -15,6 +15,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -45,14 +46,23 @@ import java.util.Locale
 private const val STATUS_SEPARATOR = " · "
 
 /**
- * `Profile > Scales`, câblé (FR-SCALE-010, 013, PRD_SCALE 18.1).
+ * `Profile > Scales`, câblé (FR-SCALE-010, 013, PRD_SCALE 18.1, 18.5, FR-SCALE-025).
  *
  * Le repérage des balances à portée ne tourne que pendant que l'écran est ouvert (FR-SCALE-013) et
- * **seulement si le scan est possible** : lire `rememberScalePermissions()` est passif, et rien ici
- * n'ouvre de dialogue système. Sans permission, sans radio ou sans localisation système, la liste
- * s'affiche entière et chaque balance se lit `Not in range` — ce qui est l'état normal d'une
- * balance endormie et n'est jamais présenté comme une anomalie (PRD_SCALE 18.2). La permission se
- * demande au premier appairage, un écran plus loin (FR-SCALE-025).
+ * **seulement si le scan est possible**. Lire `rememberScalePermissions()` est entièrement passif :
+ * rien ici n'ouvre de dialogue système, et les quatre gestes qui en ouvrent un sont passés à
+ * [ScalesContent] sous forme de rappels que seul un appui déclenche (FR-SCALE-025, dernière phrase).
+ *
+ * La même condition sert deux fois, et c'est délibéré : `gate == ScanGate.READY` décide à la fois si
+ * le scan de présence démarre et laquelle des phrases de PRD_SCALE 18.5 l'écran doit. Les lire
+ * séparément — `canScan` d'un côté, [ScalePermissionsState.toScanGate] de l'autre — permettrait à un
+ * écran de chercher en affirmant qu'il ne peut pas, ou l'inverse.
+ *
+ * Le **premier** appairage reste le seul endroit où Mue demande la permission (FR-SCALE-025) : on
+ * n'arrive ici avec des balances enregistrées qu'après y être passé, donc la carte que cet écran
+ * peut montrer est celle d'une permission *révoquée*, et son bouton ne fait que rouvrir une
+ * question déjà posée une fois. Rien n'y est spontané : la carte explique, l'utilisateur touche, et
+ * c'est seulement alors qu'un écran du système paraît.
  */
 @Composable
 internal fun ScalesScreen(
@@ -64,24 +74,32 @@ internal fun ScalesScreen(
     val viewModel = scalesViewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val permissions = rememberScalePermissions()
+    val context = LocalContext.current
 
-    val canScan = permissions.canScan
-    DisposableEffect(viewModel, canScan) {
-        if (canScan) viewModel.onScreenVisible()
-        onDispose { if (canScan) viewModel.onScreenHidden() }
+    val gate = permissions.toScanGate()
+    DisposableEffect(viewModel, gate) {
+        if (gate == ScanGate.READY) viewModel.onScreenVisible()
+        onDispose { if (gate == ScanGate.READY) viewModel.onScreenHidden() }
     }
 
     ScalesContent(
         state = state,
+        gate = gate,
         onBack = onBack,
         onAddScale = onAddScale,
         onOpenScale = onOpenScale,
+        onRequestPermission = permissions::request,
+        onOpenSettings = { context.startActivity(permissions.appSettingsIntent) },
+        onEnableBluetooth = { context.startActivity(permissions.enableBluetoothIntent) },
+        onOpenLocationSettings = {
+            context.startActivity(permissions.systemLocationSettingsIntent)
+        },
         modifier = modifier,
     )
 }
 
 /**
- * La liste des balances, ou l'invitation à en associer une (PRD_SCALE 18.1).
+ * La liste des balances, ou l'invitation à en associer une (PRD_SCALE 18.1, 18.5).
  *
  * L'état vide explique **ce qu'une balance apporte** avant de proposer `Add a scale`. Il n'annonce
  * rien de manquant : personne n'a tort de peser à la main, et la dernière phrase le dit.
@@ -89,13 +107,31 @@ internal fun ScalesScreen(
  * Renommer, oublier et consulter le diagnostic vivent sur la fiche d'une balance, pas ici : la
  * liste répond à « laquelle ? », la fiche à « qu'en faire ? ». C'est aussi ce qui évite deux
  * confirmations d'oubli composées en même temps pendant une transition.
+ *
+ * [gate] porte les deux lignes que PRD_SCALE 18.5 adresse nommément à cet écran — « Bluetooth
+ * désactivé : `Scales` propose de l'activer », « permission refusée ou révoquée : `Scales` explique
+ * la permission manquante ». La carte se pose **au-dessus** de la liste et ne la remplace jamais :
+ * une radio éteinte n'efface pas les balances enregistrées, et le nom, le modèle et le dernier
+ * contact de chacune se lisent exactement comme avant (FR-SCALE-013). Ce que la carte remplace est
+ * l'état à portée, qui n'a plus de sens sans scan — voir [PairedScaleRow].
+ *
+ * Elle ne s'affiche pas sur l'état vide, et ce n'est pas un oubli : les trois phrases parlent de
+ * « votre balance » et présupposent qu'il y en ait une, alors que PRD_SCALE 18.1 veut de cet écran,
+ * sans balance, une invitation et rien d'autre — surtout pas le rapport d'une panne qui ne concerne
+ * personne. Quelqu'un qui touche `Add a scale` rencontre la même carte un écran plus loin, à
+ * l'endroit exact où FR-SCALE-025 met la demande.
  */
 @Composable
 internal fun ScalesContent(
     state: ScalesUiState,
+    gate: ScanGate,
     onBack: () -> Unit,
     onAddScale: () -> Unit,
     onOpenScale: (String) -> Unit,
+    onRequestPermission: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onEnableBluetooth: () -> Unit,
+    onOpenLocationSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
@@ -124,13 +160,27 @@ internal fun ScalesContent(
                 state.isEmpty -> ScalesEmptyState(onAddScale = onAddScale)
 
                 else -> {
+                    // PRD_SCALE 18.5 : ce qui empêche Mue de joindre ces balances, et le geste qui
+                    // le lève. Au-dessus de la liste, jamais à sa place.
+                    ScaleGateCard(
+                        gate = gate,
+                        onRequestPermission = onRequestPermission,
+                        onOpenSettings = onOpenSettings,
+                        onEnableBluetooth = onEnableBluetooth,
+                        onOpenLocationSettings = onOpenLocationSettings,
+                    )
+
                     MueText(ScaleMessages.YOUR_SCALES, MueTheme.typography.sectionTitle)
                     Column(
                         modifier = Modifier.testTag(ScaleTestTags.LIST),
                         verticalArrangement = Arrangement.spacedBy(spacing.md),
                     ) {
                         state.scales.forEach { scale ->
-                            PairedScaleRow(scale = scale, onClick = { onOpenScale(scale.id) })
+                            PairedScaleRow(
+                                scale = scale,
+                                presenceKnown = gate == ScanGate.READY,
+                                onClick = { onOpenScale(scale.id) },
+                            )
                         }
                     }
                     MueSecondaryButton(
@@ -185,9 +235,16 @@ private fun ScalesEmptyState(onAddScale: () -> Unit) {
  * entre à portée pendant qu'on lit l'écran est une information, un commentaire continu ne l'est pas
  * (PRD_SCALE 20). Elle porte les deux faits en toutes lettres, sans couleur ni pastille : aucune
  * information n'est portée par la seule couleur.
+ *
+ * @param presenceKnown Un scan tourne, donc « à portée » et « hors de portée » veulent dire quelque
+ *   chose. À `false` — radio éteinte, permission absente, localisation système coupée — la ligne
+ *   s'arrête au dernier contact. FR-SCALE-013 ne demande l'état de présence que « lorsque l'écran
+ *   est ouvert », c'est-à-dire lorsqu'il est observé ; l'écrire `Not in range` sans rien observer
+ *   ferait passer une radio éteinte pour une balance absente, ce qui est faux et, pire, oriente vers
+ *   le mauvais geste.
  */
 @Composable
-private fun PairedScaleRow(scale: PairedScale, onClick: () -> Unit) {
+private fun PairedScaleRow(scale: PairedScale, presenceKnown: Boolean, onClick: () -> Unit) {
     val spacing = MueTheme.spacing
     val locale = rememberMueLocale()
     MueSurfaceCard(
@@ -207,7 +264,7 @@ private fun PairedScaleRow(scale: PairedScale, onClick: () -> Unit) {
                     modifier = Modifier.padding(top = spacing.xxs),
                 )
                 MueText(
-                    text = scale.statusLine(locale),
+                    text = scale.statusLine(locale, presenceKnown),
                     style = MueTheme.typography.caption,
                     color = MueTheme.colors.textTertiary,
                     modifier = Modifier
@@ -231,13 +288,18 @@ private fun PairedScaleRow(scale: PairedScale, onClick: () -> Unit) {
  * Les deux faits tiennent sur une ligne parce qu'ils répondent à la même question — « est-ce que
  * Mue peut la joindre, et sinon quand l'a-t-elle jointe pour la dernière fois ? ». `Last seen` ne
  * précède jamais `Never connected`, qui est déjà une phrase.
+ *
+ * @param presenceKnown Faux quand rien ne cherche : la ligne se réduit alors au dernier contact,
+ *   qui reste vrai, plutôt que d'affirmer une absence que personne n'a constatée (PRD_SCALE 18.5).
+ *   La carte posée au-dessus de la liste dit, elle, pourquoi il n'y a rien à constater.
  */
-internal fun PairedScale.statusLine(locale: Locale): String {
+internal fun PairedScale.statusLine(locale: Locale, presenceKnown: Boolean = true): String {
     val lastSeen = if (lastSeenAt == null) {
         ScaleMessages.NEVER_CONNECTED
     } else {
         "${ScaleMessages.LAST_SEEN_LABEL} ${formatLastSeen(lastSeenAt, locale)}"
     }
+    if (!presenceKnown) return lastSeen
     val presence = if (inRange) ScaleMessages.IN_RANGE else ScaleMessages.NOT_IN_RANGE
     return lastSeen + STATUS_SEPARATOR + presence
 }
@@ -265,28 +327,41 @@ private val PreviewScales: List<PairedScale> = listOf(
     ),
 )
 
-@Preview(name = "Scales — list", widthDp = 390, heightDp = 720)
 @Composable
-private fun ScalesListPreview() {
+private fun ScalesPreview(state: ScalesUiState, gate: ScanGate) {
     MueTheme {
         ScalesContent(
-            state = ScalesUiState(loading = false, scales = PreviewScales),
+            state = state,
+            gate = gate,
             onBack = {},
             onAddScale = {},
             onOpenScale = {},
+            onRequestPermission = {},
+            onOpenSettings = {},
+            onEnableBluetooth = {},
+            onOpenLocationSettings = {},
         )
     }
+}
+
+@Preview(name = "Scales — list", widthDp = 390, heightDp = 720)
+@Composable
+private fun ScalesListPreview() {
+    ScalesPreview(ScalesUiState(loading = false, scales = PreviewScales), ScanGate.READY)
 }
 
 @Preview(name = "Scales — empty", widthDp = 390, heightDp = 720)
 @Composable
 private fun ScalesEmptyPreview() {
-    MueTheme {
-        ScalesContent(
-            state = ScalesUiState(loading = false),
-            onBack = {},
-            onAddScale = {},
-            onOpenScale = {},
-        )
-    }
+    ScalesPreview(ScalesUiState(loading = false), ScanGate.READY)
+}
+
+/** PRD_SCALE 18.5 : la liste reste entière et lisible, et rien n'y prétend à une portée. */
+@Preview(name = "Scales — Bluetooth off", widthDp = 390, heightDp = 720)
+@Composable
+private fun ScalesBluetoothOffPreview() {
+    ScalesPreview(
+        ScalesUiState(loading = false, scales = PreviewScales),
+        ScanGate.BLUETOOTH_OFF,
+    )
 }

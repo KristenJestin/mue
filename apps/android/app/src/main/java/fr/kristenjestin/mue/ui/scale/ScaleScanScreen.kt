@@ -142,7 +142,7 @@ internal fun ScaleScanContent(
             Spacer(Modifier.height(spacing.md))
 
             if (state.gate != ScanGate.READY) {
-                ScanGateCard(
+                ScaleGateCard(
                     gate = state.gate,
                     onRequestPermission = onRequestPermission,
                     onOpenSettings = onOpenSettings,
@@ -342,84 +342,6 @@ private fun UnsupportedDeviceRow(device: UnsupportedDevice) {
                 color = MueTheme.colors.textQuiet,
             )
         }
-    }
-}
-
-/**
- * Ce qui empêche de chercher, et le seul geste qui le lève (PRD_SCALE 16.1, 18.5).
- *
- * Une seule carte à la fois, dans l'ordre que `ScalePermissions` documente : la permission, puis la
- * radio, puis la localisation système. Chaque cas dit ce qu'il est **et** ce qu'il n'est pas — la
- * permission Bluetooth ne sert pas à localiser, et le reste de Mue continue de fonctionner sans
- * elle (BR-SCALE-011).
- */
-@Composable
-private fun ScanGateCard(
-    gate: ScanGate,
-    onRequestPermission: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onEnableBluetooth: () -> Unit,
-    onOpenLocationSettings: () -> Unit,
-) {
-    val spacing = MueTheme.spacing
-    val explanation: String
-    val actionLabel: String
-    val action: () -> Unit
-    val cardTag: String
-    val actionTag: String
-
-    when (gate) {
-        ScanGate.PERMISSION_NEEDED -> {
-            explanation = ScaleMessages.PERMISSION_EXPLANATION
-            actionLabel = ScaleMessages.ALLOW_BLUETOOTH
-            action = onRequestPermission
-            cardTag = ScaleTestTags.PERMISSION_EXPLANATION
-            actionTag = ScaleTestTags.ALLOW_PERMISSION
-        }
-
-        ScanGate.PERMISSION_DENIED -> {
-            explanation = ScaleMessages.PERMISSION_DENIED_EXPLANATION
-            actionLabel = ScaleMessages.OPEN_SETTINGS
-            action = onOpenSettings
-            cardTag = ScaleTestTags.PERMISSION_EXPLANATION
-            actionTag = ScaleTestTags.OPEN_SETTINGS
-        }
-
-        ScanGate.BLUETOOTH_OFF -> {
-            explanation = ScaleMessages.BLUETOOTH_OFF_EXPLANATION
-            actionLabel = ScaleMessages.ENABLE_BLUETOOTH
-            action = onEnableBluetooth
-            cardTag = ScaleTestTags.PERMISSION_EXPLANATION
-            actionTag = ScaleTestTags.ENABLE_BLUETOOTH
-        }
-
-        ScanGate.SYSTEM_LOCATION_OFF -> {
-            explanation = ScaleMessages.SYSTEM_LOCATION_EXPLANATION
-            actionLabel = ScaleMessages.OPEN_LOCATION_SETTINGS
-            action = onOpenLocationSettings
-            cardTag = ScaleTestTags.LOCATION_EXPLANATION
-            actionTag = ScaleTestTags.OPEN_LOCATION_SETTINGS
-        }
-
-        ScanGate.READY -> return
-    }
-
-    MueSurfaceCard(
-        modifier = Modifier.testTag(cardTag),
-        contentPadding = PaddingValues(spacing.cardPadding),
-    ) {
-        MueText(
-            text = explanation,
-            style = MueTheme.typography.body,
-            color = MueTheme.colors.textSecondary,
-        )
-        MuePrimaryButton(
-            label = actionLabel,
-            onClick = action,
-            modifier = Modifier
-                .padding(top = spacing.lg)
-                .testTag(actionTag),
-        )
     }
 }
 

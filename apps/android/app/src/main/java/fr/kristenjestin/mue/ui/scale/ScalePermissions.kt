@@ -115,18 +115,32 @@ internal object ScalePermissions {
  */
 @Stable
 internal class ScalePermissionsState internal constructor(
-    /** What this API level asks for; empty is impossible. Useful for a diagnostic block. */
+    /**
+     * What this API level asks for; empty is impossible.
+     *
+     * Read by the diagnostics block of a scale's card (FR-SCALE-013) and by nothing else. It
+     * belongs there rather than on a permission card: the list depends on the Android version —
+     * `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` from Android 12, `ACCESS_FINE_LOCATION` before —
+     * so it is the one fact about permissions nobody can look up for their own phone, and
+     * exactly the kind of thing "grouped and presented as diagnostics, never as a setting"
+     * exists for. The cards of PRD_SCALE 18.5 say what is *missing*, in a sentence; this says
+     * what is *asked for*, as a value.
+     */
     val required: List<String>,
     /** Every permission of [required] is held. */
     val isGranted: Boolean,
-    /** Asked for at some point and not held now — softly or for good. */
-    val isDenied: Boolean,
     /**
      * Asked for, refused, and the system will no longer show its dialog. The only route left is
      * [appSettingsIntent], with the one-sentence explanation FR-SCALE-025 requires.
      *
      * `false` while the persisted flag is still being read, so a screen never flashes
      * `Open settings` at someone who has simply never been asked.
+     *
+     * There is deliberately no softer `isDenied` beside it. "Refused and can be asked again" is
+     * not a state any screen can act on differently from "never asked": both lead to the same
+     * card and the same `Allow Bluetooth`, because Android's own dialog is the only thing that
+     * knows which of the two it is about to show. A flag no interface can branch on is a flag
+     * that will eventually be branched on by mistake.
      */
     val isPermanentlyDenied: Boolean,
     /** The system dialog would actually appear. */
@@ -241,7 +255,6 @@ internal fun rememberScalePermissions(): ScalePermissionsState {
     return ScalePermissionsState(
         required = ScalePermissions.REQUIRED,
         isGranted = granted,
-        isDenied = !granted && alreadyRequested == true,
         isPermanentlyDenied = !granted && alreadyRequested == true && !canShowSystemPrompt,
         canRequest = !granted && alreadyRequested != null && canShowSystemPrompt,
         isBluetoothEnabled = bluetoothEnabled,

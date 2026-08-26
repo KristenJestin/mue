@@ -45,6 +45,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextMeasurer
@@ -723,7 +724,27 @@ private fun ScaleNote(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(spacing.xs),
-                modifier = Modifier.testTag(ScaleTestTags.ENTRY_INDICATOR),
+                modifier = Modifier
+                    .testTag(ScaleTestTags.ENTRY_INDICATOR)
+                    /*
+                     * PRD_SCALE 20 : « l'état de la balance est exposé aux services
+                     * d'accessibilité ». Un libellé de zone, pas une région active.
+                     *
+                     * `paneTitle` est ce qui *nomme* une zone qui se met à jour d'elle-même —
+                     * `AccessibilityNodeInfo.setPaneTitle` du côté de la plateforme — sans rien
+                     * dire de ce qu'elle contient. C'est exactement ce qui manquait : sans lui,
+                     * un lecteur d'écran qui tombe sur `Connecting` n'a aucun moyen de savoir de
+                     * quoi cette ligne parle.
+                     *
+                     * Il ne pouvait pas s'agir d'une région active ici, et c'est toute la raison
+                     * pour laquelle cette ligne-ci n'en porte pas : elle affiche le flux instable,
+                     * qui change plusieurs fois par seconde pendant qu'on monte sur la balance.
+                     * Le titre, lui, est constant, donc la plateforme n'émet rien tant que la
+                     * ligne reste à l'écran — la seule chose qu'elle annonce est l'apparition de
+                     * la zone, c'est-à-dire le début d'une session. « Jamais à chaque trame »
+                     * reste vrai par construction.
+                     */
+                    .semantics { paneTitle = ScaleMessages.SCALE_STATUS_LABEL },
             ) {
                 MueText(
                     text = indicator.message,
@@ -859,6 +880,11 @@ private fun ScaleFootnotes(
                 .testTag(ScaleTestTags.ENTRY_STATUS)
                 .semantics(mergeDescendants = true) {
                     liveRegion = LiveRegionMode.Polite
+                    // PRD_SCALE 20 : la même zone nommée que l'indication, dont cette ligne prend
+                    // la place. Le libellé dit de quoi il est question ; la région active, elle,
+                    // reste réglée sur le seul changement qui mérite d'être annoncé —
+                    // l'indisponibilité —, et `announcement` n'est pas touché par ce libellé.
+                    paneTitle = ScaleMessages.SCALE_STATUS_LABEL
                     contentDescription = announcement
                 },
         ) {

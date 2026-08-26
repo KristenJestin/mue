@@ -32,8 +32,10 @@ import kotlinx.coroutines.launch
  * **Ce ViewModel ne demande jamais de permission** (FR-SCALE-025). Il ne connaît même pas
  * l'existence d'Android : c'est l'écran qui lit `rememberScalePermissions()`, et qui n'appelle
  * [onScreenVisible] que lorsque le scan est effectivement possible. Sans permission, sans radio ou
- * sans localisation système, la liste s'affiche entière et chaque balance se lit simplement
- * `Not in range` — l'état normal d'une balance endormie (PRD_SCALE 18.2), jamais une anomalie.
+ * sans localisation système, la liste s'affiche entière — nom, modèle et dernier contact compris —
+ * et [PairedScale.inRange] reste simplement à `false` pour tout le monde. L'écran ne l'affiche pas
+ * dans ce cas : ce `false` signifie « personne n'a regardé », pas « la balance est absente », et
+ * c'est `ScalesContent` qui tient cette distinction (PRD_SCALE 18.5).
  */
 internal class ScalesViewModel(
     private val scales: ScaleRepository,

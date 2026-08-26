@@ -212,6 +212,26 @@ internal object ScaleMessages {
     const val DIAGNOSTICS_ADVERTISED_NAME: String = "Advertised name"
     const val DIAGNOSTICS_DRIVER: String = "Driver"
 
+    /**
+     * FR-SCALE-013: what this phone's Android version asks Mue for before it may look for a
+     * scale (PRD_SCALE 16.1). Diagnostics, not a setting — nothing here is granted or revoked,
+     * and the row has no control of any kind. It earns its place in the block because it is the
+     * one line of it nobody can look up for their own device: the list is `BLUETOOTH_SCAN` and
+     * `BLUETOOTH_CONNECT` from Android 12 and `ACCESS_FINE_LOCATION` before it, which is also
+     * why a bug report that quotes it is worth more than one that quotes the version number.
+     */
+    const val DIAGNOSTICS_PERMISSIONS: String = "Permissions"
+
+    /**
+     * The short names, as Android's own settings screen writes them.
+     *
+     * `android.permission.` is dropped because it is the same eighteen characters on every line
+     * and says nothing: what identifies the permission is what follows it. The full name never
+     * appears on screen and is not needed to look one up.
+     */
+    fun permissionNames(permissions: List<String>): String =
+        permissions.joinToString(", ") { it.substringAfterLast('.') }
+
     /** FR-SCALE-014, word for word. */
     const val FORGET_THIS_SCALE: String = "Forget this scale"
 
@@ -510,7 +530,14 @@ internal object ScaleMessages {
     const val UNAVAILABLE_ANNOUNCEMENT: String =
         "Your scale is unavailable. You can still enter your weight."
 
-    /** PRD_SCALE 20: the scale state, exposed to accessibility services as a labelled region. */
+    /**
+     * PRD_SCALE 20: the scale state, exposed to accessibility services as a labelled region.
+     *
+     * Carried as a pane title by the two lines `Entry` gives the scale — the discreet indication
+     * and the actionable status — which are never both on screen, so the name is never
+     * ambiguous. It labels the region and says nothing about its contents: what is announced,
+     * and when, is decided by `EntryScaleAnnouncement` and by nothing here.
+     */
     const val SCALE_STATUS_LABEL: String = "Scale status"
 
     /**

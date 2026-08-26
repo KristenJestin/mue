@@ -1,9 +1,11 @@
 package fr.kristenjestin.mue.ui.scale
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -54,6 +56,10 @@ class ScalesScreenTest {
     private val opened = mutableListOf<String>()
     private var addRequested = 0
     private var backs = 0
+    private var permissionRequested = 0
+    private var settingsOpened = 0
+    private var bluetoothEnabled = 0
+    private var locationSettingsOpened = 0
 
     /** PRD_SCALE 18.1 : une invitation qui dit ce qu'une balance apporte, pas un manque. */
     @Test
@@ -124,6 +130,126 @@ class ScalesScreenTest {
         assertEquals(1, addRequested)
     }
 
+    // region les conditions d'Android sur `Scales` (FR-SCALE-025, PRD_SCALE 18.5)
+
+    /**
+     * PRD_SCALE 18.5, mot pour mot : « Bluetooth désactivé : `Scales` propose de l'activer ».
+     *
+     * Et il le propose **sans effacer la liste** : une radio éteinte n'est pas une perte de
+     * données, les balances enregistrées restent lisibles avec leur nom, leur modèle et leur
+     * dernier contact (FR-SCALE-013).
+     */
+    @Test
+    fun aRadioThatIsOffIsOfferedToBeSwitchedOnWithoutHidingTheList() {
+        show(
+            ScalesUiState(loading = false, scales = listOf(BATHROOM, DOWNSTAIRS)),
+            gate = ScanGate.BLUETOOTH_OFF,
+        )
+
+        compose.onNodeWithTag(ScaleTestTags.PERMISSION_EXPLANATION).assertIsDisplayed()
+        compose.onNodeWithText(ScaleMessages.BLUETOOTH_OFF_EXPLANATION).assertIsDisplayed()
+
+        compose.onNodeWithTag(ScaleTestTags.LIST).assertIsDisplayed()
+        compose.onNodeWithText("Bathroom scale").assertIsDisplayed()
+        compose.onNodeWithText("Downstairs").assertIsDisplayed()
+        // Les deux gardent le modèle reconnu : la carte n'a rien retiré de la liste.
+        compose.onAllNodesWithText(BATHROOM.modelName).assertCountEquals(2)
+        compose.onNodeWithTag(ScaleTestTags.rowStatus("a"))
+            .assertTextContains(ScaleMessages.LAST_SEEN_LABEL, substring = true)
+
+        compose.onNodeWithTag(ScaleTestTags.ENABLE_BLUETOOTH).performScrollTo().performClick()
+
+        assertEquals(1, bluetoothEnabled)
+    }
+
+    /**
+     * PRD_SCALE 18.5 : sans scan, personne n'a constaté quoi que ce soit.
+     *
+     * `Not in range` serait un mensonge — la balance est peut-être là, allumée, sous les yeux du
+     * lecteur — et surtout il désigne le mauvais geste : monter sur la balance plutôt que rallumer
+     * la radio. La ligne s'arrête donc au dernier contact, qui reste vrai.
+     */
+    @Test
+    fun withoutTheRadioNothingClaimsAScaleIsOutOfRange() {
+        show(ScalesUiState(loading = false, scales = listOf(BATHROOM)), gate = ScanGate.BLUETOOTH_OFF)
+
+        compose.onNodeWithTag(ScaleTestTags.rowStatus("a"))
+            .assertTextContains(ScaleMessages.LAST_SEEN_LABEL, substring = true)
+        compose.onNodeWithText(ScaleMessages.NOT_IN_RANGE, substring = true).assertDoesNotExist()
+        compose.onNodeWithText(ScaleMessages.IN_RANGE, substring = true).assertDoesNotExist()
+    }
+
+    /**
+     * FR-SCALE-025 : « permission refusée ou révoquée : `Scales` explique la permission
+     * manquante », et **rien ne se demande** tant que le bouton n'est pas activé — aucun écran
+     * système ne s'ouvre sans geste de l'utilisateur.
+     */
+    @Test
+    fun aRevokedPermissionIsExplainedAndAsksForNothingOnItsOwn() {
+        show(ScalesUiState(loading = false, scales = listOf(BATHROOM)), gate = ScanGate.PERMISSION_NEEDED)
+
+        compose.onNodeWithTag(ScaleTestTags.PERMISSION_EXPLANATION).assertIsDisplayed()
+        compose.onNodeWithText(ScaleMessages.PERMISSION_EXPLANATION).assertIsDisplayed()
+        assertEquals(0, permissionRequested)
+
+        compose.onNodeWithTag(ScaleTestTags.ALLOW_PERMISSION).performScrollTo().performClick()
+
+        assertEquals(1, permissionRequested)
+    }
+
+    /** FR-SCALE-025 : un refus définitif renvoie aux réglages, et n'est jamais redemandé. */
+    @Test
+    fun aFinalRefusalLeadsToTheSettingsAndIsNeverAskedAgain() {
+        show(ScalesUiState(loading = false, scales = listOf(BATHROOM)), gate = ScanGate.PERMISSION_DENIED)
+
+        compose.onNodeWithText(ScaleMessages.PERMISSION_DENIED_EXPLANATION).assertIsDisplayed()
+        compose.onNodeWithTag(ScaleTestTags.ALLOW_PERMISSION).assertDoesNotExist()
+        compose.onNodeWithTag(ScaleTestTags.OPEN_SETTINGS).performScrollTo().performClick()
+
+        assertEquals(1, settingsOpened)
+        assertEquals(0, permissionRequested)
+    }
+
+    /** PRD_SCALE 16.1, API ≤ 30 : expliquée comme une exigence du système, avec son réglage. */
+    @Test
+    fun systemLocationIsExplainedOnTheListToo() {
+        show(
+            ScalesUiState(loading = false, scales = listOf(BATHROOM)),
+            gate = ScanGate.SYSTEM_LOCATION_OFF,
+        )
+
+        compose.onNodeWithTag(ScaleTestTags.LOCATION_EXPLANATION).assertIsDisplayed()
+        compose.onNodeWithText(ScaleMessages.SYSTEM_LOCATION_EXPLANATION).assertIsDisplayed()
+        compose.onNodeWithTag(ScaleTestTags.OPEN_LOCATION_SETTINGS).performScrollTo().performClick()
+
+        assertEquals(1, locationSettingsOpened)
+    }
+
+    /**
+     * PRD_SCALE 18.1 : sans balance, l'écran reste une invitation.
+     *
+     * Les trois phrases de PRD_SCALE 18.5 parlent de « votre balance » et n'ont personne à qui
+     * s'adresser ici. Elles attendent le flux d'appairage, où FR-SCALE-025 met la demande.
+     */
+    @Test
+    fun theEmptyStateStaysAnInvitationEvenWithTheRadioOff() {
+        show(ScalesUiState(loading = false), gate = ScanGate.BLUETOOTH_OFF)
+
+        compose.onNodeWithTag(ScaleTestTags.EMPTY_STATE).assertIsDisplayed()
+        compose.onNodeWithTag(ScaleTestTags.PERMISSION_EXPLANATION).assertDoesNotExist()
+        compose.onNodeWithTag(ScaleTestTags.ADD_SCALE).assertHasClickAction()
+    }
+
+    /** Rien n'est proposé avant la première lecture, pas même une condition d'Android. */
+    @Test
+    fun nothingIsExplainedBeforeTheFirstRead() {
+        show(ScalesUiState(loading = true), gate = ScanGate.BLUETOOTH_OFF)
+
+        compose.onNodeWithTag(ScaleTestTags.PERMISSION_EXPLANATION).assertDoesNotExist()
+    }
+
+    // endregion
+
     /** PRD_SCALE 20 : la liste est utilisable sans le moindre geste de glissement. */
     @Test
     fun theWayBackIsAControlAndNotAGesture() {
@@ -134,14 +260,19 @@ class ScalesScreenTest {
         assertEquals(1, backs)
     }
 
-    private fun show(state: ScalesUiState) {
+    private fun show(state: ScalesUiState, gate: ScanGate = ScanGate.READY) {
         compose.setContent {
             MueTheme {
                 ScalesContent(
                     state = state,
+                    gate = gate,
                     onBack = { backs++ },
                     onAddScale = { addRequested++ },
                     onOpenScale = { opened += it },
+                    onRequestPermission = { permissionRequested++ },
+                    onOpenSettings = { settingsOpened++ },
+                    onEnableBluetooth = { bluetoothEnabled++ },
+                    onOpenLocationSettings = { locationSettingsOpened++ },
                 )
             }
         }

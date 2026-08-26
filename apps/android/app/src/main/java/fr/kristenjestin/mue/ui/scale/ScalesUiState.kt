@@ -24,7 +24,10 @@ import java.util.Locale
  *   liste — une balance qu'on ne voit plus est une balance qu'on ne peut plus oublier.
  * @property inRange Vue par le scan pendant que l'écran est ouvert. Hors de portée est l'état
  *   normal d'une balance endormie (PRD_SCALE 18.2) : ce n'est jamais une anomalie, et l'écran ne
- *   le présente pas comme telle.
+ *   le présente pas comme telle. Faux signifie « aucune annonce reçue », ce qui recouvre deux
+ *   situations très différentes — une balance endormie, et un scan qui n'a jamais pu démarrer. Seul
+ *   l'écran sait les distinguer, parce que lui seul lit les conditions d'Android : il ne montre
+ *   cette propriété que lorsqu'un scan tourne réellement (PRD_SCALE 18.5).
  */
 @Immutable
 internal data class PairedScale(

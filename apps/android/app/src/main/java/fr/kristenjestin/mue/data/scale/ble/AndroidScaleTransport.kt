@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
@@ -401,8 +402,17 @@ private class AndroidScaleLink(
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         }
+        /*
+         * `BluetoothStatusCodes.SUCCESS` et non `BluetoothGatt.GATT_SUCCESS`.
+         *
+         * Les deux valent `0`, donc le comportement est le même, mais la surcharge d'API 33 rend un
+         * code de la famille `BluetoothStatusCodes` — pas un statut GATT. Comparer à l'autre famille
+         * est ce que `WrongConstant` signale, et il a raison : les deux ensembles divergent dès la
+         * première valeur d'erreur, et une lecture d'un code de retour dans la mauvaise table est
+         * exactement le genre de bogue qu'aucun test de protocole ne peut voir.
+         */
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            client.writeCharacteristic(characteristic, bytes, type) == BluetoothGatt.GATT_SUCCESS
+            client.writeCharacteristic(characteristic, bytes, type) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
@@ -418,7 +428,8 @@ private class AndroidScaleLink(
         descriptor: BluetoothGattDescriptor,
         value: ByteArray,
     ): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        client.writeDescriptor(descriptor, value) == BluetoothGatt.GATT_SUCCESS
+        // Même famille de codes que [send], pour la même raison.
+        client.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
     } else {
         @Suppress("DEPRECATION")
         run {

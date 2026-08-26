@@ -57,6 +57,26 @@ class ScalesViewModelTest {
         assertFalse(line.contains(ScaleMessages.LAST_SEEN_LABEL), line)
     }
 
+    /**
+     * PRD_SCALE 18.5 : sans scan, la ligne n'affirme rien sur la portée.
+     *
+     * `inRange` vaut `false` pour tout le monde quand aucun scan ne tourne, et ce `false` veut dire
+     * « personne n'a regardé », pas « la balance est absente ». L'écrire `Not in range` ferait
+     * passer une radio éteinte pour une balance endormie et désignerait le mauvais geste. Le dernier
+     * contact, lui, reste vrai et reste affiché.
+     */
+    @Test
+    fun `sans scan la ligne s'arrête au dernier contact`() = runTest {
+        val harness = harness(devices = listOf(scaleDeviceOf(id = "a", lastSeenAt = SEEN)))
+
+        val line = harness.state().scales.single()
+            .statusLine(Locale.UK, presenceKnown = false)
+
+        assertTrue(line.startsWith(ScaleMessages.LAST_SEEN_LABEL), line)
+        assertFalse(line.contains(ScaleMessages.NOT_IN_RANGE), line)
+        assertFalse(line.contains(ScaleMessages.IN_RANGE), line)
+    }
+
     /** Le pilote a été retiré depuis l'appairage : la balance se lit, elle ne disparaît pas. */
     @Test
     fun `une balance dont le pilote n'existe plus reste dans la liste`() = runTest {

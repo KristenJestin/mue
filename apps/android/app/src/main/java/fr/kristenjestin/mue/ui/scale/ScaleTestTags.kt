@@ -61,6 +61,10 @@ internal object ScaleTestTags {
      * Le geste qui déclenche la demande de permission, et lui seul (FR-SCALE-025). Distinct de
      * [PERMISSION_EXPLANATION], qui est la carte : un test doit pouvoir vérifier que la carte est
      * là **sans** que rien ne se demande tant que ce bouton n'est pas activé.
+     *
+     * Réservé dans cette région parce que c'est ici, au premier appairage, que la question se pose
+     * pour la première fois ; `Scales` le compose aussi, mais seulement pour rouvrir une question
+     * déjà posée — une permission révoquée depuis les réglages d'Android.
      */
     const val ALLOW_PERMISSION: String = "scale:allowPermission"
 
@@ -159,18 +163,32 @@ internal object ScaleTestTags {
 
     // region Permissions and system state (FR-SCALE-025, PRD_SCALE 18.5)
 
-    /** The one-sentence explanation shown on `Scales` before the first request. */
+    /*
+     * These five are the handles of `ScaleGateCard`, and that card is composed by **both**
+     * `Scales` and the pairing flow — one implementation, two screens. PRD_SCALE 18.5 names
+     * `Scales` for the radio and the missing permission, FR-SCALE-025 puts the request itself at
+     * the first pairing, and neither screen may explain the same condition differently.
+     *
+     * They never collide: the two screens are separate destinations and are only ever composed
+     * together for the length of a transition, during which at most one of them is gated.
+     */
+
+    /**
+     * The one-sentence explanation of a missing or refused permission (FR-SCALE-025). Shown on
+     * `Scales` above the list of paired scales, and on the pairing flow in place of it.
+     */
     const val PERMISSION_EXPLANATION: String = "scale:permissionExplanation"
 
     /** The way out of a permanent refusal, and nothing else (FR-SCALE-025). */
     const val OPEN_SETTINGS: String = "scale:openSettings"
 
-    /** PRD_SCALE 18.5: `Scales` offers to switch the radio on. */
+    /** PRD_SCALE 18.5: `Scales` offers to switch the radio on, and so does the pairing flow. */
     const val ENABLE_BLUETOOTH: String = "scale:enableBluetooth"
 
     /**
      * API ≤ 30 only: system location is a requirement of the platform's scanner, and
-     * PRD_SCALE 16.1 wants it explained rather than read as an empty list.
+     * PRD_SCALE 16.1 wants it explained rather than read as an empty list. Explained on both
+     * screens, for the same reason the other three are.
      */
     const val LOCATION_EXPLANATION: String = "scale:locationExplanation"
     const val OPEN_LOCATION_SETTINGS: String = "scale:openLocationSettings"

@@ -4,7 +4,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -24,6 +26,9 @@ private val KNOWN = DiscoveredScale(
 )
 
 private val SPEAKER = UnsupportedDevice("AA:BB:CC:DD:EE:01", "Living room speaker")
+
+/** La balance enregistrée qui ne répond plus à son ancienne adresse (FR-SCALE-001). */
+private val CANDIDATE = ReattachCandidate("a", "Bathroom scale")
 
 /**
  * Le flux d'appairage (FR-SCALE-011, 012), le rattachement (FR-SCALE-001) et les quatre
@@ -46,6 +51,7 @@ class ScaleScanScreenTest {
     private var locationSettingsOpened = 0
     private var reattached = 0
     private var declined = 0
+    private var backs = 0
 
     /** FR-SCALE-011 : la phrase la plus utile de l'écran. */
     @Test
@@ -54,6 +60,44 @@ class ScaleScanScreenTest {
 
         compose.onNodeWithTag(ScaleTestTags.SCAN_HINT).assertIsDisplayed()
         compose.onNodeWithText(ScaleMessages.SCAN_WAKE_HINT).assertIsDisplayed()
+    }
+
+    /**
+     * PRD_SCALE 18.5 et 20 : une condition d'Android remplace la recherche, jamais l'écran.
+     *
+     * Le flux d'appairage reste entier et se quitte par un contrôle, pas par un geste de
+     * glissement — y compris quand il n'a rien à chercher.
+     */
+    @Test
+    fun aConditionOfAndroidReplacesTheSearchAndNotTheScreen() {
+        show(ScaleScanUiState(gate = ScanGate.BLUETOOTH_OFF))
+
+        compose.onNodeWithTag(ScaleTestTags.SCAN_SCREEN).assertIsDisplayed()
+        compose.onNodeWithTag(ScaleTestTags.SCAN_HINT).assertDoesNotExist()
+        compose.onNodeWithTag(ScaleTestTags.SCAN_STATUS).assertDoesNotExist()
+        compose.onNodeWithTag(ScaleTestTags.SCAN_AGAIN).assertDoesNotExist()
+
+        compose.onNodeWithContentDescription("Back").performClick()
+
+        assertEquals(1, backs)
+    }
+
+    /**
+     * PRD_SCALE 7.3 : une seule ligne pour les trois moments de la recherche, et c'est son texte
+     * qui les distingue. Aucun des trois n'est une erreur — pas même le dernier.
+     */
+    @Test
+    fun theOneStatusLineSaysWhichOfTheThreeMomentsItIs() {
+        show(ScaleScanUiState())
+        compose.onNodeWithTag(ScaleTestTags.SCAN_STATUS)
+            .assertTextEquals(ScaleMessages.SCAN_NOT_STARTED)
+
+        show(ScaleScanUiState(scanning = true, started = true))
+        compose.onNodeWithTag(ScaleTestTags.SCAN_STATUS).assertTextEquals(ScaleMessages.SCANNING)
+
+        show(ScaleScanUiState(scanning = false, started = true))
+        compose.onNodeWithTag(ScaleTestTags.SCAN_STATUS)
+            .assertTextEquals(ScaleMessages.SCAN_FINISHED)
     }
 
     @Test
@@ -126,6 +170,10 @@ class ScaleScanScreenTest {
 
     // region les quatre conditions d'Android (FR-SCALE-025, PRD_SCALE 18.5)
 
+    /**
+     * FR-SCALE-025 : la permission se demande **ici**, au premier appairage, et derrière un geste
+     * délibéré. Composer l'écran ne demande rien ; c'est cette différence que le compteur mesure.
+     */
     @Test
     fun theFirstPairingIsWhereTheBluetoothPermissionIsAskedFor() {
         show(ScaleScanUiState(gate = ScanGate.PERMISSION_NEEDED))
@@ -134,6 +182,15 @@ class ScaleScanScreenTest {
         compose.onNodeWithText(ScaleMessages.PERMISSION_EXPLANATION).assertIsDisplayed()
         // Le scan n'est même pas dessiné tant que la condition n'est pas levée.
         compose.onNodeWithTag(ScaleTestTags.SCAN_HINT).assertDoesNotExist()
+
+        // La carte est à l'écran depuis le début et rien n'a encore été demandé.
+        assertEquals(0, permissionRequested)
+
+        compose.onNodeWithTag(ScaleTestTags.ALLOW_PERMISSION)
+            .assertHasClickAction()
+            .performClick()
+
+        assertEquals(1, permissionRequested)
     }
 
     @Test
@@ -141,6 +198,8 @@ class ScaleScanScreenTest {
         show(ScaleScanUiState(gate = ScanGate.PERMISSION_DENIED))
 
         compose.onNodeWithText(ScaleMessages.PERMISSION_DENIED_EXPLANATION).assertIsDisplayed()
+        // FR-SCALE-025 : Mue ne redemande jamais spontanément — il n'y a plus rien à activer.
+        compose.onNodeWithTag(ScaleTestTags.ALLOW_PERMISSION).assertDoesNotExist()
         compose.onNodeWithTag(ScaleTestTags.OPEN_SETTINGS).performClick()
 
         assertEquals(1, settingsOpened)
@@ -173,26 +232,60 @@ class ScaleScanScreenTest {
 
     // region le rattachement d'adresse (FR-SCALE-001)
 
-    /** Proposé, jamais silencieux — et les deux réponses sont constructives. */
+    /**
+     * FR-SCALE-001 : **jamais silencieux.**
+     *
+     * Un appareil dont le nom annoncé et le pilote désignent une balance enregistrée qui ne répond
+     * plus est signalé sur sa ligne — `Might be …` — et rien de plus. Deux balances identiques dans
+     * un même foyer ne doivent pas fusionner à l'insu de leur propriétaire, donc tant que la
+     * question n'est pas posée, aucune des deux réponses n'est prise.
+     */
+    @Test
+    fun aScaleThatMightHaveChangedAddressIsNeverReattachedOnItsOwn() {
+        val device = KNOWN.copy(reattachTo = CANDIDATE)
+        show(ScaleScanUiState(started = true, recognised = listOf(device)))
+
+        compose.onNodeWithText(ScaleMessages.mightBe(CANDIDATE.displayName)).assertIsDisplayed()
+        compose.onNodeWithTag(ScaleTestTags.REATTACH_PROPOSAL).assertDoesNotExist()
+        assertEquals(0, reattached)
+        assertEquals(0, declined)
+    }
+
+    /**
+     * FR-SCALE-001 : proposé, et les deux réponses sont constructives.
+     *
+     * Aucune n'est « celle qui annule » : l'une conserve le nom et l'historique de la balance
+     * enregistrée, l'autre en appaire une seconde. Le corps de la question dit ce que chacune garde,
+     * ce qui est la seule chose qui la rende répondable.
+     */
     @Test
     fun reattachingIsAQuestionWithTwoUsableAnswers() {
-        val device = KNOWN.copy(reattachTo = ReattachCandidate("a", "Bathroom scale"))
+        val device = KNOWN.copy(reattachTo = CANDIDATE)
         show(
             ScaleScanUiState(
                 started = true,
                 recognised = listOf(device),
-                proposal = ReattachProposal(device, ReattachCandidate("a", "Bathroom scale")),
+                proposal = ReattachProposal(device, CANDIDATE),
             ),
         )
 
+        compose.onNodeWithTag(ScaleTestTags.REATTACH_PROPOSAL).assertIsDisplayed()
+        compose.onNodeWithText(ScaleMessages.REATTACH_TITLE).assertIsDisplayed()
         // Le nom donné à la balance enregistrée est ce qui rend la question répondable.
-        compose.onNodeWithText("Bathroom scale", substring = true).assertIsDisplayed()
+        compose.onNodeWithText(ScaleMessages.reattachBody(CANDIDATE.displayName))
+            .assertIsDisplayed()
 
-        compose.onNodeWithText("Reattach").assertHasClickAction().performClick()
+        compose.onNodeWithTag(ScaleTestTags.REATTACH_CONFIRM)
+            .assertHasClickAction()
+            .performClick()
         assertEquals(1, reattached)
+        assertEquals(0, declined)
 
-        compose.onNodeWithText("Add as a new scale").assertHasClickAction().performClick()
+        compose.onNodeWithTag(ScaleTestTags.REATTACH_DECLINE)
+            .assertHasClickAction()
+            .performClick()
         assertEquals(1, declined)
+        assertEquals(1, reattached)
     }
 
     // endregion
@@ -225,7 +318,7 @@ class ScaleScanScreenTest {
                     onReattachConfirmed = { reattached++ },
                     onReattachDeclined = { declined++ },
                     onProposalDismissed = {},
-                    onBack = {},
+                    onBack = { backs++ },
                 )
             }
         }
