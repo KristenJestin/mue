@@ -51,6 +51,18 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 private val BackIconSize: Dp = 18.dp
 
 /**
+ * The glyph tile in front of a search result: the prototype's `h-11 w-11 rounded-2xl`, so 44 dp.
+ *
+ * The prototype gives every leading tile in the module the *same* corner — `rounded-2xl` — and
+ * varies only the side: 40 dp on a journal line, 44 dp here and in the catalogue, 56 dp on a
+ * recipe. This one had drifted twice over: 48 dp because [MueMinTouchTarget] was read as a
+ * proportion rather than as a rule about targets, and `shapes.small` where every visually
+ * identical row in the module uses `shapes.field`, so the same object was drawn with two
+ * different radii depending on which screen it appeared on.
+ */
+private val ResultTileSize: Dp = 44.dp
+
+/**
  * PRD_FOOD 11's shared selector, and the way in FR-FOOD-002 opens (PRD_FOOD 9.4).
  *
  * It hands back a [FoodId] rather than a `Food`: the caller reads the card from the catalogue
@@ -284,8 +296,8 @@ private fun FoodResultRow(row: FoodPickerRowUiState, onClick: () -> Unit) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(MueMinTouchTarget)
-                    .clip(MueTheme.shapes.small)
+                    .size(ResultTileSize)
+                    .clip(MueTheme.shapes.field)
                     .background(colors.accentSoft),
                 contentAlignment = Alignment.Center,
             ) {
