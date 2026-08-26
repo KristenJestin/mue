@@ -9,10 +9,14 @@ import androidx.core.content.ContextCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import fr.kristenjestin.mue.domain.model.ActivityEnvironment
 import fr.kristenjestin.mue.domain.model.ActivityPreset
+import fr.kristenjestin.mue.domain.model.FoodLogKind
+import fr.kristenjestin.mue.domain.model.FoodSource
+import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.Movement
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueIcons
+import fr.kristenjestin.mue.ui.food.FoodIcons
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -66,13 +70,20 @@ class MueIconTest {
         }
     }
 
-    /** The tab table of PRD 14.1, read back through the bar's own destinations. */
+    /**
+     * The tab table of PRD 14.1 and PRD_FOOD 7, read back through the bar's own destinations.
+     *
+     * `getValue` rather than `get`: a tab added without a row here fails loudly instead of
+     * quietly skipping the only assertion that would have checked its glyph. That is what
+     * happened when `Food` was inserted, and it is the intended way for it to happen.
+     */
     @Test
     fun eachTabCarriesTheIconThePrdNames() {
         val expected = mapOf(
             MueDestination.ENTRY to ActivityIcons.TAB_ENTRY,
             MueDestination.PROGRESS to ActivityIcons.TAB_PROGRESS,
             MueDestination.ACTIVITY to ActivityIcons.TAB_ACTIVITY,
+            MueDestination.FOOD to FoodIcons.TAB_FOOD,
             MueDestination.PROFILE to ActivityIcons.TAB_PROFILE,
         )
 
@@ -80,6 +91,19 @@ class MueIconTest {
             assertEquals(expected.getValue(destination), destination.iconName)
             assertEquals(MueIcons.resource(destination.iconName), destination.iconRes)
         }
+    }
+
+    /**
+     * PRD_FOOD 7 puts `Food` between `Activity` and `Profile`, and the order is not cosmetic:
+     * `MueNavigationHost` reads the ordinal to decide which way a tab change slides, and
+     * `MueTabSelectionSaver` stores that same ordinal across process death.
+     */
+    @Test
+    fun theFoodTabSitsBetweenActivityAndProfile() {
+        assertEquals(
+            listOf("Entry", "Progress", "Activity", "Food", "Profile"),
+            MueDestination.entries.map { it.label },
+        )
     }
 
     /** Whatever the module screens ask `ActivityIcons` for has to exist as a drawable. */
@@ -147,6 +171,75 @@ class MueIconTest {
         MueIcons.timerNames.forEach {
             assertTrue("`$it` is not in MueIcons.names and would ship undrawn", it in MueIcons.names)
         }
+        MueIcons.foodNames.forEach {
+            assertTrue("`$it` is not in MueIcons.names and would ship undrawn", it in MueIcons.names)
+        }
+    }
+
+    /**
+     * Whatever a Food screen can ask `FoodIcons` for has to exist as a drawable.
+     *
+     * The three tables of PRD_FOOD 19 are walked exhaustively rather than spot-checked, so a
+     * moment, a provenance or a form of journal line added to the domain later cannot reach the
+     * `else` of `MueIcons.resource` for the first time on a user's device.
+     */
+    @Test
+    fun everyIconTheFoodModuleCanAskForWasImported() {
+        MealSlot.entries.forEach { slot ->
+            val name = FoodIcons.forSlot(slot)
+            assertTrue("`$slot` draws nothing", paintedPixels(context, MueIcons.resource(name)) > 0)
+        }
+        FoodSource.entries.forEach { source ->
+            val name = FoodIcons.forSource(source)
+            assertTrue("`$source` draws nothing", paintedPixels(context, MueIcons.resource(name)) > 0)
+        }
+        FoodLogKind.entries.forEach { kind ->
+            val name = FoodIcons.forKind(kind)
+            assertTrue("`$kind` draws nothing", paintedPixels(context, MueIcons.resource(name)) > 0)
+        }
+    }
+
+    /**
+     * PRD_FOOD 19: the four moments are told apart by their glyph, and so is every provenance.
+     *
+     * Two moments sharing a vector would leave the day screen reading as one repeated heading —
+     * the same failure `onlyTheOtherMovementFallsBackOnTheGenericGlyph` guards for the Activity
+     * module. The fruit is deliberately in both tables, so the two are checked separately rather
+     * than as one pool.
+     */
+    @Test
+    fun noTwoMomentsAndNoTwoProvenancesShareAGlyph() {
+        val slots = MealSlot.entries.groupBy(FoodIcons::forSlot).filterValues { it.size > 1 }
+        assertTrue("moments share a glyph: $slots", slots.isEmpty())
+
+        val sources = FoodSource.entries.groupBy(FoodIcons::forSource).filterValues { it.size > 1 }
+        assertTrue("provenances share a glyph: $sources", sources.isEmpty())
+
+        val kinds = FoodLogKind.entries.groupBy(FoodIcons::forKind).filterValues { it.size > 1 }
+        assertTrue("journal line forms share a glyph: $kinds", kinds.isEmpty())
+    }
+
+    /**
+     * The Food glyphs (PRD_FOOD 19), drawn rather than merely resolved.
+     *
+     * The same trap as the timer set, and this batch walks straight into it: SVG lets an arc pack
+     * its two flags into one token, Android's `PathParser` does not, and AAPT compiles such a file
+     * without complaint — the failure arrives as a `Resources$NotFoundException` at inflate, on a
+     * device, which is exactly what drawing here forces. `moon` is a single `a9 9 0 1 1-9-9`;
+     * `apple`, `camera`, `chef-hat`, `sun`, `sunrise` and `utensils` are all arcs too, so this is
+     * the whole set bar `barcode`, `egg` and `star`.
+     */
+    @Test
+    fun everyFoodGlyphDrawsAShapeOfItsOwn() {
+        val drawn = MueIcons.foodNames.associateWith { name ->
+            mask(context, MueIcons.resource(name)).also {
+                assertTrue("`$name` draws nothing at all", it.contains(Painted))
+            }
+        }
+
+        // A file copied onto another would pass every check above; only the pixels tell them apart.
+        val identical = drawn.entries.groupBy({ it.value }, { it.key }).values.filter { it.size > 1 }
+        assertTrue("food glyphs draw the same shape: $identical", identical.isEmpty())
     }
 
     /**

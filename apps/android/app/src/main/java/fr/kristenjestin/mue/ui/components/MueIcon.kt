@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.R
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.food.FoodIcons
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
 /** What the prototypes draw an inline icon at; the Lucide grid still reads down to 16 dp. */
@@ -181,6 +182,17 @@ object MueIcons {
         HISTORY -> R.drawable.ic_history
         ROTATE_CW -> R.drawable.ic_rotate_cw
 
+        FoodIcons.TAB_FOOD -> R.drawable.ic_utensils
+        FoodIcons.APPLE -> R.drawable.ic_apple
+        FoodIcons.SUNRISE -> R.drawable.ic_sunrise
+        FoodIcons.SUN -> R.drawable.ic_sun
+        FoodIcons.MOON -> R.drawable.ic_moon
+        FoodIcons.BARCODE -> R.drawable.ic_barcode
+        FoodIcons.EGG -> R.drawable.ic_egg
+        FoodIcons.CHEF_HAT -> R.drawable.ic_chef_hat
+        FoodIcons.CAMERA -> R.drawable.ic_camera
+        FoodIcons.STAR -> R.drawable.ic_star
+
         else -> error("No Lucide vector was imported for the icon `$name`")
     }
 
@@ -198,6 +210,29 @@ object MueIcons {
         CIRCLE_DOT,
         HISTORY,
         ROTATE_CW,
+    )
+
+    /**
+     * The glyphs the Food module introduces (PRD_FOOD 19), named as a group for the same reason
+     * as [timerNames]: its own test walks them without restating the list, and [names] cannot be
+     * the place one of them is forgotten.
+     *
+     * Every one of them is a file of its own. `Quick add` is the only path in Food that reuses an
+     * existing vector — `zap` — and it does so under that vector's existing name rather than a
+     * second one, because two names for one drawable is exactly what puts the wrong glyph on
+     * screen when one of them is later repointed.
+     */
+    val foodNames: List<String> = listOf(
+        FoodIcons.TAB_FOOD,
+        FoodIcons.APPLE,
+        FoodIcons.SUNRISE,
+        FoodIcons.SUN,
+        FoodIcons.MOON,
+        FoodIcons.BARCODE,
+        FoodIcons.EGG,
+        FoodIcons.CHEF_HAT,
+        FoodIcons.CAMERA,
+        FoodIcons.STAR,
     )
 
     /** Every name this app can draw. A test walks it so an unimported icon cannot ship. */
@@ -245,7 +280,7 @@ object MueIcons {
         CLOCK,
         LIST_PLUS,
         ZAP,
-    ) + timerNames
+    ) + timerNames + foodNames
 }
 
 @Preview(name = "Icons", showBackground = true, backgroundColor = 0xFF101012)

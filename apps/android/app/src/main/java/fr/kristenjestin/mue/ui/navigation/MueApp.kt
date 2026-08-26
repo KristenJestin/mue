@@ -27,6 +27,7 @@ import fr.kristenjestin.mue.ui.activity.ActivityRoute
 import fr.kristenjestin.mue.ui.components.MueBottomBar
 import fr.kristenjestin.mue.ui.components.MueTab
 import fr.kristenjestin.mue.ui.entry.EntryScreen
+import fr.kristenjestin.mue.ui.food.FoodNavHost
 import fr.kristenjestin.mue.ui.profile.ProfileScreen
 import fr.kristenjestin.mue.ui.progress.ProgressScreen
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -35,19 +36,20 @@ import fr.kristenjestin.mue.ui.timer.TimerBanner
 import fr.kristenjestin.mue.ui.timer.timerViewModel
 
 /**
- * Root of the application: four permanent tabs above a bar that never moves, and — since the
+ * Root of the application: five permanent tabs above a bar that never moves, and — since the
  * Activity Timer — a compact banner between the two (PRD 8, PRD_ACTIVITIES 7,
  * PRD_ACTIVITY_TIMER 6.4).
  *
  * The tabs are siblings — none of them opens another tab — so the shell itself is a single
  * saved selection rather than a navigation graph. Anything a library would add here (routes,
- * entry providers, a stack per tab to keep the four screens alive) would only re-describe that
+ * entry providers, a stack per tab to keep the five screens alive) would only re-describe that
  * one integer.
  *
- * `Activity` is the one tab holding several screens, and it keeps that stack to itself in
- * [ActivityNavHost]: the shell stays a selection, and the bar above it never learns that a
- * sub-screen is open. The one thing that tab reports back is which screen is on top, because
- * the banner hides while the timer's own screen is showing the very same timer.
+ * Two tabs hold several screens — `Activity` and, since PRD_FOOD 7, `Food` — and each keeps its
+ * stack to itself in its own host: the shell stays a selection, and the bar above it never learns
+ * that a sub-screen is open. The one thing `Activity` reports back is which screen is on top,
+ * because the banner hides while the timer's own screen is showing the very same timer. `Food`
+ * reports nothing, because nothing in the chassis depends on what it is showing.
  */
 @Composable
 fun MueApp() {
@@ -117,13 +119,19 @@ fun MueApp() {
                 onRouteChanged = { route -> activityRouteKey = route.key },
             )
 
+            // PRD_FOOD 7. The second tab holding several screens, and it keeps that stack to
+            // itself the way Activity does: the shell stays a selection, and the bar above it
+            // never learns that a view was switched or a sheet opened. It reports nothing back —
+            // the timer banner has no reason to hide for anything inside Food.
+            MueDestination.FOOD -> FoodNavHost(Modifier.fillMaxSize())
+
             MueDestination.PROFILE -> ProfileScreen(Modifier.fillMaxSize())
         }
     }
 }
 
 /**
- * Which of the four tabs is on screen.
+ * Which of the five tabs is on screen.
  *
  * Hoisted out of [MueNavigationHost] so the chassis can move it: PRD 6.4 has the banner open
  * the timer from any tab, and the notification of PRD 6.5 lands on the Activity tab whichever

@@ -43,7 +43,7 @@ private val BarMinHeight = 60.dp
 private val TabIconSize = 24.dp
 
 /**
- * Four-tab bar: an icon above a label, nothing else.
+ * The permanent tab bar: an icon above a label, nothing else.
  *
  * Only colours cross-fade when the selection changes — no sliding pill, no moving indicator,
  * and the icon never changes shape or weight, so nothing in the bar reflows. PRD 8 requires it
@@ -134,10 +134,40 @@ private fun MueBottomBarPreview() {
         MueTab("Entry", R.drawable.ic_scale),
         MueTab("Progress", R.drawable.ic_chart_no_axes_combined),
         MueTab("Activity", R.drawable.ic_activity),
+        MueTab("Food", R.drawable.ic_utensils),
         MueTab("Profile", R.drawable.ic_user_round),
     )
     MuePreviewHost(padding = 0) {
         MueBottomBar(tabs = tabs, selectedIndex = 0, onTabSelected = {})
-        MueBottomBar(tabs = tabs, selectedIndex = 2, onTabSelected = {})
+        MueBottomBar(tabs = tabs, selectedIndex = 3, onTabSelected = {})
+    }
+}
+
+/**
+ * The same bar on the narrowest phone the app supports and at the largest font scale.
+ *
+ * Five tabs across 360 dp is 72 dp each, and `Progress` is the longest label in the bar. Nothing
+ * in the test suite can see this: `MueText` ellipsises rather than clipping, and
+ * `onNodeWithText("Progress")` matches the semantics string either way — a shortened label passes
+ * every assertion the shell has. So the check is this preview and the screenshot beside it.
+ */
+@Preview(
+    name = "Bottom bar · 360 dp · largest font",
+    showBackground = true,
+    backgroundColor = 0xFF101012,
+    widthDp = 360,
+    fontScale = 2.0f,
+)
+@Composable
+private fun MueBottomBarNarrowPreview() {
+    val tabs = listOf(
+        MueTab("Entry", R.drawable.ic_scale),
+        MueTab("Progress", R.drawable.ic_chart_no_axes_combined),
+        MueTab("Activity", R.drawable.ic_activity),
+        MueTab("Food", R.drawable.ic_utensils),
+        MueTab("Profile", R.drawable.ic_user_round),
+    )
+    MuePreviewHost(padding = 0) {
+        MueBottomBar(tabs = tabs, selectedIndex = 3, onTabSelected = {})
     }
 }
