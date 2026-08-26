@@ -1788,6 +1788,8 @@ private class FakeUserPreferencesRepository : UserPreferencesRepository {
     override suspend fun setHapticsEnabled(enabled: Boolean) = Unit
 
     override suspend fun setShowEnergy(enabled: Boolean) = Unit
+
+    override suspend fun setScalePermissionRequested(requested: Boolean) = Unit
 }
 
 // endregion

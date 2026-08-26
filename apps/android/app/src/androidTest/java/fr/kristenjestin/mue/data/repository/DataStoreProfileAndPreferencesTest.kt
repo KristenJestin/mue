@@ -167,6 +167,51 @@ class DataStoreProfileAndPreferencesTest {
         assertEquals(false, stored.showEnergy)
     }
 
+    /**
+     * PRD_SCALE FR-SCALE-025: no permission is asked for at launch, so a fresh install has to
+     * read "never asked". The default is what `ScalePermissions` turns into the system prompt
+     * rather than a pointless trip to Android settings.
+     */
+    @Test
+    fun theScalePermissionHasNotBeenAskedForOnAFreshInstall() = runTest {
+        assertEquals(false, preferencesRepository.preferences.first().scalePermissionRequested)
+    }
+
+    @Test
+    fun theScalePermissionRequestIsRememberedAcrossReads() = runTest {
+        preferencesRepository.setScalePermissionRequested(true)
+
+        assertEquals(true, preferencesRepository.preferences.first().scalePermissionRequested)
+    }
+
+    /**
+     * The flag joined a file two visible preferences already share, so the same rule applies to
+     * it: writing it may not disturb either of them, and neither may disturb it.
+     */
+    @Test
+    fun theScalePermissionFlagKeepsAKeyOfItsOwn() = runTest {
+        preferencesRepository.setHapticsEnabled(false)
+        preferencesRepository.setShowEnergy(false)
+
+        preferencesRepository.setScalePermissionRequested(true)
+
+        assertEquals(
+            UserPreferences(
+                hapticsEnabled = false,
+                showEnergy = false,
+                scalePermissionRequested = true,
+            ),
+            preferencesRepository.preferences.first(),
+        )
+
+        preferencesRepository.setShowEnergy(true)
+
+        val stored = preferencesRepository.preferences.first()
+        assertTrue(stored.scalePermissionRequested)
+        assertTrue(stored.showEnergy)
+        assertEquals(false, stored.hapticsEnabled)
+    }
+
     @Test
     fun theProfileAndThePreferencesDoNotShareAFile() = runTest {
         profileRepository.save(UserProfile("Kristen", 178, null))

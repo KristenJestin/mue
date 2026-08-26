@@ -21,6 +21,27 @@ data class UserPreferences(
      * synchronised aggregates of PRD_FOOD 21.1.
      */
     val showEnergy: Boolean = true,
+    /**
+     * Whether the Bluetooth permissions of PRD_SCALE 16.1 have already been asked for
+     * (FR-SCALE-025).
+     *
+     * Not a preference anybody sets: it is what the app remembers about a question it has
+     * already put. It is here rather than in a repository of its own because it has to be read
+     * from the composition on two screens — `Entry` and `Profile > Scales` — and both already
+     * hold the user preferences.
+     *
+     * **A persisted boolean is the only correct implementation.**
+     * `shouldShowRequestPermissionRationale` answers `false` before the very first request and
+     * `false` again after a permanent denial, so on its own it cannot tell "never asked" from
+     * "asked and refused for good" — which are exactly the two states FR-SCALE-025 treats
+     * differently, one leading to the system prompt and the other to the app's settings page.
+     *
+     * Local to the device, like [hapticsEnabled] and [showEnergy]: it describes this install's
+     * history with Android, not the user, so it stays out of the synchronised aggregates.
+     * It defaults to `false` — nothing has been asked yet — and no screen reads it at launch,
+     * because no permission is requested at launch.
+     */
+    val scalePermissionRequested: Boolean = false,
 ) {
     companion object {
         val DEFAULT: UserPreferences = UserPreferences()

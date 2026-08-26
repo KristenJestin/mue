@@ -31,6 +31,8 @@ class DataStoreUserPreferencesRepository(
                     ?: UserPreferences.DEFAULT.hapticsEnabled,
                 showEnergy = stored[KEY_SHOW_ENERGY]
                     ?: UserPreferences.DEFAULT.showEnergy,
+                scalePermissionRequested = stored[KEY_SCALE_PERMISSION_REQUESTED]
+                    ?: UserPreferences.DEFAULT.scalePermissionRequested,
             )
         }
         .flowOn(ioDispatcher)
@@ -47,6 +49,12 @@ class DataStoreUserPreferencesRepository(
         }
     }
 
+    override suspend fun setScalePermissionRequested(requested: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { it[KEY_SCALE_PERMISSION_REQUESTED] = requested }
+        }
+    }
+
     private companion object {
         val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
 
@@ -55,5 +63,12 @@ class DataStoreUserPreferencesRepository(
          * simply finds nothing under it and falls back to the default rather than migrating.
          */
         val KEY_SHOW_ENERGY = booleanPreferencesKey("show_energy")
+
+        /**
+         * PRD_SCALE FR-SCALE-025. A key of its own, for the same reason as [KEY_SHOW_ENERGY]:
+         * an install that predates the scale module finds nothing under it and reads the
+         * default — nothing asked yet — rather than needing a migration.
+         */
+        val KEY_SCALE_PERMISSION_REQUESTED = booleanPreferencesKey("scale_permission_requested")
     }
 }

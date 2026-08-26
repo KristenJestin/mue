@@ -8,6 +8,7 @@ import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.local.datastore.FakePreferencesDataStore
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
 import fr.kristenjestin.mue.data.sync.SyncOutbox
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -63,7 +64,7 @@ class UserProfileJournalTest {
         assertEquals(SyncMutationEntity.OP_UPSERT, pending.op)
         assertEquals(SyncMutationEntity.STATE_PENDING, pending.state)
         assertEquals(PAYLOAD_SCHEMA_VERSION, pending.payloadSchemaVersion)
-        assertEquals("""{"heightCm":178,"birthDate":"1990-04-12"}""", pending.payload)
+        assertEquals("""{"heightCm":178,"birthDate":"1990-04-12","sex":null}""", pending.payload)
     }
 
     /**
@@ -91,7 +92,7 @@ class UserProfileJournalTest {
 
         val rows = journal.pending()
         assertEquals(listOf(SyncMutationEntity.OP_UPSERT, SyncMutationEntity.OP_UPSERT), rows.map { it.op })
-        assertEquals("""{"heightCm":null,"birthDate":null}""", rows[1].payload)
+        assertEquals("""{"heightCm":null,"birthDate":null,"sex":null}""", rows[1].payload)
         assertNull(
             journal.state(SyncAggregateStateEntity.TYPE_HEALTH_PROFILE, HealthProfileEntity.ROW_ID)
                 ?.deletedAt,
@@ -143,5 +144,36 @@ class UserProfileJournalTest {
             UserProfile("Kristen", 178, LocalDate.of(1990, 4, 12)),
             repository.profile.first(),
         )
+    }
+
+    /**
+     * PRD_SCALE FR-PROFILE-007 : le sexe rejoint la moitié Room du profil et son agrégat
+     * synchronisé (PRD_SCALE 22), et non le fichier de préférences que la lettre de
+     * PRD_SCALE 21.1 désignait — même motif que pour la taille et la date de naissance.
+     */
+    @Test
+    fun theSexTravelsWithTheSynchronisedHalfOfTheProfile() = runTest {
+        repository.save(UserProfile("Kristen", 178, null, Sex.FEMALE))
+
+        assertEquals("female", profiles.get()?.sex)
+        assertEquals(
+            """{"heightCm":178,"birthDate":null,"sex":"female"}""",
+            journal.pending().single().payload,
+        )
+        assertEquals(Sex.FEMALE, repository.profile.first().sex)
+    }
+
+    /** Un sexe effacé s'énonce, comme les deux autres champs : c'est une absence, pas un silence. */
+    @Test
+    fun aClearedSexTravelsAsAnExplicitNull() = runTest {
+        repository.save(UserProfile("Kristen", 178, null, Sex.MALE))
+        repository.save(UserProfile("Kristen", 178, null, null))
+
+        assertNull(profiles.get()?.sex)
+        assertEquals(
+            """{"heightCm":178,"birthDate":null,"sex":null}""",
+            journal.pending()[1].payload,
+        )
+        assertNull(repository.profile.first().sex)
     }
 }

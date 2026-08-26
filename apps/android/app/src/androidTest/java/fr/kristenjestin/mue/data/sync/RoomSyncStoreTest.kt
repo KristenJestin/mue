@@ -115,7 +115,7 @@ class RoomSyncStoreTest {
             at = at,
         )
 
-        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.weightCg)
+        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.measurement?.weightCg)
         assertNull(database.measurementDao().findByDate("2026-08-24"))
 
         val state = syncDao.syncState()
@@ -149,7 +149,7 @@ class RoomSyncStoreTest {
 
         store.applyPage(listOf(upsert("2026-08-25", 7_900, "11")), "eyJ2IjoyfQ", at + 1)
 
-        assertEquals(7_900, database.measurementDao().findByDate("2026-08-25")?.weightCg)
+        assertEquals(7_900, database.measurementDao().findByDate("2026-08-25")?.measurement?.weightCg)
         assertNull(
             syncDao.aggregateState(SyncAggregateStateEntity.TYPE_MEASUREMENT, "2026-08-25")
                 ?.deletedAt,
@@ -168,7 +168,7 @@ class RoomSyncStoreTest {
         store.applyPage(page, "eyJ2IjoxfQ", at + 1)
 
         assertEquals(1, database.measurementDao().count())
-        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.weightCg)
+        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.measurement?.weightCg)
         assertEquals(
             listOf("2026-08-24"),
             syncDao.tombstones(SyncAggregateStateEntity.TYPE_MEASUREMENT).map { it.aggregateId },
@@ -298,7 +298,7 @@ class RoomSyncStoreTest {
 
         assertEquals("eyJ2IjoxfQ", syncDao.syncState()?.cursor)
         assertEquals("client.unreachable", syncDao.syncState()?.lastErrorCode)
-        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.weightCg)
+        assertEquals(7_845, database.measurementDao().findByDate("2026-08-25")?.measurement?.weightCg)
     }
 
     /** The paired identity the engine reads before it does anything at all. */

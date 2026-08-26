@@ -254,7 +254,7 @@ class ActivityMigrationTest {
         withMigratedDatabase { database ->
             val measurements = database.measurementDao().getAll()
             assertEquals(seeded.size, measurements.size)
-            assertEquals(7_450, measurements.first { it.date == "2026-08-23" }.weightCg)
+            assertEquals(7_450, measurements.first { it.measurement.date == "2026-08-23" }.measurement.weightCg)
 
             val catalogue = database.exerciseCatalogDao().findByFoldedName("bench press")
             assertNotNull(catalogue)

@@ -323,7 +323,7 @@ class FoodMigrationTest {
         withMigratedDatabase { database ->
             val measurements = database.measurementDao().getAll()
             assertEquals(seeded.size, measurements.size)
-            assertEquals(7_450, measurements.first { it.date == "2026-08-23" }.weightCg)
+            assertEquals(7_450, measurements.first { it.measurement.date == "2026-08-23" }.measurement.weightCg)
 
             assertEquals(0, database.foodDao().countBySource("ciqual"))
             assertEquals(0, database.foodLogDao().count())

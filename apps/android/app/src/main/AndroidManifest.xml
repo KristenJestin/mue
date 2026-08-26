@@ -31,6 +31,72 @@
     -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+      The scale module (PRD_SCALE 16.1). Asked for at the first pairing and never at launch
+      (FR-SCALE-025), in a context where the reason is obvious, and refused without consequence:
+      BR-SCALE-011 keeps every function of Mue available with no Bluetooth and no permission
+      granted, so nothing below may ever gate a weigh-in typed by hand.
+
+      `neverForLocation` is a statement of fact rather than a shortcut around the location
+      permission: PRD_SCALE 16.1 uses a scan result for exactly one thing, deciding whether a
+      driver recognises a scale, and derives no position from it.
+
+      `tools:targetApi` only silences lint, which points out that the flag was introduced in API
+      31 while `minSdk` is 26. That is the intent: the whole permission is an API 31 one, older
+      releases ignore both it and its flag, and the pre-31 pair below is what they read instead.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+
+    <!-- PRD_SCALE 16.1: opening the GATT link to the scale. Runtime, from Android 12. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!--
+      The pre-Android-12 half of the same pair, granted at install and never prompted for.
+      `minSdk` is 26 (PRD 20.1), so the two regimes genuinely coexist on shipped devices and
+      PRD_SCALE 16.1 requires them to be exercised separately: `BLUETOOTH` / `BLUETOOTH_ADMIN`
+      up to API 30, `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` from API 31. `maxSdkVersion` is what
+      stops the historic pair from being requested — and shown in Settings — on a modern phone.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
+    <!--
+      A system requirement of BLE scanning before API 31, not a product choice (PRD_SCALE 16.1):
+      without it the scan simply returns nothing on Android 11 and below. `maxSdkVersion="30"`
+      keeps it off Android 12 and later, where `neverForLocation` above replaces it entirely.
+
+      The permission is not the whole story on those releases: location must also be switched on
+      at system level, which PRD_SCALE 16.1 and 18.5 require Mue to detect and explain rather
+      than let the user read as an empty list of results.
+    -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <!--
+      `ACCESS_BACKGROUND_LOCATION` is deliberately absent, and its absence is a decision rather
+      than an oversight (PRD_SCALE 16.1). No scan ever happens outside the foreground:
+      FR-SCALE-020 starts the search when `Entry` becomes visible and stops it when it does not,
+      with no service and no scheduled work behind it.
+    -->
+
+    <!--
+      Declaring a Bluetooth permission makes Google Play infer `android.hardware.bluetooth` as
+      required and filter the app off devices without a radio. BR-SCALE-011 says the opposite —
+      everything but the scale works without one — so the feature is declared optional here and
+      its absence is handled at runtime like a radio that is switched off.
+    -->
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
+
     <application
         android:name=".MueApplication"
         android:allowBackup="false"

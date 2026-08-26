@@ -20,6 +20,22 @@ import androidx.room.PrimaryKey
  * `id` is always [ROW_ID]. As in [SyncStateEntity], the single-row rule is a constant primary
  * key and not a `CHECK`, which Room cannot emit and which would therefore exist on a migrated
  * file and not on a fresh one.
+ *
+ * @property sex Le sexe du profil santé, facultatif (PRD_SCALE FR-PROFILE-007), stocké par sa
+ *   forme de fil — `female` ou `male` — et décodé par `Sex.fromWire`.
+ *
+ *   **Ici et non dans DataStore, contrairement à la lettre de PRD_SCALE 21.1.** Le motif est
+ *   exactement celui qui a déjà fait déménager [heightCm] et [birthDate] en version 5 :
+ *   PRD_SCALE 22 fait du sexe un champ de l'agrégat `HealthProfile` synchronisé, et sync PRD 19
+ *   exige qu'un agrégat distant soit appliqué *et son curseur avancé* dans une seule transaction
+ *   locale. DataStore ne rejoint pas une transaction Room — un `dataStore.edit` réussi à côté
+ *   d'une écriture Room annulée laisserait le téléphone affirmer un sexe que le serveur n'a
+ *   jamais accepté. Le champ suit donc les deux autres champs synchronisés, et le nom d'affichage
+ *   reste seul dans le fichier de préférences parce qu'il n'a rien à quoi être atomique.
+ *
+ *   Nullable de bout en bout : « non renseigné » est une absence et non une troisième valeur
+ *   (voir `Sex`), et un profil sans sexe s'enregistre normalement — le poids est écrit, la
+ *   composition est simplement absente (FR-BODY-001).
  */
 @Entity(tableName = HealthProfileEntity.TABLE_NAME)
 data class HealthProfileEntity(
@@ -32,6 +48,9 @@ data class HealthProfileEntity(
 
     @ColumnInfo(name = "birth_date")
     val birthDate: String? = null,
+
+    @ColumnInfo(name = "sex")
+    val sex: String? = null,
 ) {
     companion object {
         const val TABLE_NAME = "health_profile"

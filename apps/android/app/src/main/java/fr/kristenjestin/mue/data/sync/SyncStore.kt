@@ -10,6 +10,7 @@ import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncWire
+import fr.kristenjestin.mue.domain.model.MeasurementSource
 
 /**
  * Everything the engine does to local storage, as one interface.
@@ -181,13 +182,27 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
         }
         val measurementDao = database.measurementDao()
         when (change) {
-            is MeasurementUpsertChangeDto -> measurementDao.upsert(
+            // `upsertAggregate` et non `upsert` : BR-SCALE-007 fait de l'absence de composition
+            // dans un payload complet un ordre de retirer l'ancienne, et une page descendue du
+            // serveur est un payload complet comme un autre. La branche coûte un `DELETE` sur une
+            // table vide dans le cas courant, et évite qu'une composition orpheline survive à un
+            // poids que le serveur a remplacé.
+            //
+            // `MeasurementPayloadV1Dto` ne porte encore ni provenance, ni impédance, ni
+            // composition : `packages/contracts` est traité dans une phase ultérieure, et rien
+            // n'est ajouté au fil ici. La provenance écrite est donc `server` — la constante que
+            // `MeasurementSource` a précisément pour ce cas — plutôt qu'un `manual` qui
+            // affirmerait une saisie à la main que personne n'a faite.
+            is MeasurementUpsertChangeDto -> measurementDao.upsertAggregate(
                 MeasurementEntity(
                     date = change.payload.date,
                     weightCg = change.payload.weightCg,
-                )
+                    sourceType = MeasurementSource.SERVER.wireValue,
+                ),
+                composition = null,
             )
 
+            // La composition suit par `ON DELETE CASCADE` (BR-SCALE-007).
             is DeleteChangeDto -> measurementDao.deleteByDate(change.aggregateId)
         }
         syncDao.putAggregateState(

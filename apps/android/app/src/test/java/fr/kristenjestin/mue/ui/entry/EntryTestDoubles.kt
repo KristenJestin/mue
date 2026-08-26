@@ -85,6 +85,9 @@ class FakeUserPreferencesRepository(
     override suspend fun setShowEnergy(enabled: Boolean) {
         state.value = state.value.copy(showEnergy = enabled)
     }
+    override suspend fun setScalePermissionRequested(requested: Boolean) {
+        state.value = state.value.copy(scalePermissionRequested = requested)
+    }
 }
 
 /** `viewModelScope` runs on the main dispatcher, which does not exist on the JVM. */
