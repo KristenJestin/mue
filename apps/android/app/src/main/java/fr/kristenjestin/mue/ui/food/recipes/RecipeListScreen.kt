@@ -55,8 +55,21 @@ import fr.kristenjestin.mue.ui.food.day.announcedAs
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
-/** The prototype's glyph tile, at the touch minimum PRD_FOOD 18 sets for anything tappable. */
-private val IconTileSize: Dp = MueMinTouchTarget
+/**
+ * Where the prototype puts a recipe's photo: `meal-photo h-14 w-14 rounded-2xl`, a 56 dp tile.
+ *
+ * It holds a glyph rather than a photograph because there is no image pipeline to fill it —
+ * PRD_FOOD 14 describes one (`RecipeImage`, a WebP under `files/recipe-images/`, a thumbnail for
+ * lists) and `Recipe.imageRef` is already in the model, but nothing in `data/` reads or writes
+ * either, so a real cover cannot be shown yet.
+ *
+ * The **footprint** is the prototype's all the same. A row built around a 56 dp leading block
+ * keeps its proportions, its text column and its line breaks whatever ends up drawn inside; when
+ * the pipeline lands, only the content of this box changes and the list does not move. Sizing it
+ * to the 48 dp touch minimum was borrowing a rule about targets to settle a question about
+ * proportion — and this tile is not a target: the card carries the click.
+ */
+private val IconTileSize: Dp = 56.dp
 
 /** The type filters FR-RECIPE-005 offers: every type, then the three of `RecipeType`. */
 private val TYPE_FILTERS: List<RecipeType?> = listOf(null) + RecipeType.entries
@@ -318,10 +331,10 @@ private fun RecipeListEmptyState(state: RecipeListUiState) {
  * the whole name however the glyphs fall — while reading wrong on the phone. A long name makes a
  * taller card, which is the honest outcome.
  *
- * The two blocks either side of it are a **fixed 48 dp** each, so neither grows with the text
- * size and the name keeps the same share of the row at every scale. That is why this one is a
- * plain `Row`: what broke the journal card was an unweighted block of *text* taking the row for
- * itself, which cannot happen to a glyph tile.
+ * The two blocks either side of it are a **fixed size** each — [IconTileSize] leading, the 48 dp
+ * star trailing — so neither grows with the text size and the name keeps the same share of the
+ * row at every scale. That is why this one is a plain `Row`: what broke the journal card was an
+ * unweighted block of *text* taking the row for itself, which cannot happen to a glyph tile.
  */
 @Composable
 private fun RecipeCard(
