@@ -121,5 +121,10 @@ cd apps/android
 
 ## Documents
 
-`docs/` holds the PRD set. `docs/PRD_SERVER_SYNC_MCP.md` is the authority for
-this module.
+Les PRD vivent **hors du dépôt**, à la racine du projet, un niveau au-dessus :
+`../PRD.md`, `../PRD_SERVER_SYNC_MCP.md`, `../PRD_FOOD.md` et les autres. Ils
+partagent cet espace avec `../proto/`, auquel ils renvoient, et avec les APKs.
+
+C'est délibéré : la racine est l'espace de travail, le dépôt ne porte que ce qui
+se construit. Conséquence à connaître : `git log` et `git blame` ne répondent
+plus sur les spécifications au-delà du commit qui les a sorties.

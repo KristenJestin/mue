@@ -22,3 +22,6 @@ coverage/
 # Le PRD y renvoie en ../../proto/ ; ils font autorité sur la mise en page,
 # pas sur les règles, et ne méritent pas un historique.
 proto/
+
+# Les PRD vivent à la racine du projet, hors du dépôt, avec les prototypes.
+docs/
