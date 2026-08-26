@@ -6,6 +6,8 @@ import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.RecipeDetail
 import fr.kristenjestin.mue.domain.model.RecipeId
+import fr.kristenjestin.mue.domain.model.UserPreferences
+import fr.kristenjestin.mue.ui.entry.FakeUserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -24,6 +26,7 @@ import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 private val TUESDAY_LUNCH = MealPlanKey(LocalDate.of(2026, 9, 1), MealSlot.LUNCH)
 private val THURSDAY_DINNER = MealPlanKey(LocalDate.of(2026, 9, 3), MealSlot.DINNER)
@@ -135,6 +138,36 @@ class RecipeDetailViewModelTest {
         card.viewModel.onMoreServings()
 
         assertEquals(2.0, state(card).servings.count)
+    }
+
+    // endregion
+
+    // region hiding the figures (FR-FOOD-010)
+
+    /**
+     * FR-FOOD-010: "la préférence masque toutes les valeurs énergétiques et de macronutriments.
+     * Le reste du module continue de fonctionner à l'identique."
+     *
+     * So the blocks go and the ingredient figures go — and the ingredients themselves, the steps
+     * and the servings counter stay exactly where they were.
+     */
+    @Test
+    fun `hiding the energy takes every figure and nothing else`() = cardTest(
+        preferences = UserPreferences(showEnergy = false),
+    ) { card ->
+        card.viewModel.start(RecipePreviewData.SALMON_ID)
+
+        val state = state(card)
+        assertNull(state.perServing)
+        assertNull(state.forServings)
+        assertTrue(
+            "a figure survived the preference",
+            state.ingredients.all { it.energyLabel == null },
+        )
+
+        assertEquals(3, state.ingredients.size)
+        assertEquals(RecipePreviewData.salmon().recipe.steps, state.steps)
+        assertTrue(state.canAddServing)
     }
 
     // endregion
@@ -260,6 +293,7 @@ class RecipeDetailViewModelTest {
     private fun cardTest(
         details: List<RecipeDetail> = RecipePreviewData.details(),
         plans: Map<RecipeId, List<MealPlanKey>> = emptyMap(),
+        preferences: UserPreferences = UserPreferences.DEFAULT,
         savedState: SavedStateHandle = SavedStateHandle(),
         body: suspend TestScope.(Card) -> Unit,
     ) = runTest(mainDispatcher) {
@@ -268,6 +302,7 @@ class RecipeDetailViewModelTest {
             viewModel = RecipeDetailViewModel(
                 recipes = repository,
                 foods = FakeFoodCatalogueRepository(RecipePreviewData.catalogue()),
+                preferences = FakeUserPreferencesRepository(preferences),
                 savedStateHandle = savedState,
                 locale = { Locale.UK },
             ),

@@ -81,7 +81,7 @@ class RecipeDetailUiStateTest {
         assertFalse(coconut.isOrphan)
         assertTrue(
             "a resolved ingredient lost its energy: ${coconut.energyLabel}",
-            coconut.energyLabel.startsWith(FoodLabels.APPROXIMATE_PREFIX),
+            assertNotNull(coconut.energyLabel).startsWith(FoodLabels.APPROXIMATE_PREFIX),
         )
     }
 

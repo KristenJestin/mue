@@ -223,6 +223,19 @@ internal fun orphanRecipeDetailState(): RecipeDetailUiState = RecipeDetailUiStat
     foods = RecipePreviewData.catalogueById(),
 )
 
+/**
+ * The same card with FR-FOOD-010's preference turned off.
+ *
+ * Every figure is gone — the two blocks and the energy beside each ingredient — and nothing else
+ * has moved: the ingredients, their quantities, the steps and the servings counter are all still
+ * there. "Le reste du module continue de fonctionner à l'identique."
+ */
+internal fun hiddenEnergyRecipeDetailState(): RecipeDetailUiState = RecipeDetailUiState.of(
+    detail = RecipePreviewData.salmon(),
+    foods = RecipePreviewData.catalogueById(),
+    showEnergy = false,
+)
+
 /** The card of a recipe with no ingredient at all, which shows no total whatsoever. */
 internal fun emptyRecipeDetailState(): RecipeDetailUiState = RecipeDetailUiState.of(
     detail = RecipePreviewData.emptyRecipe(),

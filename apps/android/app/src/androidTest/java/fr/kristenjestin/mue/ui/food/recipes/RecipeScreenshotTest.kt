@@ -81,6 +81,13 @@ class RecipeScreenshotTest {
         capture("recipe-empty")
     }
 
+    /** FR-FOOD-010: every figure gone, and every other part of the card exactly where it was. */
+    @Test
+    fun theCardWithTheEnergyHidden() {
+        setContent(fontScale = 1f) { Card(hiddenEnergyRecipeDetailState()) }
+        capture("recipe-energy-hidden")
+    }
+
     @Test
     fun theCardAtTwiceTheFontScale() {
         setContent(fontScale = 2f) { Card(previewRecipeDetailState()) }

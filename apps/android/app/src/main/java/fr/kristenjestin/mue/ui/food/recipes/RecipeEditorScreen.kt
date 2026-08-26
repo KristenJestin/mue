@@ -356,24 +356,32 @@ private fun IngredientRow(
         contentPadding = PaddingValues(MueTheme.spacing.md),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
     ) {
-        RecipeSplitRow(
-            start = {
-                Column(
-                    modifier = Modifier.announcedAs(state.description),
-                    verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
-                ) {
-                    MueText(state.name, MueTheme.typography.bodyStrong)
-                    if (state.isOrphan) {
-                        MueText(
-                            text = RecipeMessages.ORPHAN_INGREDIENT,
-                            style = MueTheme.typography.micro,
-                            color = colors.textQuiet,
-                        )
-                    }
+        val name: @Composable () -> Unit = {
+            Column(
+                modifier = Modifier.announcedAs(state.description),
+                verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
+            ) {
+                MueText(state.name, MueTheme.typography.bodyStrong)
+                if (state.isOrphan) {
+                    MueText(
+                        text = RecipeMessages.ORPHAN_INGREDIENT,
+                        style = MueTheme.typography.micro,
+                        color = colors.textQuiet,
+                    )
                 }
-            },
-            end = { MueText(state.energyLabel, MueTheme.typography.bodyStrong) },
-        )
+            }
+        }
+
+        // FR-FOOD-010: with the figures hidden there is no second half to split against.
+        val energy = state.energyLabel
+        if (energy == null) {
+            name()
+        } else {
+            RecipeSplitRow(
+                start = name,
+                end = { MueText(energy, MueTheme.typography.bodyStrong) },
+            )
+        }
 
         MueDivider()
 

@@ -426,25 +426,34 @@ private fun IngredientList(state: RecipeDetailUiState) {
                 shape = MueTheme.shapes.field,
                 contentPadding = PaddingValues(MueTheme.spacing.md),
             ) {
-                RecipeSplitRow(
-                    start = {
-                        Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs)) {
-                            MueText(ingredient.name, MueTheme.typography.bodyStrong)
-                            RecipeFactRow(facts = listOf(ingredient.quantityLabel))
-                            if (ingredient.isOrphan) {
-                                MueText(
-                                    text = RecipeMessages.ORPHAN_INGREDIENT,
-                                    style = MueTheme.typography.micro,
-                                    color = colors.textQuiet,
-                                    modifier = Modifier.testTag(
-                                        RecipeTestTags.orphanIngredient(ingredient.id),
-                                    ),
-                                )
-                            }
+                val facts: @Composable () -> Unit = {
+                    Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs)) {
+                        MueText(ingredient.name, MueTheme.typography.bodyStrong)
+                        RecipeFactRow(facts = listOf(ingredient.quantityLabel))
+                        if (ingredient.isOrphan) {
+                            MueText(
+                                text = RecipeMessages.ORPHAN_INGREDIENT,
+                                style = MueTheme.typography.micro,
+                                color = colors.textQuiet,
+                                modifier = Modifier.testTag(
+                                    RecipeTestTags.orphanIngredient(ingredient.id),
+                                ),
+                            )
                         }
-                    },
-                    end = { MueText(ingredient.energyLabel, MueTheme.typography.bodyStrong) },
-                )
+                    }
+                }
+
+                // FR-FOOD-010: with the figures hidden there is no second half to split against,
+                // so the row is simply the name and its quantity.
+                val energy = ingredient.energyLabel
+                if (energy == null) {
+                    facts()
+                } else {
+                    RecipeSplitRow(
+                        start = facts,
+                        end = { MueText(energy, MueTheme.typography.bodyStrong) },
+                    )
+                }
             }
         }
     }
@@ -554,6 +563,33 @@ private fun RecipeDetailEmptyPreview() {
     MuePreviewHost(padding = 0) {
         RecipeDetailScreen(
             state = emptyRecipeDetailState(),
+            onBack = {},
+            onEdit = {},
+            onToggleFavourite = {},
+            onFewerServings = {},
+            onMoreServings = {},
+            onRequestDelete = {},
+            onCancelDelete = {},
+            onConfirmDelete = {},
+            onDeletionAcknowledged = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * FR-FOOD-010: the same recipe with the figures hidden.
+ *
+ * Held beside the preview above it, the pair says what the preference does and what it does not:
+ * every value is gone, and the ingredients, the quantities, the steps and the servings counter
+ * are exactly where they were.
+ */
+@Preview(name = "Recipe — energy hidden", showBackground = true, backgroundColor = 0xFF101012, heightDp = 1000)
+@Composable
+private fun RecipeDetailHiddenEnergyPreview() {
+    MuePreviewHost(padding = 0) {
+        RecipeDetailScreen(
+            state = hiddenEnergyRecipeDetailState(),
             onBack = {},
             onEdit = {},
             onToggleFavourite = {},

@@ -95,6 +95,12 @@ internal data class RecipeDetailUiState(
             isLoading: Boolean = false,
             deletion: RecipeDeletionUiState = RecipeDeletionUiState.Idle,
             recipeId: RecipeId? = detail?.id,
+            /**
+             * FR-FOOD-010: the preference that hides every energy and macronutrient of the
+             * module. The ingredients, the steps and the servings counter all stay — "le reste du
+             * module continue de fonctionner à l'identique" — and only the figures go.
+             */
+            showEnergy: Boolean = true,
         ): RecipeDetailUiState {
             if (detail == null) {
                 return RecipeDetailUiState(
@@ -120,8 +126,15 @@ internal data class RecipeDetailUiState(
                 RecipeMessages.prepTime(recipe.prepTimeMinutes),
             )
             val rows = detail.ingredients.map { ingredient ->
-                RecipeIngredientUiState.of(ingredient, foods[ingredient.foodId], base, chosen)
+                RecipeIngredientUiState.of(
+                    ingredient = ingredient,
+                    food = foods[ingredient.foodId],
+                    baseServings = base,
+                    servings = chosen,
+                    showEnergy = showEnergy,
+                )
             }
+            val totals = detail.hasIngredients && showEnergy
 
             return RecipeDetailUiState(
                 recipeId = recipe.id,
@@ -144,12 +157,12 @@ internal data class RecipeDetailUiState(
                 canRemoveServing = stepped(chosen, up = false) != null,
                 ingredients = rows,
                 steps = recipe.steps,
-                perServing = detail.takeIf { it.hasIngredients }?.let {
-                    RecipeNutritionUiState.of(RecipeMessages.PER_SERVING, perServing)
-                },
-                forServings = detail.takeIf { it.hasIngredients }?.let {
-                    RecipeNutritionUiState.of(RecipeFormat.forServings(chosen), forChosen)
-                },
+                perServing = RecipeNutritionUiState
+                    .of(RecipeMessages.PER_SERVING, perServing)
+                    .takeIf { totals },
+                forServings = RecipeNutritionUiState
+                    .of(RecipeFormat.forServings(chosen), forChosen)
+                    .takeIf { totals },
                 hasOrphanIngredient = rows.any { it.isOrphan },
                 deletion = deletion,
             )
@@ -203,8 +216,14 @@ internal data class RecipeIngredientUiState(
     val name: String,
     /** `260 g` for the servings currently chosen, or `—` when it cannot be represented. */
     val quantityLabel: String,
-    /** `≈ 541 kcal`, or `—` for an ingredient whose food is missing. */
-    val energyLabel: String,
+    /**
+     * `≈ 541 kcal`, or `—` for an ingredient whose food is missing.
+     *
+     * Null is a third thing and not a fourth reading of the value: FR-FOOD-010 has hidden every
+     * figure of the module, so there is nothing to draw here at all — the row keeps its name and
+     * its quantity.
+     */
+    val energyLabel: String?,
     val isOrphan: Boolean,
     val description: String,
 ) {
@@ -215,6 +234,7 @@ internal data class RecipeIngredientUiState(
             food: Food?,
             baseServings: Int,
             servings: Servings,
+            showEnergy: Boolean = true,
         ): RecipeIngredientUiState {
             val scaled = NutritionMath.scaledIngredientQuantityOrNull(
                 quantity = ingredient.quantity,
@@ -236,7 +256,7 @@ internal data class RecipeIngredientUiState(
                 ?: ingredient.foodName?.takeIf { it.isNotBlank() }
                 ?: RecipeMessages.UNNAMED_INGREDIENT
             val quantity = FoodLabels.quantity(scaled, ingredient.unit)
-            val energy = FoodLabels.energy(contribution.energy)
+            val energy = FoodLabels.energy(contribution.energy).takeIf { showEnergy }
 
             return RecipeIngredientUiState(
                 id = ingredient.id.value,
@@ -247,7 +267,7 @@ internal data class RecipeIngredientUiState(
                 description = FoodDayFormat.sentence(
                     name,
                     quantity,
-                    FoodDayFormat.spoken(energy),
+                    energy?.let(FoodDayFormat::spoken),
                     if (food == null) RecipeMessages.ORPHAN_INGREDIENT else null,
                 ),
             )

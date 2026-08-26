@@ -90,10 +90,21 @@ internal data class RecipeEditorUiState(
             isSaving: Boolean = false,
             justSaved: Boolean = false,
             picker: RecipePickerUiState = RecipePickerUiState(),
+            /**
+             * FR-FOOD-010: the preference that hides every figure of the module. Every field of
+             * the form stays exactly where it was — "le reste du module continue de fonctionner à
+             * l'identique" — and only the values go.
+             */
+            showEnergy: Boolean = true,
         ): RecipeEditorUiState {
             val baseServings = FoodValidation.validateBaseServings(draft.baseServings)
             val rows = draft.ingredients.map { row ->
-                RecipeEditorIngredientUiState.of(row, foods[FoodId(row.foodId)], showErrors)
+                RecipeEditorIngredientUiState.of(
+                    row = row,
+                    food = foods[FoodId(row.foodId)],
+                    showErrors = showErrors,
+                    showEnergy = showEnergy,
+                )
             }
 
             /*
@@ -130,9 +141,9 @@ internal data class RecipeEditorUiState(
                 ingredientCountError = FoodValidation
                     .validateIngredientCount(draft.ingredients.size)
                     .errorMessage.orNull(showErrors),
-                perServing = draft.ingredients
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { RecipeNutritionUiState.of(RecipeMessages.PER_SERVING, perServing) },
+                perServing = RecipeNutritionUiState
+                    .of(RecipeMessages.PER_SERVING, perServing)
+                    .takeIf { draft.ingredients.isNotEmpty() && showEnergy },
                 picker = picker,
             )
         }
@@ -172,8 +183,13 @@ internal data class RecipeEditorIngredientUiState(
     val unitSymbol: String,
     val quantity: String,
     val quantityError: String?,
-    /** `≈ 541 kcal` once the quantity parses, `—` until then (PRD_FOOD 11). */
-    val energyLabel: String,
+    /**
+     * `≈ 541 kcal` once the quantity parses, `—` until then (PRD_FOOD 11).
+     *
+     * Null when FR-FOOD-010 has hidden the figures, which is a third thing rather than a fourth
+     * reading of the value: there is nothing to draw at all, and the row keeps its name.
+     */
+    val energyLabel: String?,
     val isOrphan: Boolean,
     val removeLabel: String,
     val description: String,
@@ -184,11 +200,12 @@ internal data class RecipeEditorIngredientUiState(
             row: RecipeIngredientDraft,
             food: Food?,
             showErrors: Boolean,
+            showEnergy: Boolean = true,
         ): RecipeEditorIngredientUiState {
             val quantity = FoodValidation.validateIngredientQuantity(row.quantity)
             val contribution = RecipeEditorUiState.contributionOf(row, food)
             val name = food?.name ?: row.foodName
-            val energy = FoodLabels.energy(contribution.energy)
+            val energy = FoodLabels.energy(contribution.energy).takeIf { showEnergy }
             return RecipeEditorIngredientUiState(
                 id = row.id,
                 name = name,
@@ -200,7 +217,7 @@ internal data class RecipeEditorIngredientUiState(
                 removeLabel = RecipeMessages.removeIngredient(name),
                 description = FoodDayFormat.sentence(
                     name,
-                    FoodDayFormat.spoken(energy),
+                    energy?.let(FoodDayFormat::spoken),
                     if (food == null) RecipeMessages.ORPHAN_INGREDIENT else null,
                 ),
             )

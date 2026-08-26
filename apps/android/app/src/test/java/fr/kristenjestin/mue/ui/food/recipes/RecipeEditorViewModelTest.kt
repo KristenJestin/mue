@@ -6,6 +6,8 @@ import fr.kristenjestin.mue.domain.logic.FoodValidation
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.RecipeDetail
 import fr.kristenjestin.mue.domain.model.RecipeType
+import fr.kristenjestin.mue.domain.model.UserPreferences
+import fr.kristenjestin.mue.ui.entry.FakeUserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -236,6 +238,32 @@ class RecipeEditorViewModelTest {
         assertEquals(FoodLabels.UNKNOWN, assertNotNull(state(editor).perServing).energyLabel)
     }
 
+    /**
+     * FR-FOOD-010: the figures go and the form stays.
+     *
+     * The live block disappears, every row loses its energy, and the name, the quantity and the
+     * ability to save are untouched — "le reste du module continue de fonctionner à l'identique".
+     */
+    @Test
+    fun `hiding the energy takes the block and leaves the form`() = editorTest(
+        preferences = UserPreferences(showEnergy = false),
+    ) { editor ->
+        editor.viewModel.start(null)
+        fill(editor)
+
+        val state = state(editor)
+        assertNull(state.perServing)
+        assertTrue(
+            "a figure survived the preference",
+            state.ingredients.all { it.energyLabel == null },
+        )
+        assertEquals("200", state.ingredients.single().quantity)
+
+        editor.viewModel.onSave()
+        advanceUntilIdle()
+        assertEquals(1, editor.recipes.saved.size)
+    }
+
     // endregion
 
     // region the ingredient picker (FR-RECIPE-002)
@@ -445,6 +473,7 @@ class RecipeEditorViewModelTest {
 
     private fun editorTest(
         details: List<RecipeDetail> = RecipePreviewData.details(),
+        preferences: UserPreferences = UserPreferences.DEFAULT,
         savedState: SavedStateHandle = SavedStateHandle(),
         body: suspend TestScope.(Editor) -> Unit,
     ) = runTest(mainDispatcher) {
@@ -456,6 +485,7 @@ class RecipeEditorViewModelTest {
                     foods = RecipePreviewData.catalogue() + listOf(skyr(), oats()),
                     recentlyUsed = listOf(oats()),
                 ),
+                preferences = FakeUserPreferencesRepository(preferences),
                 savedStateHandle = savedState,
             ),
             recipes = repository,

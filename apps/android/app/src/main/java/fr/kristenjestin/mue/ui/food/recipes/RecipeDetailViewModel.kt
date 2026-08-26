@@ -17,6 +17,7 @@ import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.RecipeRepository
+import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,9 +49,15 @@ import java.util.Locale
 internal class RecipeDetailViewModel(
     private val recipes: RecipeRepository,
     private val foods: FoodCatalogueRepository,
+    preferences: UserPreferencesRepository,
     private val savedStateHandle: SavedStateHandle,
     private val locale: () -> Locale = Locale::getDefault,
 ) : ViewModel() {
+
+    /** FR-FOOD-010: the preference that hides every figure of the module, and only the figures. */
+    private val showEnergy: Flow<Boolean> = preferences.preferences
+        .map { it.showEnergy }
+        .distinctUntilChanged()
 
     private val deletion = MutableStateFlow<RecipeDeletionUiState>(RecipeDeletionUiState.Idle)
 
@@ -85,8 +92,9 @@ internal class RecipeDetailViewModel(
         readings,
         savedStateHandle.getStateFlow(KEY_SERVINGS, 0),
         deletion,
-    ) { id, reading, servings, deleting ->
-        buildState(id, reading, servings, deleting)
+        showEnergy,
+    ) { id, reading, servings, deleting, energy ->
+        buildState(id, reading, servings, deleting, energy)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
@@ -186,6 +194,7 @@ internal class RecipeDetailViewModel(
         reading: Reading,
         servingsThousandths: Int,
         deleting: RecipeDeletionUiState,
+        showEnergy: Boolean,
     ): RecipeDetailUiState {
         val settled = reading.id == id && reading.isRead
         return RecipeDetailUiState.of(
@@ -195,6 +204,7 @@ internal class RecipeDetailViewModel(
             isLoading = !settled,
             deletion = deleting,
             recipeId = id,
+            showEnergy = showEnergy,
         )
     }
 
@@ -235,6 +245,7 @@ internal class RecipeDetailViewModel(
                 RecipeDetailViewModel(
                     recipes = app.container.food.recipeRepository,
                     foods = app.container.food.foodCatalogueRepository,
+                    preferences = app.container.userPreferencesRepository,
                     savedStateHandle = createSavedStateHandle(),
                 )
             }

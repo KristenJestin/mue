@@ -101,11 +101,42 @@ class RecipeDetailScreenTest {
         setCard(orphanRecipeDetailState())
 
         val known = orphanRecipeDetailState().ingredients.first { !it.isOrphan }
+        val energy = requireNotNull(known.energyLabel)
         val tag = RecipeTestTags.detailIngredient(known.id)
         scrollTo(tag)
 
-        assertDrawn(tag, known.energyLabel)
-        assertNotEquals(FoodLabels.UNKNOWN, known.energyLabel)
+        assertDrawn(tag, energy)
+        assertNotEquals(FoodLabels.UNKNOWN, energy)
+    }
+
+    /**
+     * FR-FOOD-010: "masquer l'énergie retire tous les chiffres nutritionnels sans casser un
+     * parcours".
+     *
+     * Not one figure is left on the glass — no `kcal`, no gram, and no dash standing in for one —
+     * while the ingredients, the steps and the servings counter are exactly where they were.
+     */
+    @Test
+    fun hidingTheEnergyLeavesNoFigureAndBreaksNothing() {
+        setCard(hiddenEnergyRecipeDetailState())
+
+        compose.onNodeWithTag(FoodTestTags.RECIPE_PER_SERVING).assertDoesNotExist()
+        compose.onNodeWithTag(RecipeTestTags.RECIPE_TOTAL).assertDoesNotExist()
+
+        val drawn = drawnText()
+        assertTrue(
+            "a figure survived the preference: $drawn",
+            drawn.none { it.contains(FoodLabels.ENERGY_UNIT) || it.contains(FoodLabels.UNKNOWN) },
+        )
+
+        previewRecipeDetailState().ingredients.forEach { ingredient ->
+            val tag = RecipeTestTags.detailIngredient(ingredient.id)
+            scrollTo(tag)
+            assertDrawn(tag, ingredient.name)
+            assertDrawn(tag, ingredient.quantityLabel)
+        }
+        scrollTo(RecipeTestTags.MORE_SERVINGS)
+        compose.onNodeWithTag(RecipeTestTags.MORE_SERVINGS).assertExists()
     }
 
     // endregion

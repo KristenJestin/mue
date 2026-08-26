@@ -23,6 +23,7 @@ import fr.kristenjestin.mue.domain.model.RecipeIngredientId
 import fr.kristenjestin.mue.domain.model.RecipeType
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.RecipeRepository
+import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.ui.food.FoodIcons
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -59,6 +60,7 @@ import kotlinx.coroutines.launch
 internal class RecipeEditorViewModel(
     private val recipes: RecipeRepository,
     private val foods: FoodCatalogueRepository,
+    preferences: UserPreferencesRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -100,13 +102,26 @@ internal class RecipeEditorViewModel(
             }
         }
 
+    /**
+     * The sheet's own state and the one preference that touches this form, read as one value.
+     *
+     * `combine` takes five flows and this screen has six things to watch, so the two that never
+     * interact with each other are paired here rather than pushing the whole state build into the
+     * untyped vararg overload.
+     */
+    private val pickerAndFigures: Flow<Pair<PickerState, Boolean>> = combine(
+        picker,
+        preferences.preferences.map { it.showEnergy }.distinctUntilChanged(),
+        ::Pair,
+    )
+
     val uiState: StateFlow<RecipeEditorUiState> = combine(
         drafts,
         catalogue,
         transient,
-        picker,
+        pickerAndFigures,
         offered,
-    ) { draft, foods, state, pickerState, results ->
+    ) { draft, foods, state, (pickerState, showEnergy), results ->
         RecipeEditorUiState.of(
             draft = draft,
             foods = foods,
@@ -115,6 +130,7 @@ internal class RecipeEditorViewModel(
             isSaving = state.isSaving,
             justSaved = state.justSaved,
             picker = pickerState.toUiState(results),
+            showEnergy = showEnergy,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -440,6 +456,7 @@ internal class RecipeEditorViewModel(
                 RecipeEditorViewModel(
                     recipes = app.container.food.recipeRepository,
                     foods = app.container.food.foodCatalogueRepository,
+                    preferences = app.container.userPreferencesRepository,
                     savedStateHandle = createSavedStateHandle(),
                 )
             }
