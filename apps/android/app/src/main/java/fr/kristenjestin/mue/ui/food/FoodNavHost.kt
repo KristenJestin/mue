@@ -13,11 +13,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
+import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
+import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
+import fr.kristenjestin.mue.ui.food.catalogue.FoodsRoute
 import fr.kristenjestin.mue.ui.food.day.FoodDayRoute
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -43,8 +50,26 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
 fun FoodNavHost(modifier: Modifier = Modifier) {
     val stack = rememberFoodStack()
 
+    /*
+     * PRD_FOOD 9.4 and 17: "une recherche sans résultat propose la création d'un aliment
+     * pré-rempli du terme saisi."
+     *
+     * The term has nowhere else to live. `FoodRoute.FoodEditor` carries an optional `FoodId` and
+     * nothing more, and widening it would mean re-encoding a free-text name inside a route key
+     * that three other screens are being built against this week. So the prefill is held beside
+     * the stack, saved the same way the stack is, and cleared by the editor as it closes — the
+     * one shortcoming of the frozen route this module found, and it is named in the report.
+     */
+    var editorPrefill by rememberSaveable { mutableStateOf<String?>(null) }
+
     FoodNavHost(stack = stack, modifier = modifier) { route ->
-        FoodDestination(route = route, stack = stack, modifier = Modifier.fillMaxSize())
+        FoodDestination(
+            route = route,
+            stack = stack,
+            editorPrefill = editorPrefill,
+            onEditorPrefillChange = { editorPrefill = it },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -125,6 +150,8 @@ private fun indexOf(view: FoodRoute.View?): Int = FoodRoute.VIEWS.indexOf(view)
 private fun FoodDestination(
     route: FoodRoute,
     stack: FoodStack,
+    editorPrefill: String?,
+    onEditorPrefillChange: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -144,14 +171,48 @@ private fun FoodDestination(
 
         FoodRoute.Trends -> FoodPlaceholder(modifier)
         FoodRoute.Recipes -> FoodPlaceholder(modifier)
-        FoodRoute.Foods -> FoodPlaceholder(modifier)
+
+        /* PRD_FOOD 9: the catalogue, generic and personal alike. */
+        FoodRoute.Foods -> FoodsRoute(
+            onOpenFood = { foodId ->
+                onEditorPrefillChange(null)
+                stack.push(FoodRoute.FoodEditor(foodId))
+            },
+            onCreateFood = { prefill ->
+                onEditorPrefillChange(prefill)
+                stack.push(FoodRoute.FoodEditor())
+            },
+            onOpenPreferences = { stack.push(FoodRoute.Preferences) },
+            modifier = modifier,
+        )
+
         is FoodRoute.AddFood -> FoodPlaceholder(modifier)
         is FoodRoute.RecipeDetail -> FoodPlaceholder(modifier)
         is FoodRoute.RecipeEditor -> FoodPlaceholder(modifier)
         FoodRoute.FoodPicker -> FoodPlaceholder(modifier)
-        is FoodRoute.FoodEditor -> FoodPlaceholder(modifier)
+
+        /* FR-CATALOG-003: creating a personal food, correcting one, duplicating a reference. */
+        is FoodRoute.FoodEditor -> FoodEditorRoute(
+            foodId = route.foodId,
+            prefillName = editorPrefill.takeIf { route.foodId == null },
+            onFinished = {
+                /*
+                 * The term dies with the sheet. Kept, it would prefill the *next* blank editor
+                 * with a word from a search nobody remembers making.
+                 */
+                onEditorPrefillChange(null)
+                stack.pop()
+            },
+            modifier = modifier,
+        )
+
         is FoodRoute.Swap -> FoodPlaceholder(modifier)
-        FoodRoute.Preferences -> FoodPlaceholder(modifier)
+
+        /* PRD_FOOD 6.7 and 13.2: the module's occasional settings, and nowhere else. */
+        FoodRoute.Preferences -> FoodPreferencesRoute(
+            onBack = { stack.pop() },
+            modifier = modifier,
+        )
     }
 }
 
