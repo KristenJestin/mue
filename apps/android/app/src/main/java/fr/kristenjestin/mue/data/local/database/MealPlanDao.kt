@@ -56,14 +56,15 @@ interface MealPlanDao : SyncJournalDao {
 
     @Transaction
     suspend fun upsertWithMutation(entity: MealPlanEntryEntity, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         val createdAt = findCreatedAt(entity.plannedOn, entity.slot) ?: entity.createdAt
         upsert(entity.copy(createdAt = createdAt))
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /**
@@ -79,28 +80,30 @@ interface MealPlanDao : SyncJournalDao {
         updatedAt: Long,
         mutation: SyncMutationEntity,
     ) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         setConsumed(date, slot, logEntryId, updatedAt)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     @Transaction
     suspend fun deleteWithMutation(date: String, slot: String, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         delete(date, slot)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
         markAggregateDeleted(
-            aggregateType = mutation.aggregateType,
-            aggregateId = mutation.aggregateId,
-            deletedAt = mutation.createdAt,
-            mutationId = mutation.mutationId,
+            aggregateType = row.aggregateType,
+            aggregateId = row.aggregateId,
+            deletedAt = row.createdAt,
+            mutationId = row.mutationId,
         )
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 }

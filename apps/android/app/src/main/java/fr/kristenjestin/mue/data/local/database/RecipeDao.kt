@@ -110,16 +110,17 @@ interface RecipeDao : SyncJournalDao {
         ingredients: List<RecipeIngredientEntity>,
         mutation: SyncMutationEntity,
     ) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         val createdAt = findCreatedAt(recipe.id) ?: recipe.createdAt
         deleteIngredientsOf(recipe.id)
         upsertRecipe(recipe.copy(createdAt = createdAt))
         insertIngredients(ingredients)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     @Transaction
@@ -129,13 +130,14 @@ interface RecipeDao : SyncJournalDao {
         updatedAt: Long,
         mutation: SyncMutationEntity,
     ) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         setFavourite(id, isFavourite, updatedAt)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /**
@@ -151,30 +153,32 @@ interface RecipeDao : SyncJournalDao {
         planMutations: List<SyncMutationEntity>,
     ) {
         planMutations.forEach { planMutation ->
-            val planBase = revisionOf(planMutation.aggregateType, planMutation.aggregateId)
+            val planRow = sequenced(planMutation)
+            val planBase = revisionOf(planRow.aggregateType, planRow.aggregateId)
             insertAggregateStateIfAbsent(
-                SyncAggregateStateEntity(planMutation.aggregateType, planMutation.aggregateId)
+                SyncAggregateStateEntity(planRow.aggregateType, planRow.aggregateId)
             )
             markAggregateDeleted(
-                aggregateType = planMutation.aggregateType,
-                aggregateId = planMutation.aggregateId,
-                deletedAt = planMutation.createdAt,
-                mutationId = planMutation.mutationId,
+                aggregateType = planRow.aggregateType,
+                aggregateId = planRow.aggregateId,
+                deletedAt = planRow.createdAt,
+                mutationId = planRow.mutationId,
             )
-            enqueueMutation(planMutation.copy(baseRevision = planBase))
+            enqueueMutation(planRow.copy(baseRevision = planBase))
         }
 
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         deleteRecipe(id)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
         markAggregateDeleted(
-            aggregateType = mutation.aggregateType,
-            aggregateId = mutation.aggregateId,
-            deletedAt = mutation.createdAt,
-            mutationId = mutation.mutationId,
+            aggregateType = row.aggregateType,
+            aggregateId = row.aggregateId,
+            deletedAt = row.createdAt,
+            mutationId = row.mutationId,
         )
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 }

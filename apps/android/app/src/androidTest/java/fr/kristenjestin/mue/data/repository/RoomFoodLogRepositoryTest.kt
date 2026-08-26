@@ -81,6 +81,33 @@ class RoomFoodLogRepositoryTest {
         sourceRef = sourceRef,
     )
 
+    /**
+     * PRD 12.3 and 13.1: the send order may not rest on the phone's clock. `SyncJournalDao`
+     * floors every stamp at one past the highest already in the outbox, and the Food DAOs have
+     * to go through it exactly as the measurement DAO does — otherwise a phone that steps its
+     * clock backwards between two saves has the second line sent before the first, and an edit
+     * that deleted and re-created a line would apply the deletion after the creation.
+     *
+     * The clock here steps back a full minute between the two saves, which no ordering resting
+     * on the wall clock could survive.
+     */
+    @Test
+    fun aClockThatStepsBackwardsStillJournalsInTheOrderTheLinesWereWritten() = runTest {
+        val backwards = ArrayDeque(listOf(10_000L, 9_940L))
+        val outbox = SyncOutbox(now = { backwards.removeFirst() })
+        val clockBoundRepository = RoomFoodLogRepository(database.foodLogDao(), outbox)
+
+        clockBoundRepository.save(entry(id = "first"))
+        clockBoundRepository.save(entry(id = "second"))
+
+        val pending = database.syncDao().pendingMutations(10)
+        assertEquals(listOf("first", "second"), pending.map { it.aggregateId })
+        assertTrue(
+            "stamps ${pending.map { it.createdAt }} must strictly increase",
+            pending[1].createdAt > pending[0].createdAt,
+        )
+    }
+
     @Test
     fun roundTripsAFullyDescribedLineThroughTheRealDao() = runTest {
         val original = FoodLogEntry(

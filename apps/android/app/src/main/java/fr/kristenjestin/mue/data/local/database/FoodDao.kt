@@ -115,30 +115,32 @@ interface FoodDao : SyncJournalDao {
     /** The catalogue write and its outbox row, in one transaction (FR-SYNC-001). */
     @Transaction
     suspend fun upsertWithMutation(entity: FoodEntity, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         upsert(entity)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
-        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /** The row goes, the tombstone stays (FR-SYNC-005), or the deletion would undo itself. */
     @Transaction
     suspend fun deleteWithMutation(id: String, mutation: SyncMutationEntity) {
-        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
         deleteById(id)
         insertAggregateStateIfAbsent(
-            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
         )
         markAggregateDeleted(
-            aggregateType = mutation.aggregateType,
-            aggregateId = mutation.aggregateId,
-            deletedAt = mutation.createdAt,
-            mutationId = mutation.mutationId,
+            aggregateType = row.aggregateType,
+            aggregateId = row.aggregateId,
+            deletedAt = row.createdAt,
+            mutationId = row.mutationId,
         )
-        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /** Only the shipped subset. A custom food and an Open Food Facts copy are never touched. */

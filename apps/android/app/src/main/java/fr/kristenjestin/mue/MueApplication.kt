@@ -44,6 +44,13 @@ class MueApplication : Application() {
             // protobuf read and no database open at all.
             container.sync.healthProfileSeeding.seedOnce()
 
+            // PRD_FOOD 9.1: the embedded Ciqual subset is available "dès la première
+            // ouverture", so it installs here rather than on the first visit to the Food tab.
+            // The guard is a DataStore preference compared against an asset file name, so a
+            // start with nothing to install opens neither the database nor the catalogue —
+            // which is why this can sit on every cold start beside the profile copy.
+            container.food.ciqualSeeding.seedIfNeeded()
+
             // Sync PRD 9.4: attempt a synchronisation at application start, and register the
             // periodic one. Both are WorkManager requests, so an unpaired phone, a phone with no
             // network and a phone on a low battery all enqueue and none of them runs.
