@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.ui.food.add
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +37,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -105,14 +108,33 @@ internal fun FoodAddRoute(
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val actions = remember(viewModel, onClose, onSearchFood, onUseRecipe) {
+    /*
+     * The one way out of this sheet, whichever control was used.
+     *
+     * `Close` and the system back have to behave identically — two ways out of one sheet must not
+     * differ silently — so both go through here, and [FoodAddViewModel.onLeft] decides what
+     * becomes of the draft: kept when it holds something typed, forgotten when it does not.
+     *
+     * The handler is nested inside the module's own, and nested handlers resolve innermost first,
+     * so back reaches this before `FoodNavHost` pops the stack. It disappears with the sheet:
+     * pushing the food picker takes this composable out of composition, which is exactly why
+     * going to the picker is not "leaving" and costs the draft nothing.
+     */
+    val leave = remember(viewModel, onClose) {
+        {
+            viewModel.onLeft()
+            onClose()
+        }
+    }
+    BackHandler(onBack = leave)
+
+    val actions = remember(viewModel, leave, onSearchFood, onUseRecipe) {
         FoodAddActions(
-            // Closing keeps the draft, exactly as leaving through back does: two ways out of one
-            // sheet must not behave differently. Only a save or a delete forgets it.
-            onClose = onClose,
+            onClose = leave,
             onSearchFood = onSearchFood,
             onUseRecipe = onUseRecipe,
             onQuickAdd = viewModel::onQuickAddChosen,
+            onBackToPaths = viewModel::onBackToPaths,
             onQuantityChange = viewModel::onQuantityChange,
             onPortionStep = viewModel::onPortionStep,
             onCookedStateChange = viewModel::onCookedStateChange,
@@ -147,6 +169,8 @@ internal class FoodAddActions(
     val onSearchFood: () -> Unit = {},
     val onUseRecipe: () -> Unit = {},
     val onQuickAdd: () -> Unit = {},
+    /** PRD_FOOD 7: back to the ways in, from whichever one was taken. */
+    val onBackToPaths: () -> Unit = {},
     val onQuantityChange: (String) -> Unit = {},
     /** True adds a usual portion, false removes one (PRD_FOOD 15: half a portion at a time). */
     val onPortionStep: (Boolean) -> Unit = {},
@@ -257,6 +281,8 @@ internal fun FoodAddScreen(
 /** Whichever of PRD_FOOD 7's stages the sheet is on. */
 @Composable
 private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
+    if (state.canReturnToPaths) BackToPaths(actions)
+
     when (state.stage) {
         FoodAddStage.PATHS -> WaysIn(actions)
 
@@ -328,6 +354,51 @@ private fun ColumnScope.WaysIn(actions: FoodAddActions) {
         testTag = FoodTestTags.ADD_QUICK,
         onClick = actions.onQuickAdd,
     )
+}
+
+/**
+ * The step back to the three cards, above whatever the chosen path put on screen.
+ *
+ * First in the column, because it is what the reader is looking for when they realise they took
+ * the wrong way in — and because anywhere below the quantity it would be under the fold on a
+ * small phone at a large font size.
+ *
+ * A quiet row rather than a button: it undoes a choice, it does not perform the screen's action,
+ * and giving it a button's weight would put it in competition with `Save entry`. The touch target
+ * is still the full [MueMinTouchTarget] and the whole row is the control, arrow included, so
+ * nobody has to hit the glyph.
+ */
+@Composable
+private fun BackToPaths(actions: FoodAddActions) {
+    val colors = MueTheme.colors
+    Row(
+        modifier = Modifier
+            .clip(MueTheme.shapes.field)
+            .clickable(role = Role.Button, onClick = actions.onBackToPaths)
+            .heightIn(min = MueMinTouchTarget)
+            .padding(horizontal = MueTheme.spacing.sm)
+            .testTag(FoodTestTags.ADD_BACK_TO_PATHS)
+            /*
+             * One announcement rather than two: the arrow and the label are one control, and the
+             * `Day` screen's own add row is announced the same way. Cleared *after* `clickable`,
+             * which is what keeps the action and the role on the node while silencing the glyph
+             * and the text under it.
+             */
+            .clearAndSetSemantics {
+                contentDescription = FoodAddMessages.CHANGE_PATH
+                role = Role.Button
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
+    ) {
+        MueIcon(iconName = MueIcons.ARROW_LEFT, tint = colors.textTertiary, size = 16.dp)
+        // Never capped: the label is the whole of what this control says it does.
+        MueText(
+            text = FoodAddMessages.CHANGE_PATH,
+            style = MueTheme.typography.caption,
+            color = colors.textSecondary,
+        )
+    }
 }
 
 /**

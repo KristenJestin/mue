@@ -198,6 +198,18 @@ internal data class FoodAddUiState(
 
     val canDelete: Boolean get() = isEditing
 
+    /**
+     * Whether the sheet can go back to PRD_FOOD 7's ways in.
+     *
+     * On a new line, from every stage but the first: choosing a path used to be irreversible, and
+     * a person who changed their mind had no move short of saving something they did not eat.
+     *
+     * Never while correcting a stored line (FR-FOOD-008). That sheet was not opened on the ways
+     * in and has no earlier stage to return to — its line already has a form, and offering to
+     * unmake it would offer to turn a weighed food into a quick add.
+     */
+    val canReturnToPaths: Boolean get() = !isEditing && stage != FoodAddStage.PATHS
+
     /** The figures under the fields: the contribution once there is one, the per-100 until then. */
     val figures: FoodNutrientsUiState? get() = contribution ?: per100
 

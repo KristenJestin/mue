@@ -337,6 +337,163 @@ class FoodAddViewModelTest {
         }
     }
 
+    // endregion
+
+    // region leaving the sheet, and getting out of a path (PRD_FOOD 7)
+
+    /*
+     * The owner's report, twice over:
+     *
+     *   "je suis bloqué dans un mode, j'ai fait add what you ate, add custom machin, et je suis là
+     *    dans add food, et si je fais add what you ate je ne fais que tomber sur add food, j'ai
+     *    plus accès aux 3 menus d'avant."
+     *
+     * Two defects behind one sentence. Inside the sheet, choosing a path was final: nothing
+     * returned to the ways in short of saving or deleting a line. Outside it, `Close` kept the
+     * draft whatever it held, so the next `+` on the same moment found the same target, resumed,
+     * and landed on `How much?` again — for good.
+     */
+
+    @Test
+    fun `the sheet goes back to the ways in from a chosen food`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+        add.viewModel.onQuantityChange("80")
+        assertEquals(FoodAddStage.AMOUNT, state(add).stage)
+
+        add.viewModel.onBackToPaths()
+
+        assertEquals(FoodAddStage.PATHS, state(add).stage)
+    }
+
+    @Test
+    fun `the sheet goes back to the ways in from a quick add`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.SNACK, null)
+        add.viewModel.onQuickAddChosen()
+        add.viewModel.onQuickTitleChange(FoodAddPreviewData.QUICK_NAME)
+        assertEquals(FoodAddStage.QUICK, state(add).stage)
+
+        add.viewModel.onBackToPaths()
+
+        assertEquals(FoodAddStage.PATHS, state(add).stage)
+    }
+
+    /**
+     * The step undoes the **path** and nothing else.
+     *
+     * The moment and the hour came in with the `+` that opened the sheet, or were set by hand
+     * afterwards; neither was chosen on the path being left. A back step that also moved the entry
+     * to another time of day would answer "wrong way in" with a second mistake.
+     */
+    @Test
+    fun `going back keeps the day, the moment and the hour`() = addTest { add ->
+        add.viewModel.start(YESTERDAY, MealSlot.BREAKFAST, null)
+        add.viewModel.onTimePicked(LocalTime.of(9, 15))
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+        add.viewModel.onQuantityChange("80")
+
+        add.viewModel.onBackToPaths()
+
+        val state = state(add)
+        assertEquals(YESTERDAY, state.date)
+        assertEquals(MealSlot.BREAKFAST, state.slot)
+        assertEquals(LocalTime.of(9, 15), state.time)
+        // What the path did set is gone, so the next choice starts from nothing.
+        assertNull(state.food)
+        assertNull(state.amount)
+    }
+
+    /**
+     * FR-FOOD-008: a correction was not opened on the ways in and has no earlier stage.
+     *
+     * Offering the step there would offer to turn a weighed food into a quick add, which is not
+     * a correction of the line but the loss of it.
+     */
+    @Test
+    fun `a correction is never offered the way back`() = addTest(entries = listOf(storedRice())) {
+        add ->
+        add.viewModel.start(null, null, storedRice().id)
+        advanceUntilIdle()
+
+        assertFalse(state(add).canReturnToPaths)
+    }
+
+    @Test
+    fun `a new line past the first stage is offered the way back`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        assertFalse(state(add).canReturnToPaths)
+
+        add.viewModel.onQuickAddChosen()
+
+        assertTrue(state(add).canReturnToPaths)
+    }
+
+    /**
+     * The second half: a sheet abandoned with nothing typed does not come back as it was.
+     *
+     * This is the trap itself. `Search a food`, a food picked, `Close` — and the `+` of the same
+     * moment reopened on `How much?` with an empty field, the three ways in unreachable. A chosen
+     * food is one tap, and one tap is not work worth keeping someone out of the sheet's first
+     * stage for.
+     */
+    @Test
+    fun `leaving with nothing typed reopens on the ways in`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+        assertEquals(FoodAddStage.AMOUNT, state(add).stage)
+
+        add.viewModel.onLeft()
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+
+        assertEquals(FoodAddStage.PATHS, state(add).stage)
+    }
+
+    /**
+     * And the half that must not break with it.
+     *
+     * The resume exists so a weight mid-entry survives; PRD_FOOD 15 keeps a half-typed `7,`
+     * exactly as it was typed, and a `Close` pressed by accident may not be what throws it away.
+     */
+    @Test
+    fun `leaving with something typed reopens where it was left`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+        add.viewModel.onQuantityChange("7,")
+
+        add.viewModel.onLeft()
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+
+        val state = state(add)
+        assertEquals(FoodAddStage.AMOUNT, state.stage)
+        assertEquals("7,", state.amount?.quantity)
+    }
+
+    /**
+     * The picker round trip, which is the reason the resume was written and must keep working.
+     *
+     * Going to the picker is not leaving: the sheet is pushed over, not closed, so nothing calls
+     * `onLeft` and `start` finds the same target and resumes. This is that path driven exactly as
+     * `FoodNavHost` drives it — a chosen food, then the sheet re-entering composition and calling
+     * `start` again.
+     */
+    @Test
+    fun `returning from the picker keeps the food it chose`() = addTest { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+
+        // No `onLeft`: the picker was pushed over the sheet and has just been popped off it.
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+
+        val state = state(add)
+        assertEquals(FoodAddStage.AMOUNT, state.stage)
+        assertNotNull(state.food)
+    }
+
     /** Once the line is written the sheet is done with, so the next one opens on nothing. */
     @Test
     fun `the flow is forgotten once its line has been saved`() = addTest { add ->

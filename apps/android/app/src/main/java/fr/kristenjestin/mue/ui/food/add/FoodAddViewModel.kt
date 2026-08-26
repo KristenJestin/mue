@@ -161,6 +161,20 @@ internal class FoodAddViewModel(
         updateDraft { it.copy(kindId = FoodLogKind.QUICK.id, foodId = null) }
     }
 
+    /**
+     * Back to PRD_FOOD 7's ways in, from whichever one was taken.
+     *
+     * The step the sheet never had. Choosing a path was final until the line was saved or deleted,
+     * so someone who picked the wrong one had no move at all: "je suis là dans add food, et si je
+     * fais add what you ate je ne fais que tomber sur add food, j'ai plus accès aux 3 menus
+     * d'avant". [FoodAddDraft.backToPaths] undoes exactly the path and leaves the day, the moment
+     * and the time where they were.
+     */
+    fun onBackToPaths() {
+        clearErrors()
+        updateDraft(FoodAddDraft::backToPaths)
+    }
+
     // endregion
 
     // region how much (FR-FOOD-006)
@@ -328,12 +342,8 @@ internal class FoodAddViewModel(
     /**
      * Called once the button's confirmation has played out; the sheet is about to close.
      *
-     * This, and the delete below, are the **only** two things that forget a draft. Leaving
-     * through back or through `Close` keeps what was typed, which is the rule `Log activity`
-     * already sets — "leaving through back keeps the draft; only a save turns it into a session"
-     * — and it means the two ways out of this sheet behave the same rather than differing
-     * silently. A `+` pressed on another moment is a different line and starts afresh, which
-     * [start] is what decides.
+     * A save and the delete below forget the flow unconditionally: the line exists now, and
+     * nothing about the draft that made it is worth carrying to the next one.
      */
     fun onSaveConfirmationFinished() {
         forget()
@@ -341,6 +351,29 @@ internal class FoodAddViewModel(
 
     fun onDeleteConfirmationFinished() {
         forget()
+    }
+
+    /**
+     * The sheet is being left through `Close` or through back — **not** handed to the picker.
+     *
+     * The rule this settles is the second half of the owner's report. It used to be that leaving
+     * kept the draft whatever it held, copied from `Log activity` where it is right: there, back
+     * leaves a form full of typed sets, and wiping it would cost real work. Here it meant that
+     * choosing `Search a food`, picking one and closing left a draft carrying that food — so the
+     * `+` pressed on the same moment a minute later found `resumed = true`, `stageOf` answered
+     * `AMOUNT`, and the three ways in were unreachable for good.
+     *
+     * So the draft is kept **exactly when it holds something that was typed**
+     * ([FoodAddDraft.hasTypedContent]) and forgotten otherwise. That keeps the reason the resume
+     * exists — a half-written quick add, a weight mid-entry, a `7,` — and drops the case where
+     * resuming buys a person nothing and costs them the choice of path.
+     *
+     * Returning from the food picker does not come through here at all: the picker is pushed over
+     * this sheet rather than closing it, so nothing is left and nothing is forgotten. That path is
+     * [start]'s, and it is untouched.
+     */
+    fun onLeft() {
+        if (!_draft.value.hasTypedContent) forget()
     }
 
     // endregion

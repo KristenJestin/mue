@@ -122,6 +122,48 @@ internal data class FoodAddDraft(
     fun withTime(time: LocalTime): FoodAddDraft =
         copy(consumedAt = format(FoodValidation.normalizeConsumedAt(time)))
 
+    /**
+     * Back to PRD_FOOD 7's ways in, having undone the chosen path and **nothing else**.
+     *
+     * Everything a path set goes: which of the three forms is being written, the food behind it,
+     * the quantity, the counter, the state it was weighed in, the quick add's three fields and a
+     * recipe line's servings. Everything the `+` decided stays: the day, the moment, the time and
+     * whether either was pinned. Those were not chosen on the path being left — they came in with
+     * the moment the sheet was opened from, or were set by hand afterwards — and clearing them
+     * would answer "I picked the wrong way in" by also moving the entry to another hour.
+     *
+     * [entryId] survives too, and is why the sheet only ever offers this on a **new** line: a
+     * correction opened on a stored entry has no earlier stage to return to.
+     */
+    fun backToPaths(): FoodAddDraft = copy(
+        kindId = FoodLogKind.FOOD.id,
+        foodId = null,
+        quantity = "",
+        portionThousandths = null,
+        weighedCooked = false,
+        quickTitle = "",
+        quickEnergy = "",
+        quickProtein = "",
+        servings = "",
+    )
+
+    /**
+     * Whether this draft holds anything the person actually wrote.
+     *
+     * The question the resume rule turns on. A chosen food is deliberately **not** content: it is
+     * one tap in the picker, it costs one tap to make again, and treating it as work to protect is
+     * precisely what left the sheet reopening on `How much?` forever — "j'ai plus accès aux 3
+     * menus d'avant". A weight, a portion count, a quick add's name or energy, a servings figure:
+     * those took typing, and losing them to a `Close` would be the opposite mistake.
+     */
+    val hasTypedContent: Boolean
+        get() = quantity.isNotBlank() ||
+            portionThousandths != null ||
+            quickTitle.isNotBlank() ||
+            quickEnergy.isNotBlank() ||
+            quickProtein.isNotBlank() ||
+            servings.isNotBlank()
+
     companion object {
 
         /** `HH:mm`, which is what [FoodValidation.validateConsumedAt] reads back. */

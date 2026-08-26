@@ -47,6 +47,14 @@ internal object FoodAddMessages {
     const val QUICK_PATH: String = "Quick add"
     const val QUICK_PATH_DESCRIPTION: String = "A name and an energy, when that is all you know"
 
+    /**
+     * The way back to the three cards above, from whichever path was taken.
+     *
+     * Worded against [PATHS_TITLE] on purpose — `Pick a way in.` and `Choose another way` are the
+     * same noun — so the control names the screen it returns to rather than describing a gesture.
+     */
+    const val CHANGE_PATH: String = "Choose another way"
+
     // endregion
 
     // region the food, and how much of it (FR-FOOD-006)

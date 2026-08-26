@@ -58,6 +58,7 @@ class FoodAddScreenTest {
     private var saved = 0
     private var deleted = 0
     private var timeOpened = 0
+    private var backedOut = 0
     private var stepped = mutableListOf<Boolean>()
 
     // region the ways in (PRD_FOOD 7)
@@ -96,6 +97,56 @@ class FoodAddScreenTest {
         compose.onNodeWithTag(FoodTestTags.ADD_BY_SEARCH).assertDoesNotExist()
         compose.onNodeWithTag(FoodTestTags.CONFIRM_BUTTON).assertDoesNotExist()
         compose.onNodeWithTag(FoodTestTags.ADD_SHEET).assertExists()
+    }
+
+    /**
+     * The way out of a chosen path, on the glass (PRD_FOOD 7).
+     *
+     * "j'ai plus accès aux 3 menus d'avant." The sheet had no step back at all: once a path was
+     * taken the three cards were unreachable until a line was saved or deleted. It is the first
+     * thing in the column because it is what a reader is looking for the moment they realise they
+     * took the wrong way in — anywhere under the quantity it would be below the fold at a large
+     * text size.
+     */
+    @Test
+    fun theWayBackToThePathsIsOfferedOnceAPathIsTaken() {
+        show(previewCookedState())
+
+        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS)
+            .assertIsDisplayed()
+            .performClick()
+
+        assertEquals(1, backedOut)
+    }
+
+    /** Nothing has been chosen yet on the first stage, so there is nothing to go back from. */
+    @Test
+    fun theWaysInThemselvesCarryNoWayBack() {
+        show(previewPathsState())
+
+        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+    }
+
+    /**
+     * FR-FOOD-008: a correction was not opened on the ways in and has no earlier stage.
+     *
+     * Offering the step there would offer to turn a weighed food into a quick add, which is the
+     * loss of the line rather than a correction of it.
+     */
+    @Test
+    fun aCorrectionIsNeverOfferedTheWayBack() {
+        show(previewServingsState())
+
+        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+        compose.onNodeWithTag(FoodTestTags.DELETE_BUTTON).assertExists()
+    }
+
+    /** PRD_FOOD 18: the step is a control, so it is a target of at least 48 dp with a name. */
+    @Test
+    fun theWayBackIsANamedTargetOfTheRightSize() {
+        show(previewCookedState())
+
+        assertTallEnough(FoodAddMessages.CHANGE_PATH)
     }
 
     // endregion
@@ -409,6 +460,7 @@ class FoodAddScreenTest {
                                 onSearchFood = { searched++ },
                                 onUseRecipe = { recipes++ },
                                 onQuickAdd = { quick++ },
+                                onBackToPaths = { backedOut++ },
                                 onPortionStep = { up -> stepped += up },
                                 onSlotSelected = { slotChosen = it },
                                 onOpenTimePicker = { timeOpened++ },

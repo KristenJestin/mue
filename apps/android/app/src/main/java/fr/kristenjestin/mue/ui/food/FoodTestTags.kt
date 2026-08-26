@@ -100,6 +100,9 @@ internal object FoodTestTags {
     const val SCANNER_PREVIEW: String = "food:scannerPreview"
     const val BARCODE_FIELD: String = "food:barcodeField"
 
+    /** The step back to the four paths, from whichever one was taken (PRD_FOOD 7). */
+    const val ADD_BACK_TO_PATHS: String = "food:addBackToPaths"
+
     const val QUICK_NAME_FIELD: String = "food:quickNameField"
     const val QUICK_ENERGY_FIELD: String = "food:quickEnergyField"
 
