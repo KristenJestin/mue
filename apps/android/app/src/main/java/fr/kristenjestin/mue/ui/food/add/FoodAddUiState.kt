@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.food.add
 
 import androidx.compose.runtime.Immutable
 import fr.kristenjestin.mue.domain.logic.FoodLabels
+import fr.kristenjestin.mue.domain.logic.MealSlotRules
 import fr.kristenjestin.mue.domain.logic.Validated
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
@@ -114,6 +115,14 @@ internal data class FoodAddFoodUiState(
 internal data class FoodAddSlotUiState(
     val slot: MealSlot,
     val label: String,
+    /**
+     * PRD_FOOD 10.3's window under the name — `05:00 – 10:00` — or `Any other time` for the snack.
+     *
+     * The moment and the hour were two controls with nothing between them, and a moment is not a
+     * word anyone can define by looking at it. Its hours are the definition, they are already in
+     * the domain, and this is where they belong: on the thing being chosen, before the choice.
+     */
+    val hoursLabel: String,
     val iconName: String,
     val selected: Boolean,
 )
@@ -175,6 +184,14 @@ internal data class FoodAddUiState(
     val slots: List<FoodAddSlotUiState>,
     val time: LocalTime,
     val timeLabel: String,
+    /**
+     * PRD_FOOD 10.3: what to say when the hour and the moment disagree, and null when they don't.
+     *
+     * Never a refusal and never a correction. The windows "ne créent aucune contrainte", so a
+     * breakfast at six in the evening is saved exactly as chosen — the screen only stops letting
+     * the pair look like an accident.
+     */
+    val slotTimeNote: String?,
     val food: FoodAddFoodUiState?,
     val amount: FoodAmountUiState?,
     val quick: FoodQuickUiState?,
@@ -256,12 +273,14 @@ internal data class FoodAddUiState(
                     FoodAddSlotUiState(
                         slot = slot,
                         label = slot.label,
+                        hoursLabel = hoursOf(slot, locale),
                         iconName = FoodIcons.forSlot(slot),
                         selected = slot == draft.slot,
                     )
                 },
                 time = time,
                 timeLabel = FoodDayFormat.time(time, locale),
+                slotTimeNote = slotTimeNote(draft.slot, time, locale),
                 food = food?.let(::foodOf),
                 amount = amount,
                 quick = FoodQuickUiState(
@@ -294,6 +313,39 @@ internal data class FoodAddUiState(
                 justDeleted = justDeleted,
                 isTimePickerVisible = isTimePickerVisible,
                 isLoading = isLoading,
+            )
+        }
+
+        /**
+         * PRD_FOOD 10.3's window for a moment, rendered.
+         *
+         * The bounds are [MealSlotRules.windowOf]'s and the clock face is [FoodDayFormat.time]'s,
+         * so the hours under `Breakfast` and the hours the clock actually preselects it for are
+         * the same two numbers. A null window is [MealSlot.SNACK]'s, which PRD_FOOD 10.3 defines
+         * as the complement of the other three — not an interval, and never drawn as one.
+         */
+        private fun hoursOf(slot: MealSlot, locale: Locale): String {
+            val window = MealSlotRules.windowOf(slot) ?: return FoodAddMessages.ANY_OTHER_TIME
+            return FoodAddMessages.slotHours(
+                from = FoodDayFormat.time(window.from, locale),
+                untilExclusive = FoodDayFormat.time(window.untilExclusive, locale),
+            )
+        }
+
+        /**
+         * The sentence shown when the chosen hour is not in the chosen moment's window.
+         *
+         * [MealSlotRules.isWithinWindow] is the whole test, half-open ends included, so ten
+         * o'clock sharp is a snack here for exactly the reason PRD_FOOD 22 says it is one in the
+         * journal. Null while the two agree: there is nothing to explain, and a line of prose
+         * under every entry would be noise.
+         */
+        private fun slotTimeNote(slot: MealSlot, time: LocalTime, locale: Locale): String? {
+            if (MealSlotRules.isWithinWindow(slot, time)) return null
+            return FoodAddMessages.timeOutsideSlot(
+                timeLabel = FoodDayFormat.time(time, locale),
+                byTheClock = MealSlotRules.slotFor(time),
+                chosen = slot,
             )
         }
 

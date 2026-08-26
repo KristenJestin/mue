@@ -141,6 +141,13 @@ internal object FoodAddMessages {
     // region when and where (PRD_FOOD 10.3, FR-FOOD-007)
 
     const val SLOT_SECTION: String = "Which moment?"
+
+    /**
+     * PRD_FOOD 10.3 has no window for [MealSlot.SNACK] — it is "tout le reste", the complement of
+     * the three named ones — so its card says that rather than inventing an interval for it.
+     */
+    const val ANY_OTHER_TIME: String = "Any other time"
+
     const val TIME_LABEL: String = "Time"
     const val CHANGE_TIME: String = "Change"
     const val TIME_SHEET_TITLE: String = "What time?"
@@ -235,6 +242,33 @@ internal object FoodAddMessages {
      */
     fun countedAs(referenceWeight: String, rawWord: String): String =
         "Counted as $referenceWeight $rawWord"
+
+    /**
+     * The hours a moment usually covers, under its name (PRD_FOOD 10.3's table).
+     *
+     * The two controls used to sit side by side with nothing linking them, so `Breakfast` at 18:00
+     * was reachable and read as a contradiction — "je peux sélectionner breakfast, mais avoir un
+     * time à 18h, je comprends pas". Printing each moment's own window is the half of the answer
+     * that arrives *before* the mistake: a reader who can see that breakfast means five to ten has
+     * been told what a moment is, and the pairing stops being a guess.
+     *
+     * The bounds are [fr.kristenjestin.mue.domain.logic.MealSlotRules]' own and are never restated
+     * here; the en dash is all this function adds.
+     */
+    fun slotHours(from: String, untilExclusive: String): String = "$from – $untilExclusive"
+
+    /**
+     * The other half: what to say when the time and the moment disagree anyway.
+     *
+     * **Not a refusal.** PRD_FOOD 10.3 is explicit that the windows "ne créent aucune contrainte :
+     * elles ne font que choisir la valeur par défaut", and a late breakfast is a real meal. Making
+     * the moment follow the clock would let the clock overrule a person who has already said which
+     * moment they meant; making the time follow the moment would throw away an hour they typed on
+     * purpose. So the screen states the relation instead of enforcing it — it names the moment the
+     * clock would have chosen, and then says the choice stands.
+     */
+    fun timeOutsideSlot(timeLabel: String, byTheClock: MealSlot, chosen: MealSlot): String =
+        "$timeLabel usually falls in ${byTheClock.label}. Kept in ${chosen.label}, as you chose."
 
     /** What the save button announces it will do, moment and day included (PRD_FOOD 18). */
     fun saveDescription(label: String, slot: MealSlot, dateLabel: String): String =

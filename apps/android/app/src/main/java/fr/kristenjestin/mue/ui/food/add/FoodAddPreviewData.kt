@@ -258,6 +258,26 @@ internal fun previewOrphanedState(): FoodAddUiState {
     )
 }
 
+/**
+ * Breakfast at six in the evening (PRD_FOOD 10.3).
+ *
+ * The pairing the owner could not read — "je peux sélectionner breakfast, mais avoir un time à
+ * 18h, je comprends pas" — and the two things that now explain it: the hours under every moment's
+ * name, and the sentence under the time field naming the moment the clock would have chosen. It
+ * is still saved exactly as chosen; the windows "ne créent aucune contrainte".
+ */
+internal fun previewLateBreakfastState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft(MealSlot.BREAKFAST)
+        .withTime(LocalTime.of(18, 0))
+        .copy(
+            foodId = FoodAddPreviewData.apple().id.value,
+            quantity = "150",
+            timePinned = true,
+        ),
+    food = FoodAddPreviewData.apple(),
+    today = FoodAddPreviewData.TODAY,
+)
+
 /** The picker on an empty search: what was logged most recently (PRD_FOOD 9.4). */
 internal fun previewPickerState(): FoodPickerUiState = FoodPickerUiState(
     query = "",

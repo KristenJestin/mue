@@ -33,6 +33,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.LocalTime
+import java.util.Locale
 
 /**
  * The `Add food` sheet as it reaches the glass (PRD_FOOD 7, 13, 15, 17 and 18).
@@ -297,6 +299,48 @@ class FoodAddScreenTest {
         compose.onNodeWithTag(FoodTestTags.TIME_PICKER).assertExists()
     }
 
+    /*
+     * "« which moment » on comprend pas, je peux sélectionner breakfast, mais avoir un time à 18h,
+     * je comprends pas ?"
+     *
+     * The pairing is not forbidden — PRD_FOOD 10.3 says the windows "ne créent aucune contrainte"
+     * and a late breakfast is real — so what these two check is that the relation is *visible*:
+     * the hours are on the moments themselves, and a disagreement is stated in words.
+     */
+
+    @Test
+    fun everyMomentDrawsTheHoursItCovers() {
+        show(momentState(MealSlot.DINNER, LocalTime.of(20, 0)))
+
+        assertDrawn(FoodTestTags.SLOT_PICKER, "05:00 – 10:00")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "11:30 – 14:30")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "18:00 – 22:00")
+        assertDrawn(FoodTestTags.SLOT_PICKER, FoodAddMessages.ANY_OTHER_TIME)
+    }
+
+    @Test
+    fun aMomentAndAnHourThatDisagreeSaySoOnScreen() {
+        show(momentState(MealSlot.BREAKFAST, LocalTime.of(18, 0)))
+
+        // The sheet scrolls, and the note lives under the time field near its foot.
+        compose.onNodeWithTag(FoodTestTags.SLOT_TIME_NOTE)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assert(
+                hasText(
+                    FoodAddMessages.timeOutsideSlot("18:00", MealSlot.DINNER, MealSlot.BREAKFAST),
+                ),
+            )
+    }
+
+    /** A moment and an hour that agree have nothing to explain, so the line is not drawn. */
+    @Test
+    fun anHourInsideItsMomentSaysNothing() {
+        show(momentState(MealSlot.DINNER, LocalTime.of(20, 0)))
+
+        compose.onNodeWithTag(FoodTestTags.SLOT_TIME_NOTE).assertDoesNotExist()
+    }
+
     // endregion
 
     // region saving and correcting (FR-FOOD-008)
@@ -412,6 +456,21 @@ class FoodAddScreenTest {
     // region harness
 
     private fun nutrient(key: String): String = FoodTestTags.nutrientField(key)
+
+    /**
+     * The sheet aimed at one moment and one hour, in a locale that writes a clock as PRD_FOOD 10.3
+     * writes it.
+     *
+     * The times drawn on the moment cards are formatted for the reader's own locale, so a fixture
+     * that left it to the device would assert `18:00` on one emulator image and `6:00 PM` on
+     * another. `Locale.UK` is the one the module's JVM suites already pin for the same reason.
+     */
+    private fun momentState(slot: MealSlot, time: LocalTime): FoodAddUiState = FoodAddUiState.of(
+        draft = FoodAddPreviewData.draft(slot).withTime(time).copy(timePinned = true),
+        food = FoodAddPreviewData.rice(),
+        today = FoodAddPreviewData.TODAY,
+        locale = Locale.UK,
+    )
 
     /** Asserts that the node handled by [tag] draws [text] somewhere inside itself. */
     private fun assertDrawn(tag: String, text: String) {

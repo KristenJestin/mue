@@ -6,6 +6,8 @@ import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Servings
 import org.junit.Test
 import java.time.LocalDate
+import java.time.LocalTime
+import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -282,6 +284,79 @@ class FoodAddUiStateTest {
         assertEquals(listOf(MealSlot.DINNER), state.slots.filter { it.selected }.map { it.slot })
     }
 
+    /*
+     * The fourth finding, in the owner's words:
+     *
+     *   "« which moment » on comprend pas, je peux sélectionner breakfast, mais avoir un time à
+     *    18h, je comprends pas ?"
+     *
+     * Two controls side by side with nothing between them. The pairing is not forbidden and must
+     * not become so — PRD_FOOD 10.3 says the windows "ne créent aucune contrainte" and a late
+     * breakfast is a real meal — so what changes is that the relation is now on screen: each
+     * moment carries its own hours, and a moment and an hour that disagree say so.
+     */
+
+    /** PRD_FOOD 10.3's table, on the thing being chosen. */
+    @Test
+    fun `every moment shows the hours it usually covers`() {
+        val slots = stateAt(MealSlot.DINNER, LocalTime.of(20, 0)).slots.associateBy { it.slot }
+
+        assertEquals("05:00 – 10:00", slots.getValue(MealSlot.BREAKFAST).hoursLabel)
+        assertEquals("11:30 – 14:30", slots.getValue(MealSlot.LUNCH).hoursLabel)
+        assertEquals("18:00 – 22:00", slots.getValue(MealSlot.DINNER).hoursLabel)
+    }
+
+    /**
+     * PRD_FOOD 10.3 gives the snack no window of its own: it is "tout le reste".
+     *
+     * An interval would be an invention, and a wrong one — the complement of three intervals is
+     * not an interval.
+     */
+    @Test
+    fun `the snack claims no window, because it has none`() {
+        val snack = stateAt(MealSlot.DINNER, LocalTime.of(20, 0))
+            .slots
+            .first { it.slot == MealSlot.SNACK }
+
+        assertEquals(FoodAddMessages.ANY_OTHER_TIME, snack.hoursLabel)
+    }
+
+    /** Breakfast at six in the evening: allowed, saved as chosen, and no longer unexplained. */
+    @Test
+    fun `an hour outside the chosen moment is stated rather than refused`() {
+        val state = stateAt(MealSlot.BREAKFAST, LocalTime.of(18, 0))
+
+        val note = assertNotNull(state.slotTimeNote, "the mismatch was left unexplained")
+        assertTrue(note.contains("18:00"), "the hour is not named: «$note»")
+        // The moment the clock would have chosen, and the one that was actually chosen.
+        assertTrue(note.contains(MealSlot.DINNER.label), "the clock's moment is not named: «$note»")
+        assertTrue(note.contains(MealSlot.BREAKFAST.label), "the choice is not named: «$note»")
+        // The pairing survives the explanation: nothing was moved and nothing was refused.
+        assertEquals(MealSlot.BREAKFAST, state.slot)
+        assertEquals(LocalTime.of(18, 0), state.time)
+    }
+
+    /** A moment and an hour that agree have nothing to explain, so nothing is said. */
+    @Test
+    fun `an hour inside the chosen moment says nothing at all`() {
+        assertNull(stateAt(MealSlot.BREAKFAST, LocalTime.of(8, 0)).slotTimeNote)
+        assertNull(stateAt(MealSlot.LUNCH, LocalTime.of(14, 0)).slotTimeNote)
+        assertNull(stateAt(MealSlot.DINNER, LocalTime.of(21, 59)).slotTimeNote)
+    }
+
+    /**
+     * The snack is the complement, so it agrees with exactly the hours the other three leave out.
+     *
+     * Ten o'clock sharp is a snack here for the same reason PRD_FOOD 22 makes it one in the
+     * journal — the windows are closed at their start and open at their end — and one o'clock is
+     * lunchtime, so a snack at one is the mismatch worth stating.
+     */
+    @Test
+    fun `the snack agrees with every hour the named moments leave out`() {
+        assertNull(stateAt(MealSlot.SNACK, LocalTime.of(10, 0)).slotTimeNote)
+        assertNotNull(stateAt(MealSlot.SNACK, LocalTime.of(13, 0)).slotTimeNote)
+    }
+
     /** PRD_FOOD 18: the save action says where the line is going, not just that it saves. */
     @Test
     fun `the save action announces the moment and the day it writes to`() {
@@ -294,6 +369,21 @@ class FoodAddUiStateTest {
     // endregion
 
     // region harness
+
+    /**
+     * The sheet aimed at one moment and one hour, in a locale that writes a clock as PRD_FOOD 10.3
+     * writes it.
+     *
+     * The times are formatted for the reader's own locale, so a fixture that left it to the
+     * machine would assert `18:00` on a French laptop and `6:00 pm` on an American one. `Locale.UK`
+     * is the one `FoodAddViewModelTest` already pins for the same reason.
+     */
+    private fun stateAt(slot: MealSlot, time: LocalTime): FoodAddUiState = FoodAddUiState.of(
+        draft = FoodAddPreviewData.draft(slot).withTime(time).copy(timePinned = true),
+        food = FoodAddPreviewData.rice(),
+        today = FoodAddPreviewData.TODAY,
+        locale = Locale.UK,
+    )
 
     private fun FoodNutrientsUiState.value(key: String): String =
         rows.first { it.key == key }.value

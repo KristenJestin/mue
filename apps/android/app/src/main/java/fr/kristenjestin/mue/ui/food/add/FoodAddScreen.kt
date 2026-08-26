@@ -799,6 +799,14 @@ private fun MomentSection(state: FoodAddUiState, actions: FoodAddActions) {
                                 label = option.label,
                                 selected = option.selected,
                                 onClick = { actions.onSlotSelected(option.slot) },
+                                /*
+                                 * PRD_FOOD 10.3's window, on the thing being chosen.
+                                 *
+                                 * `MueChoiceCard` never caps a description, so at the largest font
+                                 * size `05:00 – 10:00` wraps and the tile grows rather than the
+                                 * hours being cut — half a window is a wrong window.
+                                 */
+                                description = option.hoursLabel,
                                 icon = {
                                     MueIcon(
                                         iconName = option.iconName,
@@ -824,6 +832,24 @@ private fun MomentSection(state: FoodAddUiState, actions: FoodAddActions) {
                 onClickLabel = FoodAddMessages.TIME_SHEET_TITLE,
                 trailingText = FoodAddMessages.CHANGE_TIME,
             )
+
+            /*
+             * PRD_FOOD 10.3: the two controls no longer sit side by side saying nothing to each
+             * other. When the hour and the moment disagree the screen says so, in the accent
+             * rather than the error colour — nothing is wrong, a late breakfast is a real meal,
+             * and the sentence ends by confirming the choice rather than asking for it back.
+             *
+             * Uncapped: this is the only place the pairing is explained, and half an explanation
+             * is worse than none.
+             */
+            state.slotTimeNote?.let { note ->
+                MueText(
+                    text = note,
+                    style = MueTheme.typography.micro,
+                    color = MueTheme.colors.accent,
+                    modifier = Modifier.testTag(FoodTestTags.SLOT_TIME_NOTE),
+                )
+            }
 
             /*
              * Which day this line lands on (PRD_FOOD 10.1 and FR-FOOD-009).
@@ -953,6 +979,29 @@ private fun FoodAddCookedPreview() {
     MuePreviewHost(padding = 0) {
         FoodAddScreen(
             state = previewCookedState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * A late breakfast, and the two things that stop it reading as a contradiction (PRD_FOOD 10.3).
+ *
+ * What to look for: `05:00 – 10:00` under `Breakfast`, so a moment is no longer a word with
+ * nothing behind it — and, under the time, one line naming the moment six in the evening usually
+ * belongs to and confirming that the choice stands. Nothing is refused and nothing is moved: the
+ * windows "ne créent aucune contrainte", and a late breakfast is a real meal.
+ *
+ * The step back to the ways in is at the top of the same picture, which is the other thing this
+ * sheet was missing: a path chosen used to be a path kept until the line was saved.
+ */
+@Preview(name = "Add food — breakfast at six", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodAddLateBreakfastPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewLateBreakfastState(),
             actions = FoodAddActions(),
             modifier = Modifier.fillMaxSize(),
         )

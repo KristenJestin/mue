@@ -115,6 +115,10 @@ internal object FoodTestTags {
     const val SERVINGS_STEPPER: String = "food:servingsStepper"
     const val SLOT_PICKER: String = "food:slotPicker"
     const val TIME_FIELD: String = "food:timeField"
+
+    /** PRD_FOOD 10.3: what the sheet says when the hour and the moment disagree. */
+    const val SLOT_TIME_NOTE: String = "food:slotTimeNote"
+
     const val TIME_PICKER: String = "food:timePicker"
     const val CONFIRM_BUTTON: String = "food:confirmButton"
     const val DELETE_BUTTON: String = "food:deleteButton"
