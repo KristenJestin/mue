@@ -29,6 +29,9 @@ import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodsRoute
 import fr.kristenjestin.mue.ui.food.day.FoodDayRoute
+import fr.kristenjestin.mue.ui.food.recipes.RecipeDetailRoute
+import fr.kristenjestin.mue.ui.food.recipes.RecipeEditorRoute
+import fr.kristenjestin.mue.ui.food.recipes.RecipeListRoute
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 
@@ -45,9 +48,10 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * showing, as the Activity tab's own stack does. The direction of each is resolved once, above
  * the animation, because `transitionSpec` runs outside composition.
  *
- * `Day`, `Add food` and the food picker have screens behind them; the rest still draw
- * [FoodPlaceholder]. They land one directory at a time, and the routes, the tags and the icons
- * they need are already here, so none of them has to reopen a file another is editing.
+ * Only `Trends` and `Swap` still draw [FoodPlaceholder]; the day, the add sheet, the food picker,
+ * the catalogue, the preferences and the three recipe screens all have screens behind them. They
+ * landed one directory at a time, and the routes, the tags and the icons they needed were already
+ * here, so none of them had to reopen a file another was editing.
  */
 @Composable
 fun FoodNavHost(modifier: Modifier = Modifier) {
@@ -173,7 +177,13 @@ private fun FoodDestination(
         )
 
         FoodRoute.Trends -> FoodPlaceholder(modifier)
-        FoodRoute.Recipes -> FoodPlaceholder(modifier)
+
+        // PRD_FOOD 11. The list opens a card and creates a recipe; nothing else on it navigates.
+        FoodRoute.Recipes -> RecipeListRoute(
+            onOpenRecipe = { recipeId -> stack.push(FoodRoute.RecipeDetail(recipeId)) },
+            onCreateRecipe = { stack.push(FoodRoute.RecipeEditor()) },
+            modifier = modifier,
+        )
 
         /* PRD_FOOD 9: the catalogue, generic and personal alike. */
         FoodRoute.Foods -> FoodsRoute(
@@ -207,8 +217,30 @@ private fun FoodDestination(
             modifier = modifier,
         )
 
-        is FoodRoute.RecipeDetail -> FoodPlaceholder(modifier)
-        is FoodRoute.RecipeEditor -> FoodPlaceholder(modifier)
+        /*
+         * FR-RECIPE-006: a deleted recipe leaves nothing to come back to, so the card is popped
+         * rather than left showing a row that no longer exists. It is popped only once the
+         * screen has said which meal plans the deletion freed — that report has no other home.
+         */
+        is FoodRoute.RecipeDetail -> RecipeDetailRoute(
+            recipeId = route.recipeId,
+            onBack = stack::back,
+            onEdit = { stack.push(FoodRoute.RecipeEditor(route.recipeId)) },
+            onDeleted = { stack.pop() },
+            modifier = modifier,
+        )
+
+        /*
+         * FR-RECIPE-001 and 006: one form creates and edits. A save returns to whatever opened
+         * it — the list for a new recipe, the card for an edited one — rather than always to the
+         * list, which would lose the reader's place.
+         */
+        is FoodRoute.RecipeEditor -> RecipeEditorRoute(
+            recipeId = route.recipeId,
+            onBack = stack::back,
+            onSaved = { stack.pop() },
+            modifier = modifier,
+        )
 
         /*
          * PRD_FOOD 11's shared selector (PRD_FOOD 9.4).
