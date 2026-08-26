@@ -56,70 +56,66 @@ internal fun FoodCatalogueRow(
             modifier = Modifier.fillMaxWidth().announcedAs(state.description),
             verticalArrangement = Arrangement.spacedBy(spacing.sm),
         ) {
-        FoodSplitRow(
-            leading = {
-                Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs)) {
-                    /*
-                     * No `maxLines`. PRD_FOOD 15 lets a name run to eighty characters, and
-                     * `MueText` ellipsises whatever it cannot fit — which `onNodeWithText`
-                     * would never notice, because it matches the semantics string rather than
-                     * the glyphs. The name wraps instead.
-                     */
-                    MueText(state.name, MueTheme.typography.bodyStrong)
-                    state.brand?.let {
-                        MueText(it, MueTheme.typography.caption, color = colors.textTertiary)
+            FoodSplitRow(
+                leading = {
+                    Column(verticalArrangement = Arrangement.spacedBy(spacing.xxs)) {
+                        /*
+                         * No `maxLines`. PRD_FOOD 15 lets a name run to eighty characters, and
+                         * `MueText` ellipsises whatever it cannot fit — which `onNodeWithText`
+                         * would never notice, because it matches the semantics string rather
+                         * than the glyphs. The name wraps instead.
+                         */
+                        MueText(state.name, MueTheme.typography.bodyStrong)
+                        state.brand?.let {
+                            MueText(it, MueTheme.typography.caption, color = colors.textTertiary)
+                        }
                     }
-                }
-            },
-            figures = {
-                if (state.hasFigures) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
-                    ) {
-                        MueText(
-                            text = state.figures.first(),
-                            style = MueTheme.typography.bodyStrong,
-                            color = colors.accent,
-                            textAlign = TextAlign.End,
-                        )
-                        MueText(
-                            text = state.basisLabel,
-                            style = MueTheme.typography.micro,
-                            color = colors.textQuiet,
-                            textAlign = TextAlign.End,
-                        )
+                },
+                figures = {
+                    if (state.hasFigures) {
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(spacing.xxs),
+                        ) {
+                            MueText(
+                                text = state.figures.first(),
+                                style = MueTheme.typography.bodyStrong,
+                                color = colors.accent,
+                                textAlign = TextAlign.End,
+                            )
+                            MueText(
+                                text = state.basisLabel,
+                                style = MueTheme.typography.micro,
+                                color = colors.textQuiet,
+                                textAlign = TextAlign.End,
+                            )
+                        }
                     }
-                }
-            },
-            gap = SplitGap,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(spacing.sm),
-        ) {
-            MueIcon(
-                iconName = state.iconName,
-                tint = colors.textTertiary,
-                size = 16.dp,
+                },
+                gap = SplitGap,
+                modifier = Modifier.fillMaxWidth(),
             )
-            MueText(state.sourceLabel, MueTheme.typography.micro, color = colors.textTertiary)
-        }
 
-        /*
-         * The four macronutrients, each keeping its noun, so `— fibre` cannot be mistaken for a
-         * missing row and `≈ 0.0 g fibre` cannot be mistaken for an unknown one. They wrap onto
-         * as many lines as the font scale needs rather than being squeezed onto one.
-         */
-        if (state.figures.size > 1) {
-            MueText(
-                text = state.figures.drop(1).joinToString(SEPARATOR),
-                style = MueTheme.typography.caption,
-                color = colors.textSecondary,
-            )
-        }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing.sm),
+            ) {
+                MueIcon(iconName = state.iconName, tint = colors.textTertiary, size = 16.dp)
+                MueText(state.sourceLabel, MueTheme.typography.micro, color = colors.textTertiary)
+            }
+
+            /*
+             * The four macronutrients, each keeping its noun, so `— fibre` cannot be mistaken
+             * for a missing row and `≈ 0.0 g fibre` cannot be mistaken for an unknown one. They
+             * wrap onto as many lines as the font scale needs rather than being squeezed on one.
+             */
+            if (state.figures.size > 1) {
+                MueText(
+                    text = state.figures.drop(1).joinToString(SEPARATOR),
+                    style = MueTheme.typography.caption,
+                    color = colors.textSecondary,
+                )
+            }
         }
     }
 }
