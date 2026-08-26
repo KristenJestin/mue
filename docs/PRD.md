@@ -666,6 +666,7 @@ Le passage du dixième au centième de kilogramme modifie l'unité de la colonne
 
 - La typographie **Sora** est embarquée en ressources `.ttf`. Les Downloadable Fonts sont exclues : la typographie ne se chargerait pas au premier lancement sans réseau.
 - **Aucune permission `INTERNET`** dans le manifeste. C'est la preuve technique et vérifiable du fonctionnement entièrement local, et un argument direct pour la fiche du Play Store.
+  - **Portée : application de base seule.** [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) §14.4 ajoute `INTERNET`, et [`PRD_FOOD.md`](./PRD_FOOD.md) §16.3 s'appuie dessus. La garantie ci-dessus vaut pour toute version livrée sans ces deux modules ; elle ne survit pas à leur fusion. La fiche Play Store et la politique de confidentialité doivent être réécrites au même moment, et non après.
 - `android:allowBackup="false"` et règles d'extraction vides. La sauvegarde automatique enverrait les mesures sur Google Drive, ce que contredit la section 16.4. Conséquence assumée et documentée dans la section 18.
 
 ### 20.5 Comportements techniques

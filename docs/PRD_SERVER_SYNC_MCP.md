@@ -160,13 +160,13 @@ Un agent hébergé uniquement dans le cloud et sans accès au réseau domestique
 
 La V1 expose un endpoint unique **Streamable HTTP** à `/mcp` pour les clients capables de joindre le serveur sur le réseau privé.
 
-- La révision cible est MCP `2026-07-28`.
-- Le SDK TypeScript MCP V2 assure la négociation avec les clients encore compatibles uniquement avec la révision `2025-11-25` lorsque cette compatibilité est disponible.
+- La révision cible est MCP `2025-11-25`.
+- Le SDK TypeScript MCP assure la négociation avec les clients encore limités à `2025-06-18` ou `2025-03-26`.
 - Le transport SSE historique n'est pas implémenté.
 - Un adaptateur `stdio` n'est pas requis en V1 ; il pourra être ajouté plus tard comme simple pont vers l'endpoint HTTP sans dupliquer les outils métier.
 - L'implémentation n'utilise aucune extension Anthropic, OpenAI ou propre à un autre fournisseur comme condition de fonctionnement.
 
-Référence : [spécification MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28).
+Référence : [spécification MCP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25).
 
 ## 9. Intégration dans l'application Android
 
@@ -410,7 +410,7 @@ Une mutation contient au minimum :
 - Utiliser les annotations MCP standard : lecture seule, destructif, idempotent et interaction externe.
 - Ne pas dépendre du nom d'un modèle, d'un fournisseur ou d'un SDK d'IA.
 
-Référence : [outils de la spécification MCP](https://modelcontextprotocol.io/specification/2026-07-28/server/tools).
+Référence : [outils de la spécification MCP](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).
 
 ### 14.2 Outils de lecture V1
 
@@ -516,7 +516,7 @@ Les prompts et conversations complètes ne sont pas requis dans l'audit Mue.
 - L'utilisateur humain possède un compte commun aux différents clients.
 - Le Web utilise une session par cookie `HttpOnly`, `Secure` et `SameSite`.
 - Android utilise une session Bearer obtenue après authentification et conservée dans Android Keystore.
-- MCP utilise OAuth 2.1, PKCE, les métadonnées de ressource protégée et le profil CIMD de MCP `2026-07-28` fournis par `@better-auth/mcp` et `@better-auth/cimd`.
+- MCP utilise OAuth 2.1, PKCE, les métadonnées de ressource protégée et le profil CIMD de MCP `2025-11-25` fournis par `@better-auth/mcp` et `@better-auth/cimd`.
 - Le plugin Better Auth Agent Auth, encore instable, ne fait pas partie de la V1.
 - Chaque session Android et chaque autorisation agent est identifiable et révocable séparément.
 - Aucun client ne reçoit le secret maître Better Auth.
@@ -741,7 +741,7 @@ Emplacement des documents : les PRD, le cadrage et les tests manuels rejoignent 
 - [ ] Perdre une réponse réseau puis recommencer ne produit aucun doublon.
 - [ ] Un agent peut parcourir toutes les pesées et activités sans fenêtre temporelle imposée.
 - [ ] Les outils MCP peuvent créer, modifier et supprimer les domaines autorisés.
-- [ ] Les outils MCP fonctionnent par Streamable HTTP privé sur `/mcp` avec la révision `2026-07-28` et la compatibilité négociée prévue.
+- [ ] Les outils MCP fonctionnent par Streamable HTTP privé sur `/mcp` avec la révision `2025-11-25` et la compatibilité négociée jusqu'à `2025-03-26`.
 - [ ] Aucun composant du serveur ne dépend d'OpenAI ou d'un autre fournisseur d'IA.
 - [ ] Aucun endpoint Mue n'est publié automatiquement sur Internet.
 - [ ] Chaque agent possède une identité révocable et des portées configurables.
@@ -842,7 +842,7 @@ Emplacement des documents : les PRD, le cadrage et les tests manuels rejoignent 
 | Le serveur est-il exposé sur Internet ? | Non, jamais par Mue. |
 | Un agent cloud sans chemin réseau peut-il accéder au serveur ? | Non. |
 | Quel transport MCP est visé ? | Streamable HTTP privé sur `/mcp`. SSE est exclu ; stdio est facultatif après la V1. |
-| Quelle révision MCP est visée ? | `2026-07-28`, avec compatibilité négociée `2025-11-25` lorsque le SDK la permet. |
+| Quelle révision MCP est visée ? | `2025-11-25`, la plus récente publiée et la valeur de `LATEST_PROTOCOL_VERSION` du SDK. Compatibilité négociée jusqu'à `2025-03-26`. |
 | Le PRD alimentaire bloque-t-il le serveur ? | Non. [`PRD_FOOD.md`](./PRD_FOOD.md) fixe ses agrégats, ses conflits et ses outils MCP. |
 | Que peut faire un agent sur les données alimentaires ? | Tout ce que peut faire l'utilisateur, y compris modifier une ligne de journal existante. La contrepartie est un audit consultable depuis l'application. |
 | Le minuteur actif est-il synchronisé ? | Non. Seule la séance finalisée l'est. |
@@ -864,7 +864,7 @@ Emplacement des documents : les PRD, le cadrage et les tests manuels rejoignent 
 La stack est arrêtée. Les points suivants nécessitent encore un spike ou une valeur mesurée, sans remettre l'architecture en discussion :
 
 - intégration du handler Hono dans le point d'entrée `fetch` de TanStack Start sous Bun ;
-- interopérabilité de Better Auth MCP avec plusieurs clients MCP et le profil `2026-07-28` ;
+- interopérabilité de Better Auth MCP avec plusieurs clients MCP et le profil `2025-11-25` ;
 - URL HTTPS privée, résolution DNS et émission du certificat sans exposition du service sur Internet ;
 - génération Drizzle des schémas PostgreSQL séparés `mue_app` et `mue_auth` ;
 - comportement exact du Bearer Better Auth dans le client Ktor et sa révocation ;

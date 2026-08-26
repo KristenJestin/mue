@@ -462,7 +462,7 @@ Le minuteur introduit les deux premières permissions de Mue :
 | `POST_NOTIFICATIONS` | Demandée à l'exécution, Android 13 et plus | Notification de séance en cours. Le refus n'empêche rien d'autre que la notification. |
 | `RECEIVE_BOOT_COMPLETED` | Accordée à l'installation | Reposter la notification d'un minuteur en cours après un redémarrage. |
 
-- L'absence de permission `INTERNET` reste intacte : elle demeure la preuve technique du fonctionnement entièrement local et l'argument de la fiche Play Store.
+- L'absence de permission `INTERNET` reste intacte **pour ce module** : le minuteur n'ouvre aucun accès réseau. Elle cesse de l'être dès la fusion du module serveur ([`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) §14.4), dont le module alimentaire dépend.
 - Aucune de ces deux permissions ne donne accès à une donnée personnelle, à un capteur ou au réseau.
 - La fiche Play Store et la politique de confidentialité doivent néanmoins être relues avant publication, puisqu'elles annonçaient jusqu'ici une application sans aucune permission.
 
