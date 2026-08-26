@@ -16,7 +16,6 @@ import fr.kristenjestin.mue.domain.model.RecipeId
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
-import java.util.UUID
 
 /**
  * Mints the outbox row for a local change. It builds the row and nothing else: writing it is
@@ -37,7 +36,10 @@ import java.util.UUID
  * sends the whole local history anyway, so the engine is free to collapse what it finds waiting.
  */
 class SyncOutbox(
-    private val newMutationId: () -> String = { UUID.randomUUID().toString() },
+    // A UUIDv7 and not `UUID.randomUUID()`. `mutationIdSchema` is `z.uuidv7()` and the server
+    // refuses a v4 before it looks at the payload, so this default is the difference between a
+    // push that is applied and one that comes back `sync.invalid_payload`. See `MutationIds`.
+    private val newMutationId: () -> String = MutationIds::random,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
 
