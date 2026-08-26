@@ -12,7 +12,7 @@
 | Plateforme | Android natif, téléphone, portrait |
 | Langue de l'application | Anglais uniquement |
 | Dépendance | [`PRD_ACTIVITIES.md`](./PRD_ACTIVITIES.md) |
-| Référence visuelle | [`start-activity`](../proto/fusion/start-activity.html), [`active-activity`](../proto/fusion/active-activity.html) |
+| Référence visuelle | [`start-activity`](../../proto/fusion/start-activity.html), [`active-activity`](../../proto/fusion/active-activity.html) |
 
 Le module Activities est déjà spécifié et en cours d'implémentation. Le minuteur ne le réécrit pas : il s'y greffe. Les amendements qu'il impose au document et au code existants sont rassemblés en section 17 ; aucun autre changement du module Activities n'est implicite.
 

@@ -17,3 +17,8 @@ coverage/
 
 # copies de travail
 *.bak
+
+# Prototypes cliquables : ils vivent à la racine du projet, hors du dépôt.
+# Le PRD y renvoie en ../../proto/ ; ils font autorité sur la mise en page,
+# pas sur les règles, et ne méritent pas un historique.
+proto/

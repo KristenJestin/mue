@@ -14,7 +14,7 @@
 | PRD du socle | [`PRD.md`](./PRD.md) |
 | Modules voisins | [`PRD_ACTIVITIES.md`](./PRD_ACTIVITIES.md), [`PRD_ACTIVITY_TIMER.md`](./PRD_ACTIVITY_TIMER.md) |
 | Dépendance serveur | [`PRD_SERVER_SYNC_MCP.md`](./PRD_SERVER_SYNC_MCP.md) |
-| Référence visuelle | [`food`](../proto/fusion/food.html) |
+| Référence visuelle | [`food`](../../proto/fusion/food.html) |
 
 Ce document décrit un module ajouté à une application dont le socle poids et le module activité sont déjà développés. Il ne redéfinit ni le design system, ni la navigation générale, ni les décisions techniques du socle : il les prolonge. En cas de divergence sur la navigation, la section 7 fait autorité ; en cas de divergence avec le prototype, la section 19.
 
@@ -670,7 +670,7 @@ Il n'existe aucun mode, badge ou interrupteur lié à MCP. Connecté ou non, cha
 ## 19. Design, icônes et mouvement
 
 - Le module reprend la direction `Fusion` : fond très sombre, accent ambre, Sora, cartes tactiles, rayons généreux.
-- Le prototype de référence est [`food.html`](../proto/fusion/food.html). Ce document fait autorité pour le modèle et les règles ; le prototype fait autorité pour la mise en page et le rythme visuel.
+- Le prototype de référence est [`food.html`](../../proto/fusion/food.html). Ce document fait autorité pour le modèle et les règles ; le prototype fait autorité pour la mise en page et le rythme visuel.
 - Une proposition est visuellement secondaire : contour en pointillés, fond très léger, hauteur réduite. Une ligne réelle est pleine et opaque. La différence doit se lire sans lire le texte.
 - Les icônes distinguent les moments : lever de soleil, soleil, fruit, lune.
 - Chaque source d'aliment possède une icône stable : catalogue générique, produit emballé, aliment personnalisé, recette, estimation rapide.
