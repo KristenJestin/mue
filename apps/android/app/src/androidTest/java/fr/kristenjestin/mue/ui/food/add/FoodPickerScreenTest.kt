@@ -4,8 +4,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -89,11 +91,22 @@ class FoodPickerScreenTest {
 
     // region searching and filtering
 
+    /**
+     * Typing reaches the search.
+     *
+     * Aimed at the **editable node**, not at the handle. `FoodTestTags.SEARCH_FIELD` sits on
+     * `MueSearchField`'s outer row — the pill with its icon, its border and its clear button — and
+     * that row has no text action of its own, so `performTextInput` on it could only ever fail
+     * with "RequestFocus is defined". The field inside carries `SEARCH_LABEL` as its description,
+     * which is what a screen reader uses to find it and what this uses too.
+     */
     @Test
     fun typingReachesTheSearch() {
         show(previewPickerState())
 
-        compose.onNodeWithTag(FoodTestTags.SEARCH_FIELD).performTextInput("rice")
+        compose.onNode(
+            hasSetTextAction() and hasAnyAncestor(hasTestTag(FoodTestTags.SEARCH_FIELD)),
+        ).performTextInput("rice")
 
         assertEquals("rice", typed)
     }

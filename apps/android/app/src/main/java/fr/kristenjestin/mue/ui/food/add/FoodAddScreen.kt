@@ -55,6 +55,7 @@ import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -382,7 +383,21 @@ private fun WayIn(
 
 // region the food and its quantity (FR-FOOD-002 and 006)
 
-/** The chosen food, its provenance, and the way back to the picker (FR-CATALOG-004). */
+/**
+ * The chosen food, its provenance, and the way back to the picker (FR-CATALOG-004).
+ *
+ * Split by [MueSplitRow] rather than laid out as a plain `Row`, for the reason that component
+ * records — and this card is where the reason was still costing a name. A `Row` measures its
+ * unweighted children first and at whatever width they ask for, so the icon tile and the chevron
+ * were taken out of the line before the name saw any of it. At the largest font scale on a 360 dp
+ * phone that left the name 168 dp, and the catalogue's longest entry needs 185 dp for the single
+ * word `pomegranate` alone: it came out broken **in the middle of a word**, over ten lines.
+ * `onNodeWithText` could not see it — the semantics string is the whole name however the glyphs
+ * fall — and `FoodAddLayoutTest` reads the text layout instead, which is what caught it.
+ *
+ * The measured split gives the chevron its own line once the name cannot be read beside it, and
+ * the name then gets the card's full width. Below that scale this draws exactly what it drew.
+ */
 @Composable
 private fun ChosenFood(state: FoodAddUiState, actions: FoodAddActions) {
     val food = state.food ?: return
@@ -394,38 +409,55 @@ private fun ChosenFood(state: FoodAddUiState, actions: FoodAddActions) {
         onClick = actions.onSearchFood,
         onClickLabel = FoodAddMessages.CHANGE_FOOD,
     ) {
-        Row(
+        MueSplitRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clearAndSetSemantics { contentDescription = food.description },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(MueMinTouchTarget)
-                    .clip(MueTheme.shapes.field)
-                    .background(colors.accentSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                MueIcon(iconName = food.iconName, tint = colors.onAccentSoft, size = 18.dp)
-            }
-            Column(
-                modifier = Modifier.weight(1f).padding(horizontal = MueTheme.spacing.lg),
-                verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
-            ) {
-                // Never capped: PRD_FOOD 15 lets a name run to 80 characters, and a name cut
-                // short still satisfies every assertion a semantics string can make.
-                MueText(food.name, MueTheme.typography.bodyStrong)
-                MueText(food.meta, MueTheme.typography.micro, color = colors.textTertiary)
-            }
-
+            gap = MueTheme.spacing.md,
+            stackedGap = MueTheme.spacing.sm,
+            start = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    /*
+                     * The gutter between the tile and the name is the row's own spacing rather
+                     * than padding on the column, so it is part of what `minIntrinsicWidth`
+                     * reports — which is what makes the split's decision honest instead of
+                     * optimistic by 16 dp.
+                     */
+                    horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(MueMinTouchTarget)
+                            .clip(MueTheme.shapes.field)
+                            .background(colors.accentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MueIcon(
+                            iconName = food.iconName,
+                            tint = colors.onAccentSoft,
+                            size = 18.dp,
+                        )
+                    }
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
+                    ) {
+                        // Never capped: PRD_FOOD 15 lets a name run to 80 characters, and a name
+                        // cut short still satisfies every assertion a semantics string can make.
+                        MueText(food.name, MueTheme.typography.bodyStrong)
+                        MueText(food.meta, MueTheme.typography.micro, color = colors.textTertiary)
+                    }
+                }
+            },
             // The card opens the picker again; a tappable card with no mark on it says nothing.
-            MueIcon(
-                iconName = MueIcons.CHEVRON_RIGHT,
-                tint = colors.textTertiary,
-                size = 16.dp,
-            )
-        }
+            end = {
+                MueIcon(
+                    iconName = MueIcons.CHEVRON_RIGHT,
+                    tint = colors.textTertiary,
+                    size = 16.dp,
+                )
+            },
+        )
     }
 }
 

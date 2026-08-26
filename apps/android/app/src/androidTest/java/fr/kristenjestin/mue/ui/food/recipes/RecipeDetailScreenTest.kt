@@ -75,8 +75,16 @@ class RecipeDetailScreenTest {
 
         assertDrawn(orphanRow, RecipePreviewData.ORPHAN_SNAPSHOT)
         assertDrawn(orphanRow, FoodLabels.UNKNOWN)
-        compose.onNodeWithTag(RecipeTestTags.orphanIngredient(orphanIngredientId()))
-            .assertExists()
+        /*
+         * Unmerged. The ingredient card announces itself as one sentence, so everything **under**
+         * it is cleared from the merged tree — which is exactly what stops a screen reader hearing
+         * a name, a quantity and a warning as three fragments. The card keeps its own handle; the
+         * warning inside it does not, so a merged lookup could never find this tag and never did.
+         */
+        compose.onNodeWithTag(
+            RecipeTestTags.orphanIngredient(orphanIngredientId()),
+            useUnmergedTree = true,
+        ).assertExists()
 
         scrollTo(FoodTestTags.RECIPE_PER_SERVING)
         assertDrawn(FoodTestTags.RECIPE_PER_SERVING, FoodLabels.UNKNOWN)
@@ -179,11 +187,19 @@ class RecipeDetailScreenTest {
     fun theCardOpensOnTheServingsTheRecipeIsWrittenFor() {
         setCard(previewRecipeDetailState())
 
-        scrollTo(FoodTestTags.RECIPE_SERVINGS)
+        /*
+         * Scrolled to by the stepper beside it rather than by the figure itself. The servings
+         * block announces `Servings, 2` as one thing, so the label and the number under it are
+         * cleared from the merged tree — `FoodTestTags.RECIPE_SERVINGS` is on the number, and
+         * `performScrollTo` looks in the merged tree, so it could never find it. The two step
+         * buttons are siblings of that block and keep their handles.
+         */
+        scrollTo(RecipeTestTags.MORE_SERVINGS)
         compose.onNodeWithText(
             RecipeFormat.servings(servings(2.0)),
             useUnmergedTree = true,
         ).assertExists()
+        compose.onNodeWithTag(FoodTestTags.RECIPE_SERVINGS, useUnmergedTree = true).assertExists()
     }
 
     @Test

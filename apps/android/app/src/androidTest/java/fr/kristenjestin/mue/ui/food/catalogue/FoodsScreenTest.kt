@@ -4,8 +4,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -121,7 +123,16 @@ class FoodsScreenTest {
     fun typingReachesTheViewModel() {
         setFoods(previewFoodsState())
 
-        compose.onNodeWithTag(FoodTestTags.FOOD_SEARCH).performTextReplacement("oats")
+        /*
+         * Aimed at the editable node, not at the handle. `FoodTestTags.FOOD_SEARCH` sits on
+         * `MueSearchField`'s outer row — the pill with its icon, its border and its clear button —
+         * and that row carries no text action of its own, so `performTextReplacement` on it could
+         * only ever fail with "RequestFocus is defined". The picker's own search test had the
+         * same mistake.
+         */
+        compose.onNode(
+            hasSetTextAction() and hasAnyAncestor(hasTestTag(FoodTestTags.FOOD_SEARCH)),
+        ).performTextReplacement("oats")
 
         assertEquals("oats", typed)
     }
@@ -244,9 +255,20 @@ class FoodsScreenTest {
 
     // region harness
 
+    /**
+     * Asserts that the card handled by [tag] draws [text] somewhere inside itself.
+     *
+     * `substring = true`, because a catalogue row draws its four macronutrients as **one** string
+     * — `≈ 0.0 g protein   ≈ 0.0 g carbs   ≈ 0.0 g fat   ≈ 0.0 g fibre` — so that they wrap
+     * together rather than being squeezed onto one line. `hasText(x)` matches an *element* of a
+     * node's text list, not a part of one, so asking for `≈ 0.0 g fibre` on its own could never
+     * match and never did: the assertion was looking for a node the row stopped drawing when its
+     * figures were joined. It is still scoped to the card, which is what keeps `≈ 0.0 g fibre`
+     * and `— fibre` provably on two different rows.
+     */
     private fun assertDrawnInside(tag: String, text: String) {
         compose.onNode(
-            hasTestTag(tag) and hasAnyDescendant(hasText(text)),
+            hasTestTag(tag) and hasAnyDescendant(hasText(text, substring = true)),
             useUnmergedTree = true,
         ).assertExists()
     }

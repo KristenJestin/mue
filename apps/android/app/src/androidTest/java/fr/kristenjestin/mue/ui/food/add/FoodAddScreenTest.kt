@@ -7,12 +7,14 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionContains
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -182,14 +184,28 @@ class FoodAddScreenTest {
         assertDrawn(nutrient(FoodNutrientsUiState.ENERGY), "≈ 927 kcal")
     }
 
-    /** PRD_FOOD 18: what is heard is never the punctuation that is drawn. */
+    /**
+     * PRD_FOOD 18: what is heard is never the punctuation that is drawn.
+     *
+     * The card's heading is **announced and not drawn as text**: `FoodSectionCard` clears its
+     * title's semantics and puts the whole sentence on it as a description, so the five figures
+     * under it are heard as one fact rather than as five fragments. `hasText` looks at
+     * `SemanticsProperties.Text` and never at a content description, so it could not match this
+     * heading and never did — the assertion was wrong the first time it ran, against a screen that
+     * was right.
+     *
+     * So the two halves are read where each of them actually lives: the announcement on the
+     * heading, and the dash in the row the eye sees.
+     */
     @Test
     fun anUnknownIsAnnouncedAsUnknownRatherThanAsADash() {
         show(previewQuickState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_SHEET)
-            .assert(hasAnyDescendant(hasText(FoodAddMessages.CONTRIBUTION_SECTION)))
+        compose
+            .onNodeWithContentDescription(FoodAddMessages.CONTRIBUTION_SECTION, substring = true)
+            .assertExists()
         compose.onNodeWithContentDescription("unknown", substring = true).assertExists()
+        assertDrawn(nutrient(FoodNutrientsUiState.PROTEIN), FoodLabels.UNKNOWN)
     }
 
     // endregion
@@ -254,7 +270,15 @@ class FoodAddScreenTest {
         assertEquals(1, deleted)
     }
 
-    /** PRD_FOOD 15 and 17: "erreur à côté du champ, formulaire conservé". */
+    /**
+     * PRD_FOOD 15 and 17: "erreur à côté du champ, formulaire conservé".
+     *
+     * Scoped to the field, which is what the rule is about. A bare `onNodeWithText` could never
+     * pass here and never did: the sheet draws this sentence **twice** by design — once under the
+     * quantity, and once beside `Save entry` as `FoodAddErrors.summary`, so a reader who has
+     * scrolled past the field still hears why the save did nothing. Two nodes, one string, and an
+     * unscoped matcher that demands exactly one.
+     */
     @Test
     fun aRefusedQuantityIsShownBesideItsFieldAndKeepsWhatWasTyped() {
         show(
@@ -263,8 +287,22 @@ class FoodAddScreenTest {
             ),
         )
 
-        compose.onNodeWithText(FoodValidation.INGREDIENT_QUANTITY_ERROR).assertExists()
+        assertDrawn(FoodTestTags.QUANTITY_FIELD, FoodValidation.INGREDIENT_QUANTITY_ERROR)
         assertDrawn(FoodTestTags.QUANTITY_FIELD, "600")
+    }
+
+    /** The same refusal beside the action, so it is heard without scrolling back (PRD_FOOD 18). */
+    @Test
+    fun aRefusalIsAlsoSaidBesideTheSaveAction() {
+        show(
+            previewCookedState().copy(
+                errors = FoodAddErrors(quantity = FoodValidation.INGREDIENT_QUANTITY_ERROR),
+            ),
+        )
+
+        compose
+            .onAllNodesWithText(FoodValidation.INGREDIENT_QUANTITY_ERROR)
+            .assertCountEquals(2)
     }
 
     /** PRD_FOOD 17: a line whose food is gone keeps its values and says why. */

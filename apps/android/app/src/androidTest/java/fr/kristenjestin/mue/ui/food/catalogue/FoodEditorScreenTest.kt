@@ -119,9 +119,19 @@ class FoodEditorScreenTest {
     fun aReferenceEntryIsInertAndOffersTheDuplicate() {
         setEditor(referenceFoodEditorState())
 
+        /*
+         * A disabled `BasicTextField` publishes **no** `SetText` action at all — that is what
+         * being disabled means in the semantics tree — so `hasSetTextAction()` cannot match one
+         * and this assertion could never have run against a read-only card. It looked for the
+         * editable node in order to assert it was not editable.
+         *
+         * The absence *is* the claim, so it is what is asserted: there is nothing typable inside
+         * the name field, and the field itself is on screen and inert.
+         */
+        compose.onNodeWithTag(FoodTestTags.FOOD_NAME_FIELD).performScrollTo().assertIsDisplayed()
         compose.onNode(
             hasSetTextAction() and hasAnyAncestor(hasTestTag(FoodTestTags.FOOD_NAME_FIELD)),
-        ).performScrollTo().assertIsNotEnabled()
+        ).assertDoesNotExist()
 
         compose.onNodeWithText(FoodCatalogueMessages.DUPLICATE).assertIsDisplayed()
         compose.onNodeWithText(FoodCatalogueMessages.READ_ONLY_NOTE)
