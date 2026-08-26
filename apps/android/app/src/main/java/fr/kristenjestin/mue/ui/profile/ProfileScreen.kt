@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -37,19 +39,25 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.timer.TimerNotificationPermission
 import fr.kristenjestin.mue.timer.rememberTimerNotificationPermission
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
+import fr.kristenjestin.mue.ui.components.MueIcon
+import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
+import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.components.rememberMueLocale
+import fr.kristenjestin.mue.ui.scale.ScaleMessages
+import fr.kristenjestin.mue.ui.scale.ScaleTestTags
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.timer.TimerMessages
 import java.time.LocalDate
@@ -71,6 +79,13 @@ private const val HAPTICS_BODY =
     "Short vibrations while adjusting the scale and when a measurement is saved."
 private const val NOT_SET = "Not set"
 
+/** Manque à `ScaleMessages` : ce que la ligne `Scales` de `Profile` ouvre, pour l'accessibilité. */
+private const val MANAGE_SCALES = "Manage your scales"
+
+/** Manque à `ScaleMessages` : à quoi sert une balance associée, en une ligne, sur `Profile`. */
+private const val SCALES_ROW_BODY =
+    "Pair a Bluetooth scale and your weight arrives on its own when you step on it."
+
 /**
  * `Profile`: the health profile, the BMI it feeds, the preferences and the CSV export.
  *
@@ -78,7 +93,7 @@ private const val NOT_SET = "Not set"
  * moves during a tab transition (PRD 8).
  */
 @Composable
-fun ProfileScreen(modifier: Modifier = Modifier) {
+fun ProfileScreen(modifier: Modifier = Modifier, onOpenScales: () -> Unit = {}) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -112,10 +127,12 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
         onDisplayNameChange = viewModel::onDisplayNameChange,
         onHeightChange = viewModel::onHeightChange,
         onBirthDateChange = viewModel::onBirthDateChange,
+        onSexChange = viewModel::onSexChange,
         onSave = viewModel::saveProfile,
         onSaveConfirmationFinished = viewModel::onSaveConfirmationFinished,
         onHapticsEnabledChange = viewModel::onHapticsEnabledChange,
         onExport = viewModel::exportWeightData,
+        onOpenScales = onOpenScales,
         modifier = modifier,
         showNotificationSettings = !notifications.isGranted && !notifications.canRequest,
         onOpenNotificationSettings = {
@@ -138,6 +155,10 @@ internal fun ProfileScreen(
     today: LocalDate = LocalDate.now(),
     showNotificationSettings: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
+    /** FR-PROFILE-007. Par défaut inerte, pour les tests écrits avant que ce champ existe. */
+    onSexChange: (Sex?) -> Unit = {},
+    /** FR-SCALE-010. La section `Scales` ouvre l'écran dédié de PRD_SCALE 8. */
+    onOpenScales: () -> Unit = {},
 ) {
     val spacing = MueTheme.spacing
     val focusManager = LocalFocusManager.current
@@ -172,6 +193,21 @@ internal fun ProfileScreen(
                 },
             )
 
+            MueSurfaceCard(
+                shape = MueTheme.shapes.field,
+                contentPadding = PaddingValues(spacing.lg),
+            ) {
+                MueText(PRIVACY_TITLE, MueTheme.typography.sectionTitle)
+                MueText(
+                    text = PRIVACY_BODY,
+                    style = MueTheme.typography.caption,
+                    color = MueTheme.colors.textSecondary,
+                    modifier = Modifier.padding(top = spacing.xs),
+                )
+            }
+
+            SexSection(sex = state.sex, onSexChange = onSexChange)
+
             Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
                 MuePrimaryButton(
                     label = SAVE_LABEL,
@@ -184,19 +220,6 @@ internal fun ProfileScreen(
                     onSuccessFinished = onSaveConfirmationFinished,
                 )
                 state.saveError?.let { StatusLine(it, MueTheme.colors.error, assertive = true) }
-            }
-
-            MueSurfaceCard(
-                shape = MueTheme.shapes.field,
-                contentPadding = PaddingValues(spacing.lg),
-            ) {
-                MueText(PRIVACY_TITLE, MueTheme.typography.sectionTitle)
-                MueText(
-                    text = PRIVACY_BODY,
-                    style = MueTheme.typography.caption,
-                    color = MueTheme.colors.textSecondary,
-                    modifier = Modifier.padding(top = spacing.xs),
-                )
             }
 
             ProfileSection(title = "Preferences") {
@@ -215,6 +238,11 @@ internal fun ProfileScreen(
                     )
                 }
             }
+
+            ScalesSection(
+                pairedScaleCount = state.pairedScaleCount,
+                onOpenScales = onOpenScales,
+            )
 
             ProfileSection(title = "Your data") {
                 MueSurfaceCard(
@@ -373,6 +401,110 @@ private fun ProfileForm(
                             error(message)
                             liveRegion = LiveRegionMode.Polite
                         },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Le sexe, dans un groupe qui n'est pas celui de la taille et de la date de naissance
+ * (PRD_SCALE FR-PROFILE-007).
+ *
+ * **La disposition porte la règle.** La taille et la date de naissance alimentent l'IMC — le
+ * relevé d'IMC est d'ailleurs collé sous la taille, dans leur groupe — et le sexe ne sert qu'aux
+ * estimations de composition corporelle. Les réunir suggérerait visuellement le lien que le PRD
+ * prend soin de nier ; ce bloc est donc séparé du formulaire par la carte de confidentialité, porte
+ * son propre intitulé — celui de son unique usage — et le rappelle en une phrase. Documenter la
+ * règle sans la disposer aurait laissé l'écran dire le contraire du texte.
+ *
+ * Trois segments, dont `Not set`, parce qu'un champ facultatif dont on ne peut pas revenir à
+ * l'état vide n'est pas facultatif. Rien ici ne peut être invalide, donc rien ne bloque
+ * l'enregistrement et aucun message d'erreur n'existe. `MueSegmentedChoice` publie déjà la
+ * sémantique de groupe de boutons radio, si bien que le champ s'annonce comme le contrôle à choix
+ * que PRD_SCALE 20 demande, avec son libellé d'usage.
+ */
+@Composable
+private fun SexSection(sex: Sex?, onSexChange: (Sex?) -> Unit) {
+    val spacing = MueTheme.spacing
+    ProfileSection(title = ScaleMessages.SEX_SECTION_TITLE) {
+        MueSurfaceCard(
+            modifier = Modifier.testTag(ScaleTestTags.SEX_SECTION),
+            shape = MueTheme.shapes.field,
+            contentPadding = PaddingValues(spacing.lg),
+        ) {
+            MueText(
+                text = ScaleMessages.SEX_SECTION_BODY,
+                style = MueTheme.typography.caption,
+                color = MueTheme.colors.textSecondary,
+            )
+            MueText(
+                text = ScaleMessages.SEX_LABEL,
+                style = MueTheme.typography.label,
+                color = MueTheme.colors.textTertiary,
+                modifier = Modifier.padding(top = spacing.lg, bottom = spacing.sm),
+            )
+            MueSegmentedChoice(
+                options = SEX_OPTIONS,
+                selected = sex,
+                onSelect = onSexChange,
+                label = ::sexLabel,
+                modifier = Modifier.testTag(ScaleTestTags.SEX_FIELD),
+            )
+        }
+    }
+}
+
+/** `Female`, `Male`, et l'état non renseigné, qui est une option comme les autres. */
+private val SEX_OPTIONS: List<Sex?> = listOf(Sex.FEMALE, Sex.MALE, null)
+
+private fun sexLabel(sex: Sex?): String = when (sex) {
+    Sex.FEMALE -> ScaleMessages.FEMALE
+    Sex.MALE -> ScaleMessages.MALE
+    null -> ScaleMessages.SEX_NOT_SET
+}
+
+/**
+ * `Scales` sur `Profile` : combien de balances sont associées, et le chemin vers l'écran dédié
+ * (FR-SCALE-010, PRD_SCALE 8).
+ *
+ * Un réglage d'appareil, rangé exactement comme `Data & sync` : invisible depuis les écrans
+ * principaux, et sans le moindre badge. `No scale paired` est un état normal et non une lacune —
+ * `Entry` est strictement l'écran du PRD socle sans balance (PRD_SCALE 18.1) — donc la ligne
+ * l'énonce sans rien réclamer. Le flux d'appairage n'est jamais proposé d'ailleurs que d'ici.
+ */
+@Composable
+private fun ScalesSection(pairedScaleCount: Int, onOpenScales: () -> Unit) {
+    val spacing = MueTheme.spacing
+    ProfileSection(title = ScaleMessages.SCALES) {
+        MueSurfaceCard(
+            modifier = Modifier.testTag(ScaleTestTags.PROFILE_SECTION),
+            shape = MueTheme.shapes.field,
+            contentPadding = PaddingValues(spacing.lg),
+            onClick = onOpenScales,
+            onClickLabel = MANAGE_SCALES,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    MueText(
+                        text = if (pairedScaleCount == 0) {
+                            ScaleMessages.NO_SCALE_PAIRED
+                        } else {
+                            ScaleMessages.scalesPaired(pairedScaleCount)
+                        },
+                        style = MueTheme.typography.bodyStrong,
+                    )
+                    MueText(
+                        text = SCALES_ROW_BODY,
+                        style = MueTheme.typography.caption,
+                        color = MueTheme.colors.textSecondary,
+                        modifier = Modifier.padding(top = spacing.xxs),
+                    )
+                }
+                MueIcon(
+                    iconName = MueIcons.CHEVRON_RIGHT,
+                    tint = MueTheme.colors.textTertiary,
+                    size = 18.dp,
                 )
             }
         }

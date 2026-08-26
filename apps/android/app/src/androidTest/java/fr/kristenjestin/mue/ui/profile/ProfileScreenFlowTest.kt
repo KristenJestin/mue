@@ -17,10 +17,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.model.DateWindow
 import fr.kristenjestin.mue.domain.model.Measurement
+import fr.kristenjestin.mue.domain.model.ScaleDevice
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
+import fr.kristenjestin.mue.domain.repository.ScaleRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
 import fr.kristenjestin.mue.ui.advanceToTheQuietButton
@@ -37,6 +39,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.IOException
+import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
 
@@ -56,6 +59,7 @@ class ProfileScreenFlowTest {
     private val profiles = FakeProfiles()
     private val preferences = FakePreferences()
     private val measurements = FakeMeasurements()
+    private val scales = FakeScales()
     private val exporter = FakeExporter()
     private val shared = mutableListOf<File>()
 
@@ -163,6 +167,7 @@ class ProfileScreenFlowTest {
             profileRepository = profiles,
             preferencesRepository = preferences,
             measurementRepository = measurements,
+            scaleRepository = scales,
             exporter = exporter,
             savedStateHandle = SavedStateHandle(),
             today = { TODAY },
@@ -297,5 +302,53 @@ private class FakeExporter : WeightDataExporter {
         exported = measurements
         failure?.let { throw it }
         return File("mue-weight-$exportDate.csv")
+    }
+}
+
+/**
+ * FR-SCALE-010 : `Profile` compte les balances associées, et rien d'autre du module ne l'atteint.
+ *
+ * Vide par défaut, ce qui est l'état de tous les tests de cet écran : la section dit
+ * `No scale paired`, qui est un état normal et non une lacune (PRD_SCALE 18.1).
+ */
+private class FakeScales : ScaleRepository {
+    private val state = MutableStateFlow<List<ScaleDevice>>(emptyList())
+
+    fun set(devices: List<ScaleDevice>) {
+        state.value = devices
+    }
+
+    override fun observeAll(): Flow<List<ScaleDevice>> = state
+    override suspend fun getAll(): List<ScaleDevice> = state.value
+    override suspend fun findById(id: String): ScaleDevice? =
+        state.value.firstOrNull { it.id == id }
+
+    override suspend fun save(device: ScaleDevice) {
+        state.value = state.value.filterNot { it.id == device.id } + device
+    }
+
+    override suspend fun rename(id: String, displayName: String) {
+        state.value = state.value.map {
+            if (it.id == id) it.copy(displayName = displayName) else it
+        }
+    }
+
+    override suspend fun markSeen(
+        id: String,
+        address: String,
+        advertisedName: String,
+        at: Instant,
+    ) {
+        state.value = state.value.map {
+            if (it.id == id) {
+                it.copy(address = address, advertisedName = advertisedName, lastSeenAt = at)
+            } else {
+                it
+            }
+        }
+    }
+
+    override suspend fun forget(id: String) {
+        state.value = state.value.filterNot { it.id == id }
     }
 }

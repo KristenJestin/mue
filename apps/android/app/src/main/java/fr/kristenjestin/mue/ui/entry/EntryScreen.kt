@@ -1,6 +1,9 @@
 package fr.kristenjestin.mue.ui.entry
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +18,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,11 +34,17 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextMeasurer
@@ -47,20 +57,27 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
+import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumberSuffixGap
 import fr.kristenjestin.mue.ui.components.MueFieldContainer
 import fr.kristenjestin.mue.ui.components.MueHaptics
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
+import fr.kristenjestin.mue.ui.components.MueIcon
+import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.rememberMueHaptics
+import fr.kristenjestin.mue.ui.scale.ScaleMessages
+import fr.kristenjestin.mue.ui.scale.ScalePermissions
+import fr.kristenjestin.mue.ui.scale.ScaleTestTags
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -97,6 +114,38 @@ private const val HeroTrailWeight = 1.5f
 fun EntryScreen(modifier: Modifier = Modifier) {
     val viewModel: EntryViewModel = viewModel(factory = EntryViewModel.Factory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    /*
+     * FR-SCALE-020: the search runs while this screen is on screen, and not one moment longer.
+     *
+     * `LifecycleStartEffect` rather than `LaunchedEffect` because the two ways of leaving are
+     * different events and both have to stop the scan: switching tab removes this composable,
+     * and locking the phone leaves it composed while the process goes to the background. A
+     * `LaunchedEffect` would survive the second one and keep the radio scanning in a pocket,
+     * which is the one thing PRD_SCALE 3.7 rules out entirely.
+     */
+    LifecycleStartEffect(viewModel) {
+        viewModel.onEntryVisible()
+        onStopOrDispose { viewModel.onEntryHidden() }
+    }
+
+    /*
+     * FR-SCALE-020: the phone stays awake while the search session runs, so it can be put down
+     * before stepping on the scale, and goes back to normal the instant a stable weight lands,
+     * the session expires or this screen leaves.
+     *
+     * Driven from the session state rather than from a flag of the Bluetooth layer, which
+     * `ScaleSessionSource` does not expose: the four states that make up a search session are
+     * exactly the window PRD_SCALE 20 describes, so the fact is derivable here and does not need
+     * to cross the domain boundary. `onDispose` releases it unconditionally — a screen that goes
+     * away mid-session must not leave the phone lit.
+     */
+    val view = LocalView.current
+    DisposableEffect(view, state.scale.keepScreenOn) {
+        view.keepScreenOn = state.scale.keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     EntryContent(
         state = state,
@@ -111,6 +160,25 @@ fun EntryScreen(modifier: Modifier = Modifier) {
         onDateSelected = viewModel::onDateSelected,
         onSave = viewModel::onSave,
         onSaveConfirmationFinished = viewModel::onSaveConfirmationFinished,
+        /*
+         * FR-SCALE-025: a system screen only ever opens on a deliberate tap, and none of these
+         * opens a dialog of Mue's own. The intents are built here rather than in the ViewModel
+         * because a `ViewModel` has no `Context` and must not acquire one; the ViewModel is still
+         * told, so it can retry the session or remember that the notice has been given.
+         */
+        onScaleStatusAction = { status ->
+            viewModel.onScaleStatusAction(status)
+            val intent = when (status) {
+                EntryScaleStatus.NOT_FOUND -> null
+                EntryScaleStatus.BLUETOOTH_OFF -> ScalePermissions.enableBluetoothIntent(context)
+                EntryScaleStatus.PERMISSION_MISSING -> ScalePermissions.appSettingsIntent(context)
+                EntryScaleStatus.SYSTEM_LOCATION_OFF ->
+                    ScalePermissions.systemLocationSettingsIntent()
+            }
+            // A settings screen that no ROM ships is not an error worth showing anyone: the
+            // status line stays, the weigh-in by hand was never blocked (BR-SCALE-011).
+            intent?.let { runCatching { context.startActivity(it) } }
+        },
         modifier = modifier,
     )
 }
@@ -129,6 +197,7 @@ internal fun EntryContent(
     onDateSelected: (LocalDate) -> Unit,
     onSave: () -> Unit,
     onSaveConfirmationFinished: () -> Unit,
+    onScaleStatusAction: (EntryScaleStatus) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
@@ -144,10 +213,27 @@ internal fun EntryContent(
      * uses and it catches up when the ruler stops.
      */
     val ruler = rememberRulerState(state.weight)
+
+    /*
+     * PRD_SCALE 19: a weigh-in arriving from the scale *moves* the ruler to its value instead of
+     * teleporting it there, over the same 180 ms the rest of this screen moves in.
+     *
+     * Which revision travels and which one jumps is decided by `arrivalRevision` rather than by
+     * the value: the history seed, `−` / `+` and the keyboard all reach this effect the same way,
+     * and only the one the scale posted may glide. Reduced motion collapses it to the direct
+     * change of value that section asks for.
+     */
+    val glide = MueMotion.spec<Float>(MueMotion.ManualEntryMillis)
     LaunchedEffect(state.weightRevision) {
         // A gesture in flight owns the value: the history seed arriving mid-drag must not
         // snatch it back (PRD FR-ENTRY-001).
-        if (!ruler.interacting) ruler.jumpTo(state.weight.hundredthsKg)
+        if (ruler.interacting) return@LaunchedEffect
+        val arrived = state.scale.fromScale && state.scale.arrivalRevision == state.weightRevision
+        if (arrived && !reduceMotion) {
+            ruler.glideTo(state.weight.hundredthsKg, glide)
+        } else {
+            ruler.jumpTo(state.weight.hundredthsKg)
+        }
     }
 
     LaunchedEffect(state.saveFlareCount) {
@@ -211,6 +297,12 @@ internal fun EntryContent(
             modifier = Modifier.padding(top = heroTopPadding),
         )
 
+        ScaleNote(
+            scale = state.scale,
+            weight = state.weight,
+            modifier = Modifier.padding(top = spacing.sm),
+        )
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -260,6 +352,8 @@ internal fun EntryContent(
             )
         }
 
+        ScaleFootnotes(scale = state.scale, onStatusAction = onScaleStatusAction)
+
         MuePickerField(
             label = "Measurement date",
             value = EntryFormat.date(state.date),
@@ -275,7 +369,15 @@ internal fun EntryContent(
             onClick = {
                 // The scale reports where it stopped, so a save landed on mid-glide would
                 // otherwise record the value the finger left rather than the one on screen.
-                onWeightChange(Weight.ofHundredthsClamped(ruler.displayedHundredths))
+                //
+                // Except while the ruler is travelling to a weigh-in it was *sent* to
+                // (PRD_SCALE 19): there the screen's weight is already the destination, and
+                // publishing the position of a glide in progress would both record a value on
+                // the way and read as a manual correction, stripping the provenance and the
+                // impedance off the very measurement being saved (BR-SCALE-013).
+                if (!ruler.gliding) {
+                    onWeightChange(Weight.ofHundredthsClamped(ruler.displayedHundredths))
+                }
                 onSave()
             },
             modifier = Modifier.padding(top = spacing.md),
@@ -584,6 +686,209 @@ private fun Modifier.fullBleed(gutter: Dp): Modifier = layout { measurable, cons
     layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
 }
 
+/**
+ * The one line a paired scale adds beside the value, and the only one (PRD_SCALE 19).
+ *
+ * **Discreet by construction.** It is a caption in the quiet text colour, under the readout and
+ * above the ruler, and it never becomes a card, an accent or a badge: the weight is the subject
+ * of this screen and nothing here may compete with it.
+ *
+ * The slot is a fixed height so that a measurement arriving does not shove the ruler down the
+ * screen under the finger — and the whole composable returns without emitting anything when no
+ * scale is paired, which is PRD_SCALE 18.1's "strictly the base PRD's screen" taken literally:
+ * not an invisible box, not a zero-height spacer, nothing.
+ *
+ * The provenance mark and the search indication share the slot because they are never both true:
+ * the indication describes a weigh-in that has not landed, the mark a weigh-in that has.
+ */
+@Composable
+private fun ScaleNote(
+    scale: EntryScaleUiState,
+    weight: Weight,
+    modifier: Modifier = Modifier,
+) {
+    if (!scale.paired) return
+
+    val colors = MueTheme.colors
+    val typography = MueTheme.typography
+    val spacing = MueTheme.spacing
+    val fade = MueMotion.spec<Float>(MueMotion.ManualEntryMillis)
+
+    Box(
+        modifier = modifier.fillMaxWidth().height(ScaleNoteHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        val indicator = scale.indicator
+        if (indicator != null && !scale.fromScale) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+                modifier = Modifier.testTag(ScaleTestTags.ENTRY_INDICATOR),
+            ) {
+                MueText(
+                    text = indicator.message,
+                    style = typography.hint,
+                    color = colors.textTertiary,
+                )
+                /*
+                 * PRD_SCALE 11: the unstable stream is visible and commits to nothing.
+                 *
+                 * It is shown *here*, in the indication, and never on the ruler. On the ruler it
+                 * would become the value `Save measurement` records, and BR-SCALE-001 forbids an
+                 * unstable reading from ever being saved. `ofHundredthsOrNull` and not the
+                 * clamping constructor: a frame outside the range is dropped, never dragged to
+                 * the nearest bound (contract §2).
+                 */
+                scale.liveHundredths?.let(Weight::ofHundredthsOrNull)?.let { live ->
+                    MueText(
+                        text = "${EntryFormat.weight(live)} $WeightUnit",
+                        style = typography.hint,
+                        color = colors.textQuiet,
+                    )
+                }
+            }
+        }
+
+        // PRD_SCALE 19: the mark fades in, and fades out the moment the user takes the value
+        // back. Under reduced motion `MueMotion.spec` already shortens it to the brief fade that
+        // section allows, so there is nothing to branch on here.
+        AnimatedVisibility(
+            visible = scale.fromScale,
+            enter = fadeIn(fade),
+            exit = fadeOut(fade),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+                modifier = Modifier
+                    .testTag(ScaleTestTags.SOURCE_MARK)
+                    /*
+                     * PRD_SCALE 20: the arrival of a stable measurement is announced with its
+                     * value. The live region sits on the mark and nowhere else — the mark exists
+                     * exactly when a measurement has landed, so it speaks once per arrival and
+                     * never once per frame, which is the distinction that section draws.
+                     */
+                    .semantics(mergeDescendants = true) {
+                        liveRegion = LiveRegionMode.Polite
+                        contentDescription = if (
+                            scale.announcement == EntryScaleAnnouncement.MEASUREMENT_RECEIVED
+                        ) {
+                            ScaleMessages.measurementReceived(EntryFormat.spokenWeight(weight))
+                        } else {
+                            ScaleMessages.FROM_YOUR_SCALE
+                        }
+                    },
+            ) {
+                MueIcon(
+                    iconName = ActivityIcons.TAB_ENTRY,
+                    tint = colors.textTertiary,
+                    size = ScaleMarkIconSize,
+                )
+                MueText(
+                    text = ScaleMessages.FROM_YOUR_SCALE,
+                    style = typography.hint,
+                    color = colors.textTertiary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What a paired scale may say above the date row: a value it refused, a hint, a way out.
+ *
+ * All three sit at the bottom, beside the save error and away from the weight, and every one of
+ * them is absent by default. None of them disables anything: BR-SCALE-011 makes every function
+ * of Mue available with no Bluetooth, no permission and no scale in range, so the ruler, the
+ * keyboard, the date and `Save measurement` keep working underneath whatever is shown here.
+ */
+@Composable
+private fun ScaleFootnotes(
+    scale: EntryScaleUiState,
+    onStatusAction: (EntryScaleStatus) -> Unit,
+) {
+    val colors = MueTheme.colors
+    val typography = MueTheme.typography
+    val spacing = MueTheme.spacing
+
+    // FR-SCALE-024: said once, and the screen is otherwise left exactly as it was — the value on
+    // the ruler, the date and the provenance are all untouched by a reading Mue will not record.
+    if (scale.outOfRange) {
+        MueText(
+            text = ScaleMessages.MEASUREMENT_OUT_OF_RANGE,
+            style = typography.caption,
+            color = colors.textSecondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = spacing.sm)
+                .testTag(ScaleTestTags.OUT_OF_RANGE_NOTICE),
+        )
+    }
+
+    // PRD_SCALE 18.3: only when the driver reported an impedance it could not measure. A weight
+    // saved before the impedance arrived, or a session that simply timed out, leaves this absent.
+    if (scale.barefootHint) {
+        MueText(
+            text = ScaleMessages.BAREFOOT_HINT,
+            style = typography.caption,
+            color = colors.textSecondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = spacing.sm)
+                .testTag(ScaleTestTags.BAREFOOT_HINT),
+        )
+    }
+
+    scale.status?.let { status ->
+        val announcement = if (scale.announcement == EntryScaleAnnouncement.UNAVAILABLE) {
+            ScaleMessages.UNAVAILABLE_ANNOUNCEMENT
+        } else {
+            status.message
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = spacing.sm)
+                .clip(MueTheme.shapes.small)
+                // FR-SCALE-025: the tap is the whole point — nothing here opens a system screen
+                // on its own, and nothing here opens a dialog of Mue's.
+                .clickable(role = Role.Button, onClick = { onStatusAction(status) })
+                .heightIn(min = MueMinTouchTarget)
+                .padding(horizontal = spacing.xs)
+                .testTag(ScaleTestTags.ENTRY_STATUS)
+                .semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = announcement
+                },
+        ) {
+            MueIcon(
+                iconName = MueIcons.BLUETOOTH,
+                tint = colors.textTertiary,
+                size = ScaleMarkIconSize,
+            )
+            MueText(
+                text = status.message,
+                style = typography.caption,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(start = spacing.xs),
+            )
+        }
+    }
+}
+
+/**
+ * The height the scale's line occupies, whatever it currently says — or nothing at all.
+ *
+ * Reserved rather than measured so that a weigh-in landing mid-adjustment cannot move the ruler
+ * out from under a finger. It only exists once a scale is paired, so the screen of someone
+ * without one is not a pixel taller (PRD_SCALE 18.1).
+ */
+private val ScaleNoteHeight: Dp = 22.dp
+
+/** Small enough to read as punctuation beside the words, never as an indicator of its own. */
+private val ScaleMarkIconSize: Dp = 14.dp
+
 // --- Previews -----------------------------------------------------------------------
 
 private fun previewState(
@@ -593,6 +898,7 @@ private fun previewState(
     manualInput: String = "",
     manualError: String? = null,
     justSaved: Boolean = false,
+    scale: EntryScaleUiState = EntryScaleUiState.ABSENT,
 ): EntryUiState {
     val today = LocalDate.of(2026, 8, 23)
     return EntryUiState(
@@ -604,6 +910,7 @@ private fun previewState(
         manualInput = manualInput,
         manualError = manualError,
         justSaved = justSaved,
+        scale = scale,
     )
 }
 
@@ -623,6 +930,7 @@ private fun EntryPreview(state: EntryUiState) {
             onDateSelected = {},
             onSave = {},
             onSaveConfirmationFinished = {},
+            onScaleStatusAction = {},
         )
     }
 }
@@ -654,3 +962,44 @@ private fun EntryManualErrorPreview() = EntryPreview(
 @Preview(name = "Entry · saved", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
 @Composable
 private fun EntrySavedPreview() = EntryPreview(previewState(justSaved = true))
+
+/*
+ * The scale module on `Entry` (PRD_SCALE 12.2). Four previews for the four things it can add,
+ * and the first of them is the one that matters most: the screen without a scale, which has to
+ * stay pixel for pixel the one above (PRD_SCALE 18.1).
+ */
+
+@Preview(name = "Entry · looking", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleSearchingPreview() = EntryPreview(
+    previewState(
+        scale = EntryScaleUiState(
+            paired = true,
+            indicator = EntryScaleIndicator.STEP_ON,
+            keepScreenOn = true,
+        ),
+    )
+)
+
+@Preview(name = "Entry · from the scale", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleReceivedPreview() = EntryPreview(
+    previewState(
+        weight = 74.35,
+        scale = EntryScaleUiState(paired = true, fromScale = true),
+    )
+)
+
+@Preview(name = "Entry · Bluetooth off", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleUnavailablePreview() = EntryPreview(
+    previewState(
+        scale = EntryScaleUiState(paired = true, status = EntryScaleStatus.BLUETOOTH_OFF),
+    )
+)
+
+@Preview(name = "Entry · out of range", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleOutOfRangePreview() = EntryPreview(
+    previewState(scale = EntryScaleUiState(paired = true, outOfRange = true))
+)

@@ -28,6 +28,9 @@ object ProgressFormat {
     private const val WEIGHT_DECIMALS = 2
     private const val DERIVED_DECIMALS = 1
 
+    /** Resting energy carries none at all (PRD_SCALE FR-BODY-003). */
+    private const val ENERGY_DECIMALS = 0
+
     /** Two decimals, no unit: `74.05` in English, `74,05` in French (PRD FR-PROGRESS-003). */
     fun weight(weight: Weight?, locale: Locale = Locale.getDefault()): String =
         weight?.let { decimal(it.kilograms, WEIGHT_DECIMALS, locale) } ?: UNAVAILABLE
@@ -53,6 +56,37 @@ object ProgressFormat {
     /** The chart-card badge of the prototype, e.g. `−1.15 kg`. */
     fun signedKilograms(value: Double?, locale: Locale = Locale.getDefault()): String =
         if (value == null) UNAVAILABLE else "${signedWeight(value, locale)} kg"
+
+    /**
+     * A body-composition percentage or mass: one decimal (PRD_SCALE FR-BODY-003).
+     *
+     * The same shape as [bmi] and for the same reason — a figure derived from a weight is not a
+     * weight — but named after what it is, because FR-BODY-003 states the rule in its own words
+     * and a reader chasing that rule should not have to notice that the BMI already carried it.
+     */
+    fun estimate(value: Double?, locale: Locale = Locale.getDefault()): String =
+        value?.let { decimal(it, DERIVED_DECIMALS, locale) } ?: UNAVAILABLE
+
+    /**
+     * The change against the previous estimate: one decimal and an always-visible sign
+     * (PRD_SCALE FR-BODY-003, the only perspective that requirement allows).
+     */
+    fun signedEstimate(value: Double?, locale: Locale = Locale.getDefault()): String =
+        signed(value, DERIVED_DECIMALS, locale)
+
+    /**
+     * Resting energy: a whole number of kilocalories (PRD_SCALE FR-BODY-003).
+     *
+     * No decimal at all, deliberately. PRD_SCALE 13.3 forbids showing digits that would suggest a
+     * clinical precision, and a tenth of a kilocalorie on a value whose equation carries an error
+     * of a hundred would be exactly that.
+     */
+    fun energy(value: Int?, locale: Locale = Locale.getDefault()): String =
+        value?.let { decimal(it.toDouble(), ENERGY_DECIMALS, locale) } ?: UNAVAILABLE
+
+    /** The change in resting energy: a whole number, with its sign. */
+    fun signedEnergy(value: Int?, locale: Locale = Locale.getDefault()): String =
+        signed(value?.toDouble(), ENERGY_DECIMALS, locale)
 
     /** Full localised date, e.g. `Aug 18, 2026` or `18 août 2026`. */
     fun date(date: LocalDate, locale: Locale = Locale.getDefault()): String =

@@ -8,11 +8,20 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import fr.kristenjestin.mue.MueApplication
+import fr.kristenjestin.mue.domain.logic.BodyCompositionCalculator
+import fr.kristenjestin.mue.domain.logic.BodyCompositionFormula
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.logic.Validated
+import fr.kristenjestin.mue.domain.logic.compositionOrNull
 import fr.kristenjestin.mue.domain.model.Measurement
+import fr.kristenjestin.mue.domain.model.MeasurementSource
+import fr.kristenjestin.mue.domain.model.ScaleReading
+import fr.kristenjestin.mue.domain.model.ScaleSessionState
+import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
+import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
+import fr.kristenjestin.mue.domain.repository.ScaleSessionSource
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +39,14 @@ import java.time.LocalDate
  * start and then belongs to the user until the process ends (PRD FR-ENTRY-001). Everything
  * needed to rebuild it goes through [SavedStateHandle], so a rotation *and* a system-killed
  * process both come back to the same screen (PRD 16.3).
+ *
+ * **La balance appairée n'ajoute pas un second propriétaire à cette valeur** (PRD_SCALE 21.2).
+ * Une pesée reçue emprunte le même chemin que le seed historique et les boutons `−` / `+` : elle
+ * pose un [Weight] et incrémente [EntryUiState.weightRevision]. Tout ce que [scaleSession] apporte
+ * en plus est une *provenance* — [EntryUiState.scale] — que le premier geste de l'utilisateur
+ * retire (BR-SCALE-013). L'invariant qui en découle tient en une phrase : à aucun moment un
+ * élément de cet écran n'est indisponible parce qu'une balance est en train de mesurer
+ * (BR-SCALE-011).
  */
 class EntryViewModel(
     private val measurements: MeasurementRepository,
@@ -37,6 +54,16 @@ class EntryViewModel(
     private val preferences: UserPreferencesRepository,
     private val savedState: SavedStateHandle,
     private val today: () -> LocalDate = LocalDate::now,
+    /**
+     * La couche de liaison, ou `null` quand il n'y en a aucune.
+     *
+     * `null` n'est pas un défaut de commodité : c'est l'état d'une application dont le module
+     * Bluetooth n'est pas câblé, et il se lit exactement comme [ScaleSessionState.Absent] — aucun
+     * scan, aucune permission demandée, aucun élément ajouté à l'écran (PRD_SCALE 18.1). Le seul
+     * chemin qui parle de Bluetooth part d'ici (PRD_SCALE 21.2) ; l'interface ne traverse jamais
+     * la couche de liaison.
+     */
+    private val scaleSession: ScaleSessionSource? = null,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(restoredState())
@@ -45,10 +72,49 @@ class EntryViewModel(
     /** True once the value on screen belongs to the user; the history must no longer overwrite it. */
     private var valueIsUserOwned: Boolean = savedState.contains(KEY_WEIGHT_HUNDREDTHS)
 
+    /**
+     * La lecture dont la valeur est actuellement sur la règle, tant que personne n'y a touché.
+     *
+     * Délibérément hors de [SavedStateHandle]. PRD_SCALE 21.2 : l'état de liaison et l'impédance
+     * en attente ne survivent pas à la destruction du processus, alors que le poids affiché, lui,
+     * survit — il redevient donc une saisie manuelle sans provenance ni composition, ce qui est
+     * exactement ce que produit un champ non restauré.
+     */
+    private var acceptedReading: ScaleReading? = null
+
+    /**
+     * L'identifiant de la session dont les trames ne doivent plus rien changer.
+     *
+     * Le mécanisme de PRD_SCALE 9.4 et 21.2, appliqué du côté de l'écran : après un
+     * enregistrement (BR-SCALE-012) ou une reprise en main manuelle (BR-SCALE-013), une trame
+     * d'impédance en retard porte encore l'identifiant de la session qu'on vient de clore et se
+     * reconnaît à cela seul. Une **nouvelle** session en porte un autre, si bien que la mesure
+     * stable suivante remplace bien la valeur et rétablit la provenance (FR-SCALE-022) au lieu
+     * d'être filtrée avec les retardataires.
+     */
+    private var closedSessionId: String? = null
+
+    /**
+     * `Scale unavailable · Open settings`, une seule fois par affichage (FR-SCALE-025).
+     *
+     * Remis à `false` par [onEntryVisible], c'est-à-dire à chaque fois qu'`Entry` redevient
+     * visible — y compris au retour des réglages, où l'utilisateur a le droit de revoir la ligne
+     * si sa réponse n'a rien changé. Aucun dialogue n'est jamais ouvert : la ligne attend un
+     * geste, elle ne le provoque pas.
+     */
+    private var permissionNoticeSpent: Boolean = false
+
+    /** PRD_SCALE 20 : l'indisponibilité s'annonce une fois par affichage, pas à chaque état. */
+    private var unavailableAnnounced: Boolean = false
+
+    /** Le profil courant, pour la composition corporelle (FR-BODY-001). Jamais persisté ici. */
+    private var profile: UserProfile = UserProfile.EMPTY
+
     init {
         if (!valueIsUserOwned) seedFromHistory()
         observeProfile()
         observePreferences()
+        observeScale()
     }
 
     // --- The scale ------------------------------------------------------------------
@@ -63,6 +129,11 @@ class EntryViewModel(
     fun onWeightChanged(weight: Weight) {
         if (_uiState.value.weight == weight) return
         valueIsUserOwned = true
+        // Un doigt sur la règle est une reprise en main comme une autre (BR-SCALE-013). Le retour
+        // anticipé ci-dessus est ce qui l'empêche de se déclencher à tort : l'écran republie la
+        // position de la règle avant chaque enregistrement, et republier la valeur qu'une balance
+        // vient de poser retirerait sa provenance au moment précis où on l'enregistre.
+        takeValueBack()
         savedState[KEY_WEIGHT_HUNDREDTHS] = weight.hundredthsKg
         _uiState.update { it.copy(weight = weight) }
     }
@@ -75,6 +146,20 @@ class EntryViewModel(
 
     /** Any source other than the scale itself; the scale is told to follow. */
     private fun setWeight(weight: Weight) {
+        takeValueBack()
+        postWeight(weight)
+    }
+
+    /**
+     * Pose une valeur et demande à la règle de la rejoindre, sans rien dire de sa provenance.
+     *
+     * C'est l'incrément de [EntryUiState.weightRevision] qui est le vrai contenu de cette
+     * fonction : l'écran ne déplace la règle que sur ce compteur, et [onWeightChanged] — l'écho
+     * de la règle elle-même — ne l'incrémente délibérément pas. Une pesée reçue emprunte donc
+     * exactement le chemin du seed historique et des boutons `−` / `+`, ce qui est la seule
+     * manière pour elle d'apparaître sous le marqueur.
+     */
+    private fun postWeight(weight: Weight) {
         valueIsUserOwned = true
         savedState[KEY_WEIGHT_HUNDREDTHS] = weight.hundredthsKg
         _uiState.update { it.copy(weight = weight, weightRevision = it.weightRevision + 1) }
@@ -156,17 +241,35 @@ class EntryViewModel(
         val currentDay = today()
         if (!MueValidation.isMeasurementDateAllowed(date, currentDay)) return
         savedState[KEY_DATE] = date.toString()
+        // BR-SCALE-009 : le poids reste affiché, mais une pesée reçue ce matin n'est pas la pesée
+        // d'un autre jour. Mue n'enregistre jamais une impédance mesurée aujourd'hui comme une
+        // composition historique, alors la valeur redevient simplement celle de l'utilisateur.
+        if (date != currentDay) takeValueBack()
         _uiState.update { it.copy(date = date, today = currentDay, datePickerVisible = false) }
     }
 
     // --- Saving ---------------------------------------------------------------------
 
-    /** Creates the measurement, or replaces the one already on that date (PRD BR-001, BR-002). */
+    /**
+     * Creates the measurement, or replaces the one already on that date (PRD BR-001, BR-002).
+     *
+     * **La session se clôt sur l'appui, pas sur l'écriture** (FR-SCALE-023, BR-SCALE-012). Tout ce
+     * qui décide du contenu de la mesure — la lecture retenue, l'impédance, la fermeture de la
+     * session — est fait ici, avant la coroutine. Le faire après aurait laissé une trame
+     * d'impédance arriver pendant l'écriture et compléter en silence une mesure déjà confirmée
+     * `Saved`, ce qui est précisément ce que cette règle interdit.
+     *
+     * La session est close même lorsque le poids a été saisi à la main : FR-SCALE-023 veut qu'après
+     * un enregistrement aucune nouvelle recherche ne démarre tant que l'utilisateur n'a pas quitté
+     * `Entry` ou activé `Try again`.
+     */
     fun onSave() {
         val snapshot = _uiState.value
         if (!MueValidation.isMeasurementDateAllowed(snapshot.date, today())) return
+        val measurement = measurementToSave(snapshot)
+        closeSession()
         viewModelScope.launch {
-            runCatching { measurements.save(Measurement(snapshot.date, snapshot.weight)) }
+            runCatching { measurements.save(measurement) }
                 .onSuccess {
                     _uiState.update {
                         it.copy(
@@ -185,6 +288,326 @@ class EntryViewModel(
 
     fun onSaveConfirmationFinished() {
         _uiState.update { it.copy(justSaved = false) }
+    }
+
+    /**
+     * Ce qui part en base, poids seul ou agrégat complet, en **une** transaction (FR-SCALE-023).
+     *
+     * Trois règles se croisent ici et aucune n'est négociable :
+     *
+     * - sans provenance, c'est une saisie manuelle et rien d'autre — même si une balance a émis
+     *   quelque chose il y a dix secondes (BR-SCALE-013) ;
+     * - l'impédance exploitable part avec la mesure **même si aucune composition n'a pu être
+     *   calculée** (FR-BODY-004, BR-SCALE-008) : un profil incomplet ou hors domaine n'empêche
+     *   que le calcul, jamais la conservation ;
+     * - le poids envoyé au calcul est celui de la mesure parente, donc `inputWeightCg` lui est
+     *   égal par construction (BR-SCALE-015).
+     *
+     * L'impédance est filtrée par [BodyCompositionFormula.isImpedanceUsable] et non recopiée telle
+     * quelle : une valeur nulle ou négative est une absence déguisée (BR-SCALE-005), et la
+     * conserver ferait compter cette mesure parmi les pesées complétables de FR-BODY-006.
+     */
+    private fun measurementToSave(snapshot: EntryUiState): Measurement {
+        val reading = acceptedReading?.takeIf { snapshot.scale.fromScale }
+            ?: return Measurement(snapshot.date, snapshot.weight)
+
+        val impedanceOhm = reading.impedanceOhm
+            ?.takeIf { BodyCompositionFormula.isImpedanceUsable(it) }
+
+        return Measurement(
+            date = snapshot.date,
+            weight = snapshot.weight,
+            source = MeasurementSource.SCALE,
+            sourceScaleId = reading.scaleId,
+            impedanceOhm = impedanceOhm,
+            bodyComposition = BodyCompositionCalculator
+                .calculate(snapshot.date, snapshot.weight, profile, impedanceOhm)
+                .compositionOrNull,
+        )
+    }
+
+    // --- La balance (PRD_SCALE 12.2) --------------------------------------------------
+
+    /**
+     * `Entry` est visible : la session de recherche s'ouvre (FR-SCALE-020).
+     *
+     * Appelé depuis le cycle de vie de l'écran et non depuis `init`, ce qui est la différence
+     * entre « scanner quand on regarde » et « scanner en arrière-plan ». Sans balance
+     * enregistrée, [ScaleSessionSource.start] est sans effet et aucune permission n'est demandée.
+     *
+     * C'est aussi le début d'un nouvel *affichage*, au sens de FR-SCALE-025 : les deux notices
+     * qui ne se donnent qu'une fois par affichage retrouvent leur droit de parole.
+     */
+    fun onEntryVisible() {
+        permissionNoticeSpent = false
+        unavailableAnnounced = false
+        _uiState.update { it.copy(scale = it.scale.copy(outOfRange = false)) }
+        scaleSession?.start()
+    }
+
+    /** `Entry` n'est plus visible : plus de scan, plus de liaison, plus rien (FR-SCALE-020). */
+    fun onEntryHidden() {
+        scaleSession?.stop()
+        _uiState.update {
+            it.copy(
+                scale = it.scale.copy(
+                    indicator = null,
+                    liveHundredths = null,
+                    announcement = null,
+                    keepScreenOn = false,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Le geste offert par la ligne d'état de PRD_SCALE 18.5.
+     *
+     * Seul [EntryScaleStatus.NOT_FOUND] agit ici — c'est l'unique chemin de relance hors d'une
+     * réouverture de l'écran (FR-SCALE-020). Les trois autres ouvrent un réglage système, ce qui
+     * appartient à l'écran : un `ViewModel` n'a pas de `Context` et ne doit pas en avoir un.
+     * Ce qui est enregistré ici, c'est que la notice de permission a été donnée pour cet
+     * affichage et ne sera pas relancée spontanément (FR-SCALE-025).
+     */
+    fun onScaleStatusAction(status: EntryScaleStatus) {
+        when (status) {
+            EntryScaleStatus.NOT_FOUND -> {
+                // `closedSessionId` n'est pas effacé : la nouvelle session porte un autre
+                // identifiant, et laisser l'ancien en place est ce qui garantit qu'une trame de
+                // la précédente ne pourra jamais compléter celle-ci (PRD_SCALE 9.4).
+                _uiState.update { it.copy(scale = it.scale.copy(outOfRange = false)) }
+                scaleSession?.retry()
+            }
+
+            EntryScaleStatus.PERMISSION_MISSING, EntryScaleStatus.SYSTEM_LOCATION_OFF -> {
+                permissionNoticeSpent = true
+                _uiState.update { it.copy(scale = it.scale.copy(status = null)) }
+            }
+
+            EntryScaleStatus.BLUETOOTH_OFF -> Unit
+        }
+    }
+
+    private fun observeScale() {
+        val source = scaleSession ?: return
+        viewModelScope.launch { source.state.collect(::onScaleState) }
+    }
+
+    /**
+     * L'unique endroit où un état de liaison devient de l'interface.
+     *
+     * Écrit comme un `when` exhaustif sur [ScaleSessionState] plutôt que comme une suite de
+     * drapeaux : les états s'excluent, et un `when` que le compilateur vérifie est ce qui garantit
+     * qu'un état ajouté plus tard ne restera pas silencieusement invisible.
+     */
+    private fun onScaleState(state: ScaleSessionState) = when (state) {
+        ScaleSessionState.Absent -> _uiState.update { it.copy(scale = EntryScaleUiState.ABSENT) }
+        ScaleSessionState.Idle -> updateScale {
+            it.copy(indicator = null, liveHundredths = null, keepScreenOn = false)
+        }
+
+        ScaleSessionState.Searching -> searching(EntryScaleIndicator.SEARCHING)
+        ScaleSessionState.Connecting -> searching(EntryScaleIndicator.CONNECTING)
+        ScaleSessionState.WaitingForStepOn -> searching(EntryScaleIndicator.STEP_ON)
+        is ScaleSessionState.Measuring ->
+            searching(EntryScaleIndicator.MEASURING, state.hundredthsKg)
+        is ScaleSessionState.Stable -> acceptReading(state.reading, impedanceRefused = false)
+        is ScaleSessionState.Complete -> acceptReading(state.reading, state.impedanceRefused)
+        is ScaleSessionState.OutOfRange -> outOfRange()
+        ScaleSessionState.NotFound -> settled(EntryScaleStatus.NOT_FOUND)
+        is ScaleSessionState.Unavailable -> unavailable(state.reason)
+    }
+
+    /**
+     * Les quatre états qui précèdent une valeur : indication discrète et écran éveillé.
+     *
+     * L'écran reste éveillé pendant toute cette phase et pas au-delà (FR-SCALE-020) : c'est là que
+     * l'utilisateur pose son téléphone pour monter sur la balance, et c'est le seul moment où
+     * l'appareil doit veiller pour une raison qu'il ne peut pas deviner autrement.
+     *
+     * [liveHundredths] n'est jamais posé sur la règle. PRD_SCALE 11 veut que le flux soit
+     * *visible* et n'engage rien ; le poser sur la règle en ferait la valeur qu'un appui sur
+     * `Save measurement` enregistrerait, ce que BR-SCALE-001 interdit.
+     */
+    private fun searching(indicator: EntryScaleIndicator, liveHundredths: Int? = null) =
+        updateScale {
+            it.copy(
+                indicator = indicator,
+                liveHundredths = liveHundredths,
+                status = null,
+                keepScreenOn = true,
+            )
+        }
+
+    /**
+     * Une mesure stable se pose sur la règle, avec sa provenance et la date du jour.
+     *
+     * Quatre effets, dans cet ordre, et chacun a sa règle : la valeur passe par [setWeight] pour
+     * incrémenter [EntryUiState.weightRevision] — sans quoi la règle ne bougerait pas — ;
+     * la date devient celle du jour (BR-SCALE-009) ; la provenance s'affiche (FR-SCALE-022) ;
+     * l'arrivée est annoncée avec sa valeur (PRD_SCALE 20).
+     *
+     * [setWeight] retire la provenance au passage, puisqu'il sert d'ordinaire les gestes de
+     * l'utilisateur ; elle est reposée juste après. L'inverse — un chemin privé qui ne la retire
+     * pas — aurait dupliqué la logique de reprise en main, qui est la seule chose de cet écran
+     * qu'il ne faut pas se tromper à écrire deux fois.
+     *
+     * Une trame de la session close est ignorée sans rien changer (BR-SCALE-012, BR-SCALE-013).
+     */
+    private fun acceptReading(reading: ScaleReading, impedanceRefused: Boolean) {
+        if (reading.sessionId == closedSessionId) return
+
+        // BR-SCALE-002 : `ofHundredthsClamped` ne valide jamais une mesure reçue (contrat §2), et
+        // `ofKilogramsOrNull` est le seul constructeur qui arrondisse au pas de PRD BR-003 avant
+        // de refuser hors domaine. La couche de liaison arrondit déjà ; le faire aussi ici coûte
+        // une division et ferme la porte à un demi-centième qui n'existe sur aucune règle.
+        val weight = Weight.ofKilogramsOrNull(reading.weightHundredthsKg / 100.0)
+            ?: return outOfRange()
+
+        val previous = acceptedReading
+        val alreadyOnScreen = previous?.sessionId == reading.sessionId &&
+            _uiState.value.scale.fromScale &&
+            _uiState.value.weight == weight
+
+        if (!alreadyOnScreen) {
+            // Une mesure d'une autre session remplace celle-ci : ses trames tardives, elles, ne
+            // doivent plus rien compléter (PRD_SCALE 9.4).
+            if (previous != null && previous.sessionId != reading.sessionId) {
+                closedSessionId = previous.sessionId
+            }
+            postWeight(weight)
+            selectToday()
+        }
+        acceptedReading = reading
+
+        _uiState.update {
+            it.copy(
+                scale = it.scale.copy(
+                    paired = true,
+                    indicator = null,
+                    liveHundredths = null,
+                    status = null,
+                    fromScale = true,
+                    arrivalRevision = it.weightRevision,
+                    outOfRange = false,
+                    // PRD_SCALE 18.3 : uniquement quand le pilote a signalé une mesure impossible.
+                    // Un délai écoulé arrive ici avec `impedanceRefused = false`, et un
+                    // enregistrement anticipé n'arrive pas ici du tout — sa session est close.
+                    barefootHint = impedanceRefused,
+                    announcement = EntryScaleAnnouncement.MEASUREMENT_RECEIVED,
+                    // FR-SCALE-020 : le maintien cesse dès qu'un poids stable est reçu.
+                    keepScreenOn = false,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Une mesure stable hors de `30.0–250.0 kg` : un message, et **l'écran reste inchangé**
+     * (FR-SCALE-024).
+     *
+     * Ni la règle, ni la date, ni la provenance ne bougent. Le cas n'est pas théorique : un appui
+     * de la main sur le plateau produit une mesure parfaitement stable autour de 18 kg.
+     */
+    private fun outOfRange() = updateScale {
+        it.copy(indicator = null, liveHundredths = null, outOfRange = true, keepScreenOn = false)
+    }
+
+    /**
+     * BR-SCALE-009 : une pesée reçue est un événement présent, donc datée d'aujourd'hui.
+     *
+     * Écrit à part de [onDateSelected] et non par un appel : celui-ci referme la feuille de
+     * sélection et retire la provenance hors d'aujourd'hui, deux effets qui appartiennent au
+     * geste de l'utilisateur et à lui seul.
+     */
+    private fun selectToday() {
+        val currentDay = today()
+        savedState[KEY_DATE] = currentDay.toString()
+        _uiState.update { it.copy(date = currentDay, today = currentDay) }
+    }
+
+    /** Fin de session sans mesure : une ligne actionnable, et rien de bloqué (BR-SCALE-011). */
+    private fun settled(status: EntryScaleStatus) = updateScale {
+        it.copy(indicator = null, liveHundredths = null, status = status, keepScreenOn = false)
+    }
+
+    /**
+     * Bluetooth éteint, permission absente, localisation système coupée (FR-SCALE-025).
+     *
+     * `Scale unavailable · Open settings` ne se donne qu'une fois par affichage et n'ouvre aucun
+     * dialogue ; `Bluetooth is off · Enable` n'a pas cette limite, parce qu'allumer la radio est
+     * un geste que l'utilisateur refait volontiers et qui n'a jamais été refusé.
+     */
+    private fun unavailable(reason: ScaleUnavailableReason) {
+        val status = when (reason) {
+            ScaleUnavailableReason.BLUETOOTH_OFF -> EntryScaleStatus.BLUETOOTH_OFF
+            ScaleUnavailableReason.PERMISSION_MISSING -> EntryScaleStatus.PERMISSION_MISSING
+            ScaleUnavailableReason.SYSTEM_LOCATION_OFF -> EntryScaleStatus.SYSTEM_LOCATION_OFF
+        }
+        val spent = permissionNoticeSpent && status != EntryScaleStatus.BLUETOOTH_OFF
+        val announce = !unavailableAnnounced
+        unavailableAnnounced = true
+        updateScale {
+            it.copy(
+                indicator = null,
+                liveHundredths = null,
+                status = status.takeUnless { spent },
+                announcement = if (announce) EntryScaleAnnouncement.UNAVAILABLE else it.announcement,
+                keepScreenOn = false,
+            )
+        }
+    }
+
+    /**
+     * La valeur redevient celle de l'utilisateur (BR-SCALE-013).
+     *
+     * Provenance retirée, impédance reçue ou attendue invalidée, conseil « pieds nus » retiré,
+     * session close pour que la trame suivante de cette liaison n'y change plus rien. Ce qui
+     * n'est **pas** fait ici compte autant : la valeur affichée ne bouge pas, et rien n'empêche
+     * une nouvelle mesure stable de la remplacer — elle arrivera dans une autre session, donc
+     * avec un autre identifiant, et rétablira la provenance (FR-SCALE-022).
+     */
+    private fun takeValueBack() {
+        val scale = _uiState.value.scale
+        if (!scale.fromScale && !scale.outOfRange) return
+        if (scale.fromScale) {
+            closeSession()
+            acceptedReading = null
+        }
+        _uiState.update {
+            it.copy(
+                scale = it.scale.copy(
+                    fromScale = false,
+                    barefootHint = false,
+                    outOfRange = false,
+                    announcement = null,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Clôt la session courante et retient son identifiant, pour ignorer ses trames tardives.
+     *
+     * [acceptedReading] n'est **pas** effacé ici : après un enregistrement, la valeur à l'écran
+     * vient toujours de la balance et un second appui doit produire exactement la même mesure.
+     * C'est [takeValueBack] qui l'efface, parce que c'est là que la valeur change de propriétaire.
+     */
+    private fun closeSession() {
+        closedSessionId = acceptedReading?.sessionId ?: closedSessionId
+        scaleSession?.closeSession()
+    }
+
+    /**
+     * Modifie l'état de la balance **sans jamais le faire exister** (PRD_SCALE 18.1).
+     *
+     * Toute mise à jour qui passe par ici marque l'appairage, et le seul chemin qui remet
+     * [EntryScaleUiState.ABSENT] est [ScaleSessionState.Absent] lui-même. Un badge ne peut donc
+     * pas se poser sur l'écran de quelqu'un qui n'a pas de balance : il n'existe aucun chemin
+     * pour l'y mettre.
+     */
+    private fun updateScale(block: (EntryScaleUiState) -> EntryScaleUiState) {
+        _uiState.update { it.copy(scale = block(it.scale.copy(paired = true))) }
     }
 
     // --- Wiring ---------------------------------------------------------------------
@@ -216,8 +639,12 @@ class EntryViewModel(
 
     private fun observeProfile() {
         viewModelScope.launch {
-            profiles.profile.collect { profile ->
-                val name = MueValidation.normalizeDisplayName(profile.displayName)
+            profiles.profile.collect { latest ->
+                // Retenu tel quel pour la composition corporelle (FR-BODY-001) : la taille, la
+                // date de naissance et le sexe doivent être là au moment de l'appui sur
+                // `Save measurement`, pas une suspension plus tard.
+                profile = latest
+                val name = MueValidation.normalizeDisplayName(latest.displayName)
                 _uiState.update { state -> state.copy(greeting = name?.let { "Hello $it," }) }
             }
         }
@@ -249,6 +676,21 @@ class EntryViewModel(
                     profiles = app.container.userProfileRepository,
                     preferences = app.container.userPreferencesRepository,
                     savedState = createSavedStateHandle(),
+                    /*
+                     * La couche de liaison n'est pas encore exposée par le conteneur.
+                     *
+                     * `ScaleContainer` porte aujourd'hui `scaleRepository` et rien d'autre ; la
+                     * source de session de PRD_SCALE 21.2 y arrivera sous la forme d'une
+                     * propriété `by lazy` de plus, et cette ligne deviendra alors
+                     * `scaleSession = app.container.scale.scaleSessionSource`.
+                     *
+                     * En attendant, `null` est un état correct et non un trou : il se lit comme
+                     * `ScaleSessionState.Absent`, c'est-à-dire aucun scan, aucune permission
+                     * demandée et un écran `Entry` strictement identique à celui du PRD socle
+                     * (PRD_SCALE 18.1). Tout le comportement de 12.2 est couvert par les tests
+                     * JVM, qui pilotent l'interface directement.
+                     */
+                    scaleSession = null,
                 )
             }
         }

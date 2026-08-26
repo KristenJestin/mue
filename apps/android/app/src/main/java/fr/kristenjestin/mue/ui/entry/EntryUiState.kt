@@ -34,6 +34,12 @@ data class EntryUiState(
     val hapticsEnabled: Boolean = true,
     /** Bumped on every successful save so the centre marker can flare once (PRD 13). */
     val saveFlareCount: Int = 0,
+    /**
+     * Everything a paired scale adds to this screen, and [EntryScaleUiState.ABSENT] when there
+     * is none — which is the default, so `Entry` is the base PRD's screen until a scale is
+     * paired and the Bluetooth layer is wired (PRD_SCALE 18.1).
+     */
+    val scale: EntryScaleUiState = EntryScaleUiState.ABSENT,
 ) {
     val isAtLowerStop: Boolean get() = weight.hundredthsKg <= Weight.MIN_HUNDREDTHS
     val isAtUpperStop: Boolean get() = weight.hundredthsKg >= Weight.MAX_HUNDREDTHS
