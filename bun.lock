@@ -18,7 +18,10 @@
       "name": "@mue/platform",
       "version": "0.0.0",
       "dependencies": {
+        "@mue/api": "workspace:*",
+        "@mue/auth": "workspace:*",
         "@mue/contracts": "workspace:*",
+        "@mue/db": "workspace:*",
         "@tanstack/react-start": "catalog:",
         "hono": "catalog:",
         "react": "catalog:",

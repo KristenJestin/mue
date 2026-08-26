@@ -203,7 +203,13 @@ export function createPinnedMetadataFetch(options: PinnedFetchOptions = {}) {
           }
         });
         settle(
-          new Response(Readable.toWeb(incoming) as ReadableStream<Uint8Array>, {
+          // Through `unknown` because this file is also compiled by `apps/platform`,
+          // whose tsconfig adds `lib.dom` for the consent page. `ReadableStream` then
+          // resolves to the DOM declaration instead of Bun's, and the two disagree on
+          // the `getReader()` overload set, so a direct assertion is rejected there
+          // and accepted here. Runtime is unaffected: `Readable.toWeb` already
+          // returns a web stream of `Uint8Array` chunks.
+          new Response(Readable.toWeb(incoming) as unknown as ReadableStream<Uint8Array>, {
             status,
             headers: toHeaders(incoming.headers),
           }),
