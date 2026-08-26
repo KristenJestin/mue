@@ -43,6 +43,7 @@ import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueWeekBars
@@ -356,26 +357,39 @@ private fun WeeklyCard(state: ActivityUiState, modifier: Modifier = Modifier) {
         if (state.showWeeklyEnergy) {
             Column(modifier = Modifier.padding(top = spacing.xl)) {
                 MueDivider()
-                Row(
+                /*
+                 * `Estimated energy` and its figure are split by measurement rather than by a
+                 * `SpaceBetween` row, because neither of them carried a weight: the row measured
+                 * the label first, at whatever it asked for, and handed the figure the sliver
+                 * that was left. At the largest font size on a 360 dp phone that sliver was one
+                 * glyph wide, so `≈ 280 kcal` came down the side of the card **one character per
+                 * line** — `≈`, `2`, `8`, `0`, `k`, `c`, `a`, `l` — and its first digits landed
+                 * *on top of* the word `energy` beside it, two readings drawn in the same place.
+                 * `onNodeWithText` saw none of it: the semantics string is the whole figure
+                 * however the glyphs fall.
+                 */
+                MueSplitRow(
                     modifier = Modifier.fillMaxWidth().padding(top = spacing.md),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MueIcon(
-                            iconName = ActivityIcons.FLAME,
-                            tint = colors.accent,
-                            size = 16.dp,
-                        )
-                        MueText(
-                            text = ENERGY_LABEL,
-                            style = type.caption,
-                            color = colors.textTertiary,
-                            modifier = Modifier.padding(start = spacing.sm),
-                        )
-                    }
-                    MueText(ActivityFormat.energy(state.week.energyKcal), type.bodyStrong)
-                }
+                    gap = spacing.md,
+                    start = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MueIcon(
+                                iconName = ActivityIcons.FLAME,
+                                tint = colors.accent,
+                                size = 16.dp,
+                            )
+                            MueText(
+                                text = ENERGY_LABEL,
+                                style = type.caption,
+                                color = colors.textTertiary,
+                                modifier = Modifier.padding(start = spacing.sm),
+                            )
+                        }
+                    },
+                    end = {
+                        MueText(ActivityFormat.energy(state.week.energyKcal), type.bodyStrong)
+                    },
+                )
             }
         }
     }

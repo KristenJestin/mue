@@ -83,16 +83,17 @@ internal fun StartAgainCard(
                     .weight(1f)
                     .padding(horizontal = spacing.md),
             ) {
+                // No ceiling: at the largest font size the shortcut named `Treadmill w…`,
+                // which is not an activity anyone can recognise. A second line is cheaper
+                // than a name, and at the ordinary size the card is unchanged.
                 MueText(
                     text = TimerMessages.START_AGAIN,
                     style = MueTheme.typography.micro,
                     color = colors.textTertiary,
-                    maxLines = 1,
                 )
                 MueText(
                     text = state.label,
                     style = MueTheme.typography.bodyStrong,
-                    maxLines = 1,
                     modifier = Modifier.padding(top = spacing.xxs),
                 )
             }
