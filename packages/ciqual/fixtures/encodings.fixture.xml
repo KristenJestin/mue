@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Hand-written, unlike the other fixtures, because the four encodings a `<teneur>` can
+  carry do not all occur inside any one real food. Each row below is copied from the
+  shape Ciqual 2025 actually uses; `&lt;` is how the release writes the "less than" sign.
+-->
+<TABLE>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 328 </const_code>
+      <teneur> 274 </teneur>
+      <min missing=" " />
+      <max missing=" " />
+      <code_confiance> D </code_confiance>
+   </COMPO>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 400 </const_code>
+      <teneur> 59,7 </teneur>
+      <min>         58,7 </min>
+      <max>         60,4 </max>
+      <code_confiance> D </code_confiance>
+   </COMPO>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 25000 </const_code>
+      <teneur> - </teneur>
+      <min missing=" " />
+      <max missing=" " />
+   </COMPO>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 31000 </const_code>
+      <teneur> traces </teneur>
+      <min missing=" " />
+      <max missing=" " />
+   </COMPO>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 40000 </const_code>
+      <teneur> &lt; 0,01 </teneur>
+      <min missing=" " />
+      <max missing=" " />
+   </COMPO>
+   <COMPO>
+      <alim_code> 99001 </alim_code>
+      <const_code> 34100 </const_code>
+      <teneur> 0 </teneur>
+      <min missing=" " />
+      <max missing=" " />
+   </COMPO>
+</TABLE>

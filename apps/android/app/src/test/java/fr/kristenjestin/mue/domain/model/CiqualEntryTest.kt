@@ -1,6 +1,7 @@
 package fr.kristenjestin.mue.domain.model
 
 import org.junit.Test
+import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -233,5 +234,44 @@ class CiqualEntryToFoodTest {
         val second = assertNotNull(apple.toFoodOrNull("v"))
         assertFalse(first.id == second.id)
         assertEquals(first.sourceId, second.sourceId)
+    }
+
+    @Test
+    fun `the identity the generator wrote down is the one every device seeds`() {
+        val written = apple.copy(id = "a5e88eff-3467-56e9-a909-60d17b06defd")
+        val onOnePhone = assertNotNull(written.toFoodOrNull("v"))
+        val onAnother = assertNotNull(written.toFoodOrNull("v"))
+
+        assertEquals("a5e88eff-3467-56e9-a909-60d17b06defd", onOnePhone.id.value)
+        assertEquals(onOnePhone.id, onAnother.id)
+    }
+
+    @Test
+    fun `a written identity outranks the one the caller offers`() {
+        val written = apple.copy(id = "a5e88eff-3467-56e9-a909-60d17b06defd")
+        val seeded = assertNotNull(written.toFoodOrNull("v", FoodId("something-else")))
+
+        assertEquals("a5e88eff-3467-56e9-a909-60d17b06defd", seeded.id.value)
+    }
+
+    /**
+     * Reads the asset the generator actually ships, not a fixture. A catalogue regenerated
+     * without ids would parse cleanly — `id` is nullable so older fixtures still decode — and
+     * every device would then mint its own. This is the only place that notices.
+     */
+    @Test
+    fun `the shipped catalogue writes an identity for every row it carries`() {
+        val assets = File("src/main/assets/ciqual")
+        val catalogueFile = assertNotNull(
+            assets.listFiles()?.firstOrNull { it.name.startsWith("catalogue-") },
+            "no Ciqual catalogue shipped in $assets",
+        )
+        val catalogue = assertNotNull(CiqualCatalogue.fromJsonOrNull(catalogueFile.readText()))
+
+        assertTrue(catalogue.entries.isNotEmpty())
+        assertTrue(catalogue.entries.all { !it.id.isNullOrBlank() }, "some rows carry no id")
+
+        val distinct = catalogue.entries.mapNotNull { it.id }.toSet()
+        assertEquals(catalogue.entries.size, distinct.size, "two rows share one id")
     }
 }

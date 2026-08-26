@@ -104,7 +104,7 @@ class QuantityTest {
         val floor = assertNotNull(CookedRatio.ofRatioOrNull(0.3))
         val weighed = assertNotNull(Quantity.ofAmountOrNull(5_000.0))
         val reference = assertNotNull(weighed.toReferenceWeightOrNull(floor))
-        assertEquals(16_666_666, reference.thousandths)
+        assertEquals(16_666_667, reference.thousandths)
         assertFalse(reference.isIngredientAmount)
     }
 

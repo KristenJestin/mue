@@ -1,0 +1,205 @@
+{
+  "$comment": [
+    "PRD_FOOD 9.5 turned into rules. Everything here is mechanical and applies to the",
+    "whole table; the handful of decisions a rule cannot make live in",
+    "subset.overrides.json, where they can be reviewed one line at a time.",
+    "`bun run catalogue:report` prints what each pass removed, so a change to this file",
+    "shows up as a diff in counts rather than as a silently different catalogue."
+  ],
+
+  "targetSizeComment": [
+    "The reviewed intent, not a constraint the build enforces. The report prints the",
+    "actual size against it and says so loudly when it falls outside, because a subset",
+    "that quietly doubled is the failure worth catching. It does not fail the build: the",
+    "size is a consequence of Ciqual's contents and of the rules below, and a build that",
+    "refused to run would only invite someone to widen the window."
+  ],
+  "targetSize": { "min": 400, "max": 800 },
+
+  "subGroupAllowlistComment": [
+    "Ciqual's own sub-groups, kept when the module would log the food and dropped when",
+    "it would not.",
+    "",
+    "Group 11 (baby food) is out entirely: PRD_FOOD addresses an adult logging what they",
+    "ate. Most of group 01 (composed dishes) is out because a lasagne is what PRD_FOOD",
+    "9.2's barcode scan or 11's recipes are for; soups stay because they are eaten as",
+    "themselves. Group 10 keeps sauces and plant-based spreads and drops cooking aids,",
+    "salts, spices and herbs, which nobody logs and which would crowd every search.",
+    "",
+    "The same 9.2 argument removes the sub-groups that are almost entirely packaged",
+    "products with a barcode on them: savoury biscuits (0303), fish products i.e. surimi",
+    "and breaded fillets (0409), non-chocolate confectionery (0703), sweet biscuits",
+    "(0706), breakfast cereals (0707), cereal bars (0708), ice cream (0801) and sorbet",
+    "(0802). A generic 'sweet biscuit' row is a worse answer than the scan of the packet",
+    "in the user's hand. Cakes and pastries (0705, 0709) stay, because those are also",
+    "baked at home and bought unwrapped."
+  ],
+  "subGroupAllowlist": [
+    "0102",
+    "0201",
+    "0202",
+    "0203",
+    "0204",
+    "0205",
+    "0301",
+    "0302",
+    "0304",
+    "0401",
+    "0402",
+    "0403",
+    "0405",
+    "0406",
+    "0407",
+    "0408",
+    "0410",
+    "0501",
+    "0502",
+    "0503",
+    "0504",
+    "0601",
+    "0602",
+    "0603",
+    "0701",
+    "0702",
+    "0704",
+    "0705",
+    "0709",
+    "0901",
+    "0902",
+    "0903",
+    "1001",
+    "1010"
+  ],
+
+  "subSubGroupDenylistComment": [
+    "Whole sub-sub-groups removed inside an otherwise allowed sub-group.",
+    "",
+    "020104, 020105, 020405 and 020406 are PRD_FOOD 9.5's 'provenances': Ciqual",
+    "enumerates the produce of two French overseas departments separately from the same",
+    "produce grown anywhere else, which is 83 rows that differ by where the plant grew.",
+    "",
+    "040305 to 040309 are pates, rillettes, quenelles, 'other delicatessen' and",
+    "plant-based delicatessen; 040108 and 040208 are offals. Both are foods someone",
+    "eats, and both are long tails of near-identical rows that would take a fifth of the",
+    "catalogue. They are the first thing to put back if the catalogue has room.",
+    "",
+    "020103 is dried and dehydrated vegetables, 060207 is drink powders to reconstitute:",
+    "in both, the shipped figures describe the powder and the user would weigh the drink."
+  ],
+  "subSubGroupDenylist": [
+    "020104",
+    "020105",
+    "020405",
+    "020406",
+    "020103",
+    "040108",
+    "040208",
+    "040305",
+    "040306",
+    "040307",
+    "040308",
+    "040309",
+    "060207"
+  ],
+
+  "clusterByComment": [
+    "The unit PRD_FOOD 9.5's 15 % is applied inside, per sub-group. The default,",
+    "`headNoun`, is right almost everywhere; see src/subset.ts for why the sub-group",
+    "alone is not.",
+    "",
+    "`subGroup` for the four fish and seafood sub-groups: Ciqual lists 108 raw fish and",
+    "bogue, megrim and pond smelt are three head nouns with one set of numbers.",
+    "",
+    "`subSubGroup` where Ciqual's own sub-sub-group already names a kind of food rather",
+    "than a state of one - 'beef and veal', 'hard or pressed cheeses', 'juices'. It is",
+    "deliberately *not* used for vegetables, fruits, legumes, eggs or grains, whose",
+    "sub-sub-groups say raw/cooked: clustering those whole deletes the cauliflower and",
+    "keeps four kinds of pea."
+  ],
+  "clusterBy": {
+    "0405": "subGroup",
+    "0406": "subGroup",
+    "0407": "subGroup",
+    "0408": "subGroup",
+    "0302": "subSubGroup",
+    "0401": "subSubGroup",
+    "0402": "subSubGroup",
+    "0403": "subSubGroup",
+    "0502": "subSubGroup",
+    "0503": "subSubGroup",
+    "0602": "subSubGroup",
+    "0603": "subSubGroup",
+    "1001": "subSubGroup"
+  },
+
+  "millilitreSubGroupsComment": [
+    "PRD_FOOD 8.6: a liquid says so explicitly and Mue applies no density. Only the",
+    "sub-groups whose contents are drunk are listed. Oils are deliberately absent: they",
+    "are sold by volume, but density 0,92 is exactly the implicit conversion 8.6 forbids,",
+    "and Ciqual states them per 100 g."
+  ],
+  "millilitreSubGroups": ["0501", "0601", "0602", "0603"],
+
+  "excludePatternsComment": [
+    "PRD_FOOD 9.5's three unjustified separations, plus 9.2's division of labour with the",
+    "barcode scan. Each pattern is a JavaScript regular expression tested against",
+    "alim_nom_eng, case-insensitively unless it says otherwise."
+  ],
+  "excludePatterns": [
+    { "pattern": ",\\s*organic\\b", "reason": "label - 9.5 'provenances et labels'" },
+    { "pattern": "label rouge", "reason": "label" },
+    { "pattern": "\\b(PDO|PGI|AOP|IGP|AOC)\\b", "reason": "provenance and label" },
+    { "pattern": "\\bfortified with\\b", "reason": "brand-level formulation, not a food" },
+    { "pattern": "\\bwith (L Casei|bifidus|sterol esters)\\b", "reason": "brand-level formulation" },
+    { "pattern": "\\bfor (baby|infant)", "reason": "out of the module's scope" },
+    { "pattern": "\\bhome-made\\b", "reason": "a recipe, which PRD_FOOD 11 owns" },
+    { "pattern": "from (fast-food outlet|bakery|caterer)", "reason": "provenance" },
+    { "pattern": "\\bvariety\\b", "reason": "9.5 'varietes d'un meme fruit ou legume'" },
+    { "pattern": "\\bbrand\\b", "reason": "9.5 'marques d'un meme produit generique'" },
+    {
+      "pattern": "\\([A-Z]",
+      "reason": "a capitalised parenthetical names a brand or a spring - codes 76000..76049 are fifty bottled waters written this way. Case-sensitive on purpose: read case-insensitively it also matches Ciqual's own '(average)' rows, which are the generic entries this file works hardest to keep",
+      "caseSensitive": true
+    },
+    {
+      "pattern": "\\bprepacked\\b",
+      "reason": "PRD_FOOD 9.2 gives packaged products to the barcode scan; 533 Ciqual rows are marked this way and each is an industrial formulation, not a generic food"
+    },
+    { "pattern": "\\bmineral (still |sparkling )?water\\b", "reason": "a list of springs, i.e. of brands" },
+    { "pattern": "\\bspring water\\b", "reason": "same" },
+    { "pattern": "\\bdietary supplement\\b", "reason": "not a food" },
+    { "pattern": "\\b(reheated|to be reheated)\\b", "reason": "a serving instruction, not a food" }
+  ],
+
+  "requireEnergyComment": [
+    "PRD_FOOD 9.3 accepts a personal food with no values, because an Open Food Facts",
+    "record is often incomplete and the user can fill it in. A shipped catalogue row is",
+    "different: nobody can complete it, it can never contribute to a total, and it",
+    "occupies a line of every search result it matches."
+  ],
+  "requireEnergy": true,
+
+  "clusteringComment": [
+    "PRD_FOOD 9.5: 'deux entrees distinctes ne se justifient que si leurs valeurs",
+    "different de plus d'environ 15 %'. The floor is the source's own resolution: Ciqual",
+    "writes raw white rice fat as 0,79, and 15 % of that is 0,12 g, which is noise rather",
+    "than a difference anyone could notice in a logged meal."
+  ],
+  "clustering": {
+    "relativeTolerance": 0.15,
+    "floor": { "energy": 10, "protein": 1, "carbs": 1, "fat": 1, "fibre": 1 },
+    "maxPerCluster": 3
+  },
+
+  "cookedRatioComment": [
+    "PRD_FOOD 8.6's raw/cooked test. `gating` is the list of constituents allowed to",
+    "refuse a pair; see the RescaleTolerance doc comment in src/pairing.ts for why fibre",
+    "is measured, reported and not allowed to vote."
+  ],
+  "cookedRatio": {
+    "relativeTolerance": 0.15,
+    "floor": { "energy": 10, "protein": 1, "carbs": 1, "fat": 1, "fibre": 1 },
+    "gating": ["energy", "protein", "carbs", "fat"],
+    "minimumDeviation": 0.15
+  }
+}
