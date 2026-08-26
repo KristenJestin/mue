@@ -57,9 +57,10 @@ import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueRemovableChip
-import fr.kristenjestin.mue.ui.components.MueChoiceRow
+import fr.kristenjestin.mue.ui.components.MueChoiceGrid
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -213,37 +214,34 @@ internal fun StartActivityContent(
 
 @Composable
 private fun PresetTiles(state: StartActivityState) {
-    Column(
+    val presets = ActivityPreset.entries
+    MueChoiceGrid(
+        labels = presets.map { it.label },
+        maxColumns = PRESETS_PER_ROW,
         modifier = Modifier
             .fillMaxWidth()
             .testTag(TimerTestTags.PRESET_ROW),
-        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-    ) {
-        ActivityPreset.entries.chunked(PRESETS_PER_ROW).forEach { row ->
-            MueChoiceRow {
-                row.forEach { preset ->
-                    val selected = preset == state.preset
-                    MueChoiceCard(
-                        label = preset.label,
-                        selected = selected,
-                        onClick = { state.selectPreset(preset) },
-                        icon = {
-                            MueIcon(
-                                iconName = ActivityIcons.forPreset(preset),
-                                tint = if (selected) {
-                                    MueTheme.colors.onAccentSoft
-                                } else {
-                                    MueTheme.colors.textTertiary
-                                },
-                            )
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag(TimerTestTags.preset(preset.id)),
-                    )
-                }
-            }
-        }
+    ) { index ->
+        val preset = presets[index]
+        val selected = preset == state.preset
+        MueChoiceCard(
+            label = preset.label,
+            selected = selected,
+            onClick = { state.selectPreset(preset) },
+            icon = {
+                MueIcon(
+                    iconName = ActivityIcons.forPreset(preset),
+                    tint = if (selected) {
+                        MueTheme.colors.onAccentSoft
+                    } else {
+                        MueTheme.colors.textTertiary
+                    },
+                )
+            },
+            modifier = Modifier
+                .weight(1f)
+                .testTag(TimerTestTags.preset(preset.id)),
+        )
     }
 }
 
@@ -260,60 +258,81 @@ private fun ReadyCard(state: StartActivityState, today: LocalDate) {
     val type = MueTheme.typography
     val spacing = MueTheme.spacing
 
+    /*
+     * Both lines of this card are split by measurement rather than by a row that hands one half
+     * whatever the other did not take.
+     *
+     * The second line was the worse of the two. `NO METRICS YET` carries no weight, so it was
+     * measured first and at whatever it asked for; at the largest font size on a 360 dp phone the
+     * `weight(1f)` column beside it was left too narrow to draw a single glyph, and the card
+     * showed **`…` over `…`** where the name of the activity about to start and its context
+     * should have been. The line above it read `Ready to start  Tod…`. Every assertion passed:
+     * `onNodeWithText(state.activityLabel)` matches the semantics string, which was still the
+     * whole name.
+     *
+     * Neither line is capped now. While both halves fit they sit exactly where they sat, and when
+     * they do not the right-hand half drops under the left, still end-aligned.
+     */
     MueSurfaceCard(modifier = Modifier.testTag(TimerTestTags.READY_CARD)) {
-        Row(
+        MueSplitRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MueIcon(
-                    iconName = MueIcons.CIRCLE_DOT,
-                    tint = colors.accent,
-                    size = NoteIconSize,
-                )
+            // The two halves already carry their own leading padding, as the row did.
+            gap = 0.dp,
+            stackedGap = spacing.xxs,
+            start = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MueIcon(
+                        iconName = MueIcons.CIRCLE_DOT,
+                        tint = colors.accent,
+                        size = NoteIconSize,
+                    )
+                    MueText(
+                        text = TimerMessages.READY_TO_START,
+                        style = type.label,
+                        color = colors.textTertiary,
+                        modifier = Modifier.padding(start = spacing.sm),
+                    )
+                }
+            },
+            end = {
                 MueText(
-                    text = TimerMessages.READY_TO_START,
-                    style = type.label,
-                    color = colors.textTertiary,
-                    maxLines = 1,
+                    // The session begins at the moment this is read, so the day is enough and the
+                    // clock is `now` (PRD 6.2 asks for nothing else before the start).
+                    text = ActivityFormat.dayLabel(today, today) +
+                        TimerFormat.SEPARATOR +
+                        TimerMessages.NOW,
+                    style = type.micro,
+                    color = colors.textQuiet,
                     modifier = Modifier.padding(start = spacing.sm),
                 )
-            }
-            MueText(
-                // The session begins at the moment this is read, so the day is enough and the
-                // clock is `now` (PRD 6.2 asks for nothing else before the start).
-                text = ActivityFormat.dayLabel(today, today) +
-                    TimerFormat.SEPARATOR +
-                    TimerMessages.NOW,
-                style = type.micro,
-                color = colors.textQuiet,
-                maxLines = 1,
-                modifier = Modifier.padding(start = spacing.sm),
-            )
-        }
+            },
+        )
 
-        Row(
+        MueSplitRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = spacing.md),
+            gap = 0.dp,
+            stackedGap = spacing.sm,
             verticalAlignment = Alignment.Bottom,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                MueText(state.activityLabel, type.bodyStrong, maxLines = 1)
-                MueText(
-                    text = state.contextLabel,
-                    style = type.caption,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = spacing.xxs),
+            start = {
+                Column {
+                    MueText(state.activityLabel, type.bodyStrong)
+                    MueText(
+                        text = state.contextLabel,
+                        style = type.caption,
+                        color = colors.textTertiary,
+                        modifier = Modifier.padding(top = spacing.xxs),
+                    )
+                }
+            },
+            end = {
+                MueValueChip(
+                    text = TimerMessages.NO_METRICS_YET,
+                    modifier = Modifier.padding(start = spacing.md),
                 )
-            }
-            MueValueChip(
-                text = TimerMessages.NO_METRICS_YET,
-                modifier = Modifier.padding(start = spacing.md),
-            )
-        }
+            },
+        )
     }
 }
 

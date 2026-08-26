@@ -8,8 +8,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,10 +25,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -146,7 +152,10 @@ fun MueChoiceCard(
                 modifier = Modifier.padding(top = if (icon != null) MueTheme.spacing.xs else 0.dp),
             )
             description?.let {
-                MueText(it, MueTheme.typography.caption, color = content, maxLines = 3)
+                // No ceiling: `Duration, effort and energy` stopped at `and ene…` at the largest
+                // font size, so the tile named two of the three things it offers. A fourth line
+                // costs a taller tile, which is what a bigger text size asks for.
+                MueText(it, MueTheme.typography.caption, color = content)
             }
         }
     }
@@ -169,6 +178,94 @@ fun MueChoiceRow(
         horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
         content = content,
     )
+}
+
+/**
+ * A grid of tiles, as many across as their own words allow and never more than [maxColumns].
+ *
+ * Three across is 96 dp of a 360 dp screen, and a tile spends 24 dp of that on its padding. At the
+ * largest font size `Treadmill` alone wants more than the 72 dp that leaves, so the six presets of
+ * `Log activity` and `Start activity` came out **cut in the middle of the word** — `Tread` over
+ * `mill …`, `Outd` over `oor …`, `Cycli` over `ng`, `Stren` over `gth …`. Four of the six unusable
+ * as words, on the first control of both screens. `onNodeWithText(preset.label)` matched every one
+ * of them: the semantics string is the whole label whatever the glyphs do.
+ *
+ * The labels themselves cannot move — they are the PRD's own words and the shell's tests name them
+ * — and shrinking the type answers someone who asked for large text with small text. So the grid
+ * gives way instead: it drops to two across, and then to one, until the longest word of the widest
+ * label fits the tile it would be drawn in. A tile that can hold its word is worth more than a row
+ * that holds three tiles.
+ *
+ * The threshold is measured, not guessed. Each label is broken into its words and laid out at the
+ * grid's own type style, at the current density and font scale, and compared with the tile a given
+ * column count would give it, padding removed. No `dp` breakpoint is written down, so a longer
+ * word, a denser script or a wider phone each move the answer by themselves — and at the ordinary
+ * size the six presets still sit three across, drawn by exactly the [MueChoiceRow]s as before.
+ */
+@Composable
+fun MueChoiceGrid(
+    labels: List<String>,
+    maxColumns: Int,
+    modifier: Modifier = Modifier,
+    labelStyle: TextStyle = MueChoiceCardDefaults.compactLabelStyle(),
+    contentPadding: PaddingValues = MueChoiceCardDefaults.CompactPadding,
+    tile: @Composable RowScope.(index: Int) -> Unit,
+) {
+    val gap = MueTheme.spacing.sm
+    BoxWithConstraints(modifier = modifier) {
+        val columns = wholeWordColumns(
+            labels = labels,
+            maxColumns = maxColumns,
+            available = maxWidth,
+            gap = gap,
+            labelStyle = labelStyle,
+            contentPadding = contentPadding,
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            labels.indices.chunked(columns).forEach { row ->
+                MueChoiceRow {
+                    row.forEach { index -> tile(index) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The largest column count, up to [maxColumns], in which no label has to break a word — and 1 when
+ * even a full-width tile cannot hold one, because there is nothing narrower left to try.
+ */
+@Composable
+private fun wholeWordColumns(
+    labels: List<String>,
+    maxColumns: Int,
+    available: Dp,
+    gap: Dp,
+    labelStyle: TextStyle,
+    contentPadding: PaddingValues,
+): Int {
+    val measurer = rememberTextMeasurer()
+    val direction = LocalLayoutDirection.current
+    val density = LocalDensity.current
+    val padding = contentPadding.calculateStartPadding(direction) +
+        contentPadding.calculateEndPadding(direction)
+
+    return remember(measurer, labels, maxColumns, available, gap, labelStyle, padding, density) {
+        val longestWord = labels
+            .flatMap { it.split(' ') }
+            .maxOfOrNull { word -> measurer.measure(word, labelStyle).size.width }
+            ?: return@remember maxColumns
+
+        val availablePx = with(density) { available.roundToPx() }
+        val gapPx = with(density) { gap.roundToPx() }
+        val paddingPx = with(density) { padding.roundToPx() }
+
+        (maxColumns downTo 2).firstOrNull { columns ->
+            val tile = (availablePx - gapPx * (columns - 1)) / columns
+            tile - paddingPx >= longestWord
+        } ?: 1
+    }
 }
 
 @Preview(name = "Choice cards", showBackground = true, backgroundColor = 0xFF101012, widthDp = 390)

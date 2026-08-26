@@ -48,7 +48,7 @@ import fr.kristenjestin.mue.domain.model.ActivityPreset
 import fr.kristenjestin.mue.domain.model.MetricKind
 import fr.kristenjestin.mue.domain.model.TimedDraftId
 import fr.kristenjestin.mue.ui.components.MueChoiceCard
-import fr.kristenjestin.mue.ui.components.MueChoiceRow
+import fr.kristenjestin.mue.ui.components.MueChoiceGrid
 import fr.kristenjestin.mue.ui.components.MueEffortSlider
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
@@ -344,36 +344,33 @@ internal fun LogActivityContent(
 
 @Composable
 private fun PresetTiles(state: LogActivityUiState, actions: LogActivityActions) {
-    Column(
+    val presets = ActivityPreset.entries
+    MueChoiceGrid(
+        labels = presets.map { it.label },
+        maxColumns = PRESETS_PER_ROW,
         modifier = Modifier
             .fillMaxWidth()
             .testTag(ActivityTestTags.PRESET_ROW),
-        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-    ) {
-        ActivityPreset.entries.chunked(PRESETS_PER_ROW).forEach { row ->
-            MueChoiceRow {
-                row.forEach { preset ->
-                    MueChoiceCard(
-                        label = preset.label,
-                        selected = preset == state.preset,
-                        onClick = { actions.onSelectPreset(preset) },
-                        icon = {
-                            MueIcon(
-                                iconName = ActivityIcons.forPreset(preset),
-                                tint = if (preset == state.preset) {
-                                    MueTheme.colors.onAccentSoft
-                                } else {
-                                    MueTheme.colors.textTertiary
-                                },
-                            )
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag(ActivityTestTags.preset(preset.id)),
-                    )
-                }
-            }
-        }
+    ) { index ->
+        val preset = presets[index]
+        MueChoiceCard(
+            label = preset.label,
+            selected = preset == state.preset,
+            onClick = { actions.onSelectPreset(preset) },
+            icon = {
+                MueIcon(
+                    iconName = ActivityIcons.forPreset(preset),
+                    tint = if (preset == state.preset) {
+                        MueTheme.colors.onAccentSoft
+                    } else {
+                        MueTheme.colors.textTertiary
+                    },
+                )
+            },
+            modifier = Modifier
+                .weight(1f)
+                .testTag(ActivityTestTags.preset(preset.id)),
+        )
     }
 }
 
