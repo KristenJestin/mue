@@ -1,0 +1,65 @@
+{
+  "$comment": [
+    "The decisions a rule could not make, one line each, so that a reviewer can disagree",
+    "with a single food instead of with the whole pipeline. Everything else in the subset",
+    "comes from subset.rules.json applied to the whole table.",
+    "",
+    "`keep` forces a food in even where a rule would have removed it, and exempts it from",
+    "clustering and from the per-food cap. `drop` forces one out. Both are counted",
+    "separately in the build report, so the number of hand decisions is itself reviewable",
+    "and can be watched for growth: a rules file that needs fifty overrides is a rules",
+    "file that is wrong.",
+    "",
+    "Every entry here exists for the same reason. The clustering pass asks whether two",
+    "rows differ nutritionally; it cannot ask which of two nutritionally identical rows a",
+    "person would search for. Ciqual has no popularity column, so where the mechanical",
+    "representative is the obscure one, it is named here."
+  ],
+  "keep": [
+    {
+      "code": "9102",
+      "note": "Rice, wholegrain, raw. Clusters into 'Rice, red, raw', which has the same figures and a fraction of the readers. PRD_FOOD 9.5 names this exact split as justified: 'riz blanc et riz complet n'ont pas les memes fibres'."
+    },
+    {
+      "code": "20535",
+      "note": "Lentil, pink or red, dried. Clusters into 'Lentil, dried (average)'. Kept because PRD_FOOD 8.6's cooked-ratio table names red lentils specifically, and a reader checking that row must be able to find it."
+    },
+    {
+      "code": "26036",
+      "note": "Salmon, raw, farmed. Sub-group 0406 clusters whole (108 species, one set of numbers), and the mechanical representative is not salmon. Salmon is the fish people log."
+    },
+    {
+      "code": "26037",
+      "note": "Salmon, smoked. Same reason, and its salt and fat put it far from raw salmon anyway."
+    },
+    {
+      "code": "26053",
+      "note": "Tuna, raw. Same reason as salmon: the second fish anyone searches for."
+    },
+    {
+      "code": "20516",
+      "note": "Chick pea, dried. Clusters into another dried pulse with the same figures; chickpeas are eaten far more often than whichever row won."
+    },
+    {
+      "code": "20507",
+      "note": "Chick pea, boiled/cooked in water. The state chickpeas are actually eaten in."
+    },
+    {
+      "code": "12726",
+      "note": "Cheddar cheese, from cow's milk. Sub-group 0503 clusters by kind, and hard cheeses are nutritionally interchangeable; cheddar is the one an English-language app must have."
+    },
+    {
+      "code": "36017",
+      "note": "Chicken, breast, without skin, raw. Sub-group 0402 clusters by kind and the mechanical representative of poultry is a whole-bird average; PRD_FOOD 8.6's cooked-ratio table names chicken breast, and the row that carries the 0.766 ratio has to be findable."
+    },
+    {
+      "code": "9100",
+      "note": "Rice, white, raw. Survives on its own today, but it carries PRD_FOOD 8.6's flagship ratio and no rule change should be allowed to remove it quietly."
+    },
+    {
+      "code": "9810",
+      "note": "Pasta, dry, regular, raw. Same reason: it carries the 2.19 pasta ratio PRD_FOOD 8.6 names."
+    }
+  ],
+  "drop": []
+}

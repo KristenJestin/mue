@@ -1,0 +1,97 @@
+{
+  "$comment": [
+    "PRD_FOOD 8.2's usual portions. Ciqual publishes none: it is a composition table, and",
+    "'how much of this does a person eat at once' is not composition. So this file is a",
+    "product decision written by hand, and it is deliberately short.",
+    "",
+    "The asymmetry that governs it: a wrong calorie figure is visible, because 400 kcal",
+    "for a tomato looks wrong to anyone. A wrong portion weight is invisible - '1 bowl'",
+    "at 250 g when the user's bowl holds 400 g produces a number that looks entirely",
+    "reasonable and is 60 % out, every time, silently. PRD_FOOD 8.6 also says the portion",
+    "is only ever an aid to entry and that an exact weight always takes precedence, which",
+    "is the escape hatch, not a licence to guess.",
+    "",
+    "So a portion is written only where the food comes in a unit a person actually",
+    "handles: an egg, a yoghurt pot, a slice of bread, an apple, a glass. There is",
+    "deliberately no portion for rice, pasta, minced meat, cheese by weight, flour or",
+    "sugar by the spoon - foods someone either weighs or estimates, and neither is helped",
+    "by a number Mue invented.",
+    "",
+    "Every weight is validated against PRD_FOOD 15's 1..2 000 g at build time and a bad",
+    "one fails the build. `code` is the Ciqual alim_code, and every one below was checked",
+    "against the release in ciqual.source.json and against the emitted subset; a portion",
+    "written for a food the subset does not ship is printed in the build report."
+  ],
+  "portions": [
+    { "code": "22000", "label": "1 egg", "grams": 50, "note": "a medium hen egg out of its shell" },
+    { "code": "22014", "label": "1 egg", "grams": 50 },
+    { "code": "22001", "label": "1 egg white", "grams": 33 },
+    { "code": "22002", "label": "1 egg yolk", "grams": 17 },
+
+    { "code": "19593", "label": "1 pot", "grams": 125, "note": "the standard yoghurt pot" },
+    { "code": "19600", "label": "1 pot", "grams": 125 },
+    { "code": "19594", "label": "1 pot", "grams": 125 },
+
+    { "code": "13396", "label": "1 apple", "grams": 130, "note": "flesh of a medium apple, core discarded" },
+    { "code": "13005", "label": "1 banana", "grams": 120 },
+    { "code": "13034", "label": "1 orange", "grams": 130 },
+    { "code": "13021", "label": "1 kiwi", "grams": 75 },
+    { "code": "13024", "label": "1 clementine", "grams": 70 },
+    { "code": "13397", "label": "1 pear", "grams": 150 },
+    { "code": "13043", "label": "1 peach", "grams": 130 },
+    { "code": "13000", "label": "1 apricot", "grams": 45 },
+    { "code": "13100", "label": "1 plum", "grams": 55 },
+    { "code": "13004", "label": "half an avocado", "grams": 75 },
+
+    { "code": "7000", "label": "1 slice", "grams": 30, "note": "a slice from a sandwich loaf" },
+    { "code": "7001", "label": "1 baguette section", "grams": 60, "note": "a quarter of a baguette" },
+    { "code": "7004", "label": "1 slice", "grams": 25, "note": "toasted, so lighter" },
+    { "code": "7115", "label": "1 slice", "grams": 30 },
+    { "code": "7255", "label": "1 slice", "grams": 30 },
+    { "code": "7258", "label": "1 bagel", "grams": 85 },
+    { "code": "7603", "label": "1 croissant", "grams": 55 },
+    { "code": "7619", "label": "1 croissant", "grams": 55 },
+    { "code": "7746", "label": "1 slice", "grams": 40, "note": "brioche" },
+    { "code": "7301", "label": "1 rusk", "grams": 10 },
+
+    { "code": "19016", "label": "1 glass", "grams": 200, "note": "PRD_FOOD 8.6 stores milk in millilitres; 200 is the glass" },
+    { "code": "19033", "label": "1 glass", "grams": 200 },
+    { "code": "19050", "label": "1 glass", "grams": 200 },
+
+    { "code": "2004", "label": "1 glass", "grams": 200, "note": "fruit juice" },
+    { "code": "2053", "label": "1 glass", "grams": 200 },
+    { "code": "18020", "label": "1 mug", "grams": 200, "note": "brewed tea" },
+    { "code": "18044", "label": "1 glass", "grams": 250 },
+    { "code": "5009", "label": "1 glass", "grams": 250, "note": "a demi of beer" },
+    { "code": "5215", "label": "1 glass", "grams": 120, "note": "a glass of wine" },
+
+    { "code": "12006", "label": "1 portion", "grams": 30, "note": "a wedge of camembert" },
+    { "code": "12726", "label": "1 portion", "grams": 30, "note": "a piece of cheddar" },
+
+    { "code": "36017", "label": "1 fillet", "grams": 150, "note": "one skinless chicken breast" },
+    { "code": "26036", "label": "1 fillet", "grams": 130, "note": "a salmon portion" },
+    { "code": "26037", "label": "1 slice", "grams": 40, "note": "one slice of smoked salmon" },
+    { "code": "26053", "label": "1 steak", "grams": 130, "note": "a tuna steak" },
+
+    { "code": "20009", "label": "1 carrot", "grams": 80 },
+    { "code": "20385", "label": "1 tomato", "grams": 120 },
+    { "code": "20172", "label": "1 cherry tomato", "grams": 15 },
+    { "code": "20031", "label": "1 handful", "grams": 25, "note": "leaves, which nobody weighs" },
+
+    { "code": "15000", "label": "1 handful", "grams": 25, "note": "almonds" },
+    { "code": "15005", "label": "1 handful", "grams": 25, "note": "walnut kernels" },
+    { "code": "15004", "label": "1 handful", "grams": 25, "note": "hazelnuts" },
+
+    { "code": "31004", "label": "1 square", "grams": 10, "note": "a square from a tablet" },
+    { "code": "31120", "label": "1 square", "grams": 10 },
+    { "code": "31010", "label": "1 square", "grams": 10 },
+    { "code": "31016", "label": "1 sugar lump", "grams": 5 },
+    { "code": "31008", "label": "1 teaspoon", "grams": 10, "note": "honey" },
+    { "code": "31006", "label": "1 teaspoon", "grams": 15, "note": "jam on bread" },
+    { "code": "31062", "label": "1 teaspoon", "grams": 15 },
+
+    { "code": "16414", "label": "1 pat", "grams": 10, "note": "butter on bread" },
+    { "code": "16410", "label": "1 pat", "grams": 10 },
+    { "code": "17270", "label": "1 tablespoon", "grams": 10, "note": "PRD_FOOD 8.6 logs cooking oil as its own line, so it needs a unit" }
+  ]
+}

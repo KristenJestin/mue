@@ -1,0 +1,4 @@
+# The ANSES source tables are ~71 MB uncompressed and are never committed
+# (PRD_FOOD 9.1): `ciqual.source.json` records where they come from and what
+# they must hash to, and `bun run source:verify` refuses a mismatch.
+.source/
