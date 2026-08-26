@@ -34,8 +34,17 @@ object FoodDayMessages {
      * The empty state of a moment *is* its add button, and it is an invitation rather than a
      * report: nothing here says a moment is missing something, because a breakfast that did not
      * happen is not an error.
+     *
+     * **Not "Add what you ate".** That was the first thing the owner named: a moment later today
+     * has not been eaten yet, and its `+` is pressed all the same — "alors que c'est parfois sur
+     * des horaires qui ne sont pas encore passés". The past tense made the commonest control in
+     * the module tell half its readers they were in the wrong place.
+     *
+     * `Add something` and [ADD_MORE]'s `Add something else` are one pair rather than two
+     * sentences, and neither claims a tense. What is being added to is the heading directly above
+     * the button — the moment names itself, so the button does not have to.
      */
-    const val ADD_FIRST: String = "Add what you ate"
+    const val ADD_FIRST: String = "Add something"
 
     const val ADD_MORE: String = "Add something else"
 

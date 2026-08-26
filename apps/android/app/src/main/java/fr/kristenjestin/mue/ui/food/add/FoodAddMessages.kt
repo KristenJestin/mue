@@ -35,7 +35,16 @@ internal object FoodAddMessages {
 
     // region the ways in (PRD_FOOD 7, FR-FOOD-002 to 005)
 
-    const val PATHS_EYEBROW: String = "What did you eat?"
+    /**
+     * Not "What did you eat?".
+     *
+     * A moment later today has not happened yet, and the sheet opens on it just the same: the `+`
+     * of tonight's dinner is pressed at six o'clock as readily as at nine. The past tense told
+     * that reader they were in the wrong place. This asks about the entry being written, which is
+     * true whether the food is already eaten or is about to be — and it stays a question about the
+     * food rather than becoming a vague one about "an item".
+     */
+    const val PATHS_EYEBROW: String = "What are you adding?"
     const val PATHS_TITLE: String = "Pick a way in."
 
     const val SEARCH_PATH: String = "Search a food"
@@ -88,7 +97,15 @@ internal object FoodAddMessages {
     // region the quick add (FR-FOOD-005)
 
     const val QUICK_SECTION: String = "Quick add"
-    const val QUICK_NAME_LABEL: String = "What was it?"
+
+    /**
+     * Present tense, because the meal may not have happened.
+     *
+     * "What was it?" is a fine question about lunch three hours ago and a wrong one about the
+     * restaurant dinner being written down at five in the afternoon. The present answers both,
+     * and asks for exactly the same thing.
+     */
+    const val QUICK_NAME_LABEL: String = "What is it?"
     const val QUICK_ENERGY_LABEL: String = "Energy"
     const val QUICK_PROTEIN_LABEL: String = "Protein · optional"
 
@@ -100,7 +117,13 @@ internal object FoodAddMessages {
     // region correcting a recipe line (FR-FOOD-008)
 
     const val SERVINGS_SECTION: String = "How many servings?"
-    const val SERVINGS_LABEL: String = "Servings eaten"
+
+    /**
+     * The noun alone: the section above it already asks "how many", and the participle carried an
+     * assumption the field does not need. A portion and a half is a portion and a half whether it
+     * is already gone or is about to be served.
+     */
+    const val SERVINGS_LABEL: String = "Servings"
 
     /** PRD_FOOD 8.4: a recipe edited since is not a line rewritten. */
     const val SERVINGS_FROZEN: String = "Rescaled from what this entry was saved with"
@@ -138,8 +161,14 @@ internal object FoodAddMessages {
     const val DELETE_FAILED: String = "Couldn't delete. Your entry is still here."
     const val TRY_AGAIN: String = "Try again"
 
-    /** PRD_FOOD 15: a quantity is required before a line can be written at all. */
-    const val NO_QUANTITY: String = "Enter how much you had"
+    /**
+     * PRD_FOOD 15: a quantity is required before a line can be written at all.
+     *
+     * `Quantity` is the domain's own noun — `FoodValidation.INGREDIENT_QUANTITY_ERROR` uses it —
+     * so the two refusals a person can meet on this field speak the same word. "how much you had"
+     * did not, and told a reader writing down tonight's dinner that they had already eaten it.
+     */
+    const val NO_QUANTITY: String = "Enter a quantity"
 
     // endregion
 
