@@ -45,6 +45,7 @@ import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueValueChip
@@ -339,24 +340,32 @@ private fun PaceLine(statistics: ProgressStatistics, modifier: Modifier = Modifi
 
     Column(modifier = modifier.fillMaxWidth()) {
         MueDivider()
-        Row(
+        /*
+         * The name and the reading are split by measurement rather than by a `SpaceBetween` row.
+         * Neither carried a weight, so the row measured `Average pace` first and at whatever it
+         * asked for; at the largest font size on a 360 dp phone the reading was left too little
+         * to draw, and the card read `Average pace—— kg /…` — the label running straight into the
+         * dash with no gutter at all, and the unit that says *what the number means* cut off.
+         * `onNodeWithText` could not see it; the semantics string carries the whole reading.
+         */
+        MueSplitRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = MueTheme.spacing.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MueText(AVERAGE_PACE_LABEL, type.label, color = colors.textTertiary)
-            MueAnimatedNumber(
-                text = ProgressFormat.signedPace(statistics.weeklyPaceKg),
-                style = type.metricMedium,
-                color = colors.accent,
-                suffix = PACE_UNIT,
-                suffixStyle = type.micro,
-                durationMillis = MueMotion.PeriodChangeMillis,
-                contentDescription = paceDescription(statistics),
-            )
-        }
+            gap = MueTheme.spacing.md,
+            start = { MueText(AVERAGE_PACE_LABEL, type.label, color = colors.textTertiary) },
+            end = {
+                MueAnimatedNumber(
+                    text = ProgressFormat.signedPace(statistics.weeklyPaceKg),
+                    style = type.metricMedium,
+                    color = colors.accent,
+                    suffix = PACE_UNIT,
+                    suffixStyle = type.micro,
+                    durationMillis = MueMotion.PeriodChangeMillis,
+                    contentDescription = paceDescription(statistics),
+                )
+            },
+        )
     }
 }
 
