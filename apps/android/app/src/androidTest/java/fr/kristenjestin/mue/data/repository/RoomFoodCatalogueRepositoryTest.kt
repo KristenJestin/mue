@@ -291,6 +291,63 @@ class RoomFoodCatalogueRepositoryTest {
         assertNull(repository.findById(FoodId("sneaky")))
     }
 
+    /**
+     * A regenerated subset is the whole subset. PRD_FOOD 9.5 splits the catalogue only where the
+     * numbers change, and merging entries would achieve nothing if the ones it replaced survived
+     * — read-only, so no user could ever remove them, and still answering the search.
+     */
+    @Test
+    fun aSupersededCatalogueDropsTheEntriesItNoLongerNames() = runTest {
+        repository.seedCiqual(
+            listOf(
+                food(id = "keep", name = "Pomme", source = FoodSource.CIQUAL),
+                food(id = "gone", name = "Pomme Golden", source = FoodSource.CIQUAL),
+            ),
+            "v1",
+        )
+
+        repository.seedCiqual(
+            listOf(food(id = "keep", name = "Pomme", source = FoodSource.CIQUAL)),
+            "v2",
+        )
+
+        assertEquals(1, database.foodDao().countBySource(FoodSource.CIQUAL.id))
+        assertNull(repository.findById(FoodId("gone")))
+        assertNotNull(repository.findById(FoodId("keep")))
+        assertEquals("v2", repository.installedCiqualVersion())
+    }
+
+    /**
+     * The replacement may never be handed an empty subset: it would clear the catalogue and put
+     * nothing in its place, and record a version the table does not hold.
+     */
+    @Test
+    fun anEmptySeedLeavesTheInstalledCatalogueStanding() = runTest {
+        repository.seedCiqual(listOf(food(id = "c1", source = FoodSource.CIQUAL)), "v1")
+
+        repository.seedCiqual(emptyList(), "v2")
+
+        assertEquals(1, database.foodDao().countBySource(FoodSource.CIQUAL.id))
+        assertEquals("v1", repository.installedCiqualVersion())
+    }
+
+    /** PRD_FOOD 20.2: replacing the subset never reaches a custom food or a copied product. */
+    @Test
+    fun replacingTheSubsetSparesEveryFoodTheUserOwns() = runTest {
+        repository.save(food(id = "mine", name = "Mon granola"))
+        repository.save(
+            Food(id = FoodId("scanned"), name = "Skyr", source = FoodSource.OPEN_FOOD_FACTS),
+        )
+        repository.seedCiqual(listOf(food(id = "c1", source = FoodSource.CIQUAL)), "v1")
+
+        repository.seedCiqual(listOf(food(id = "c2", source = FoodSource.CIQUAL)), "v2")
+
+        assertNotNull(repository.findById(FoodId("mine")))
+        assertNotNull(repository.findById(FoodId("scanned")))
+        assertNull(repository.findById(FoodId("c1")))
+        assertNotNull(repository.findById(FoodId("c2")))
+    }
+
     @Test
     fun searchIsInsensitiveToCaseAndAccentsAndFindsBrandsToo() = runTest {
         repository.save(food(id = "a", name = "Crème fraîche"))

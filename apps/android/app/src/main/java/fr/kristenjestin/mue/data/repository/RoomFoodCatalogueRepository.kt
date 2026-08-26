@@ -164,6 +164,13 @@ class RoomFoodCatalogueRepository(
                 .filter { it.source == FoodSource.CIQUAL }
                 .map { it.toEntity(createdAt = stamp, updatedAt = stamp) }
 
+            // `replaceCiqual` clears the shipped subset before writing the new one, so an empty
+            // list would trade the whole catalogue for nothing. Refusing it here — rather than
+            // trusting every caller to have checked — is what makes the replacement safe, and it
+            // is also the honest answer for a list that named no Ciqual entry at all: no subset
+            // was installed, so no version may be recorded as installed.
+            if (entities.isEmpty()) return@withContext
+
             dao.replaceCiqual(entities)
             catalogueDataStore.edit { it[KEY_INSTALLED_CIQUAL_VERSION] = version }
         }

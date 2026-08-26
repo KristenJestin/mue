@@ -1,9 +1,12 @@
 package fr.kristenjestin.mue.data.local.database
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +16,7 @@ import fr.kristenjestin.mue.domain.model.FoodSource
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -20,6 +24,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+
+private const val SEEDING_TAG = "CiqualSeeding"
 
 /**
  * The seeding of PRD_FOOD 9.1 and 20.2, against the catalogue actually packaged in the APK.
@@ -79,6 +85,54 @@ class CiqualSeedingTest {
         assertEquals(
             CiqualCatalogueAsset.availableVersion(context.assets),
             repository.installedCiqualVersion(),
+        )
+    }
+
+    /**
+     * The requirement behind the DataStore preference, asserted rather than argued: on a start
+     * with nothing to install, the guard must not build a Room connection.
+     *
+     * `MueDatabase` is constructed in [createSeeding] and its DAO is handed to the repository
+     * there, so if either of those opened the file this would already be false before
+     * `seedIfNeeded` is called. That is the point — a phone opening Mue on the weight tab pays
+     * for one small protobuf read and nothing else.
+     */
+    @Test
+    fun theGuardOpensNoDatabaseWhenTheCatalogueIsAlreadyInstalled() = runTest {
+        val available = requireNotNull(CiqualCatalogueAsset.availableVersion(context.assets))
+        store.edit { it[RoomFoodCatalogueRepository.KEY_INSTALLED_CIQUAL_VERSION] = available }
+        assertFalse("building the container must not open Room", database.isOpen)
+
+        val outcome = seeding.seedIfNeeded()
+
+        assertTrue("$outcome", outcome is CiqualSeedOutcome.AlreadyInstalled)
+        assertFalse("a cold start with nothing to do must not open Room", database.isOpen)
+    }
+
+    /**
+     * PRD_FOOD 9.1 promises the catalogue "dès la première ouverture", so what the first launch
+     * costs is a number this suite has to produce rather than assume.
+     *
+     * The work runs off the main thread, so this is not a frame budget; the ceiling is only
+     * there to catch an order-of-magnitude regression — a per-row transaction instead of one
+     * batch, say — on an emulator that is also the slowest machine this will ever run on. The
+     * measured value is logged under [SEEDING_TAG] so a run can report it.
+     */
+    @Test
+    fun theWholeShippedCatalogueInstallsWithinAFirstLaunchBudget() = runTest {
+        val startedAt = SystemClock.elapsedRealtime()
+        val outcome = seeding.seedIfNeeded()
+        val elapsedMillis = SystemClock.elapsedRealtime() - startedAt
+
+        assertTrue("$outcome", outcome is CiqualSeedOutcome.Installed)
+        val installed = outcome as CiqualSeedOutcome.Installed
+        Log.i(SEEDING_TAG, "seeded ${installed.foods} foods in $elapsedMillis ms")
+
+        assertEquals(installed.foods, database.foodDao().countBySource(FoodSource.CIQUAL.id))
+        assertTrue("the shipped subset must be the real one", installed.foods > 1_000)
+        assertTrue(
+            "seeding ${installed.foods} foods took $elapsedMillis ms",
+            elapsedMillis < 15_000,
         )
     }
 

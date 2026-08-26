@@ -141,14 +141,35 @@ interface FoodDao : SyncJournalDao {
         enqueueMutation(mutation.copy(baseRevision = baseRevision))
     }
 
+    /** Only the shipped subset. A custom food and an Open Food Facts copy are never touched. */
+    @Query("DELETE FROM food WHERE source = 'ciqual'")
+    suspend fun deleteAllCiqual()
+
     /**
-     * The embedded catalogue, installed or refreshed in one transaction and journalling nothing
-     * (PRD_FOOD 21.1). Rows absent from the new subset are left alone rather than deleted: a
-     * recipe or a journal line may still name one, and PRD_FOOD 20.2 says an update "ne modifie
-     * jamais un aliment personnalisé ni une ligne de journal".
+     * The embedded catalogue, **replaced** in one transaction and journalling nothing
+     * (PRD_FOOD 21.1).
+     *
+     * It is a replacement and not an upsert. Version N of the subset has to be exactly what the
+     * table holds, or `source_version` stops describing the catalogue and every regeneration
+     * leaves its predecessor's dropped rows behind for good — unremovable, since PRD_FOOD 9.1
+     * makes a Ciqual entry read-only for the user. PRD_FOOD 9.5 is what makes that fatal rather
+     * than untidy: the whole point of its granularity rule is to keep an MCP client's choice
+     * deterministic, and merging eight apple varieties into one achieves nothing if the eight
+     * old rows survive alongside the new one.
+     *
+     * Deleting them is safe because nothing depends on the row surviving. `recipe_ingredient`
+     * deliberately carries no foreign key to `food` and keeps a `food_name` snapshot, and a
+     * journal line copies its own values at write time (PRD_FOOD 8.4) — PRD_FOOD 21.2 already
+     * requires a client to render an ingredient whose food it does not hold. PRD_FOOD 20.2's
+     * promise is about custom foods and journal lines, and the `WHERE` clause keeps it: neither
+     * is reachable from here.
+     *
+     * The caller filters the list to `FoodSource.CIQUAL` and refuses an empty one, so this can
+     * never empty the catalogue in exchange for nothing.
      */
     @Transaction
     suspend fun replaceCiqual(entities: List<FoodEntity>) {
+        deleteAllCiqual()
         upsertAll(entities)
     }
 }
