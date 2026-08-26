@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -154,6 +155,12 @@ fun MueTextField(
     textStyle: TextStyle = MueTheme.typography.fieldValue,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    /**
+     * How the value is drawn, which is not always how it is held. The one caller that passes
+     * anything is the server pairing form of sync PRD 9.2, whose password field draws dots — the
+     * value itself is never transformed, never re-read from the glyphs and never stored.
+     */
+    visualTransformation: VisualTransformation = VisualTransformation.None,
     trailing: @Composable (RowScope.() -> Unit)? = null,
 ) {
     val colors = MueTheme.colors
@@ -183,6 +190,7 @@ fun MueTextField(
                     cursorBrush = SolidColor(colors.accent),
                     keyboardOptions = keyboardOptions,
                     keyboardActions = keyboardActions,
+                    visualTransformation = visualTransformation,
                     decorationBox = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (value.isEmpty() && placeholder != null) {

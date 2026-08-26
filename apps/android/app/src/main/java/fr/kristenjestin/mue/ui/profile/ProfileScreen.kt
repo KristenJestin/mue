@@ -1,10 +1,19 @@
 package fr.kristenjestin.mue.ui.profile
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -14,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +41,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -50,6 +61,14 @@ import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.components.rememberMueLocale
+import fr.kristenjestin.mue.ui.sync.DataSyncSection
+import fr.kristenjestin.mue.ui.sync.DataSyncUiState
+import fr.kristenjestin.mue.ui.sync.ServerSettingsRoute
+import fr.kristenjestin.mue.ui.sync.SyncMessages
+import fr.kristenjestin.mue.ui.sync.SyncStatus
+import fr.kristenjestin.mue.ui.sync.SyncViewModel
+import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
+import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.timer.TimerMessages
 import java.time.LocalDate
@@ -79,9 +98,76 @@ private const val NOT_SET = "Not set"
  */
 @Composable
 fun ProfileScreen(modifier: Modifier = Modifier) {
+    /*
+     * Sync PRD 9.1 puts `Data & sync` inside `Profile`, and 9.1's `Server settings` is a screen
+     * of its own. That makes `Profile` the third tab holding more than one screen, and it models
+     * the stack the way the other two do rather than adopting a library for it: one saved
+     * boolean, one `AnimatedContent`, and a `BackHandler` nested inside the shell's so back
+     * closes the sub-screen before it ever reaches the tab selection.
+     */
+    var serverSettingsOpen by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = serverSettingsOpen) { serverSettingsOpen = false }
+
+    // Resolved outside `transitionSpec`, which runs outside composition.
+    val deeper = profileStackTransition(deeper = true)
+    val shallower = profileStackTransition(deeper = false)
+
+    AnimatedContent(
+        targetState = serverSettingsOpen,
+        modifier = modifier,
+        transitionSpec = { if (targetState) deeper else shallower },
+        label = "profileStack",
+    ) { settingsOpen ->
+        if (settingsOpen) {
+            ServerSettingsRoute(
+                onNavigateBack = { serverSettingsOpen = false },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            ProfileRoot(
+                onOpenServerSettings = { serverSettingsOpen = true },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/**
+ * Going deeper raises the new screen over the old one, exactly as the Activity tab's stack does;
+ * reduced motion drops the movement and keeps the cross-fade.
+ */
+@Composable
+@ReadOnlyComposable
+private fun profileStackTransition(deeper: Boolean): ContentTransform {
+    val enterSpec = MueMotion.spec<Float>(MueMotion.ActivityOpenMillis, MueMotion.Enter)
+    val exitSpec = MueMotion.spec<Float>(MueMotion.ActivityOpenMillis, MueMotion.Exit)
+    if (LocalReduceMotion.current) {
+        return fadeIn(enterSpec) togetherWith fadeOut(exitSpec)
+    }
+    val offsetSpec = MueMotion.spec<IntOffset>(MueMotion.ActivityOpenMillis, MueMotion.Standard)
+    val direction = if (deeper) 1 else -1
+    return (
+        slideInVertically(offsetSpec) { height -> direction * height / 8 } + fadeIn(enterSpec)
+        ) togetherWith (
+        slideOutVertically(offsetSpec) { height -> -direction * height / 8 } + fadeOut(exitSpec)
+        )
+}
+
+@Composable
+private fun ProfileRoot(onOpenServerSettings: () -> Unit, modifier: Modifier = Modifier) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    /*
+     * Sync PRD 9.1's section reads its own state holder rather than borrowing `ProfileViewModel`.
+     * They share nothing — one is a form over DataStore and Room's profile row, the other is the
+     * outbox and the `sync_state` row — and the settings screen needs the very same instance,
+     * which it gets because both take it from the activity's store.
+     */
+    val syncViewModel: SyncViewModel = viewModel(factory = SyncViewModel.Factory)
+    val syncState by syncViewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(viewModel, context) {
         viewModel.events.collect { event ->
@@ -109,6 +195,7 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
 
     ProfileScreen(
         state = state,
+        syncState = syncState,
         onDisplayNameChange = viewModel::onDisplayNameChange,
         onHeightChange = viewModel::onHeightChange,
         onBirthDateChange = viewModel::onBirthDateChange,
@@ -116,6 +203,8 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
         onSaveConfirmationFinished = viewModel::onSaveConfirmationFinished,
         onHapticsEnabledChange = viewModel::onHapticsEnabledChange,
         onExport = viewModel::exportWeightData,
+        onSyncNow = syncViewModel::syncNow,
+        onOpenServerSettings = onOpenServerSettings,
         modifier = modifier,
         showNotificationSettings = !notifications.isGranted && !notifications.canRequest,
         onOpenNotificationSettings = {
@@ -135,6 +224,9 @@ internal fun ProfileScreen(
     onHapticsEnabledChange: (Boolean) -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    syncState: DataSyncUiState = DataSyncUiState(),
+    onSyncNow: () -> Unit = {},
+    onOpenServerSettings: () -> Unit = {},
     today: LocalDate = LocalDate.now(),
     showNotificationSettings: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
@@ -248,6 +340,23 @@ internal fun ProfileScreen(
                         )
                     }
                 }
+            }
+
+            /*
+             * Sync PRD 9.1, in the section the PRD names, on the screen the PRD names.
+             *
+             * It is the *only* place in the app that mentions a server. 9.1 ends with "L'absence
+             * de serveur associé n'affiche aucune alerte sur les écrans principaux", so Entry,
+             * Progress, Activity and Food gained nothing at all — no badge, no banner, no dot.
+             * A person who never pairs a server never learns that one exists unless they come
+             * here and read.
+             */
+            ProfileSection(title = SyncMessages.SECTION_TITLE) {
+                DataSyncSection(
+                    state = syncState,
+                    onSyncNow = onSyncNow,
+                    onOpenServerSettings = onOpenServerSettings,
+                )
             }
 
             // Leaves the last card breathing room above the tab bar, as on Progress.
@@ -405,7 +514,10 @@ private fun StatusLine(message: String, color: Color, assertive: Boolean = false
 private val PreviewToday: LocalDate = LocalDate.of(2026, 8, 23)
 
 @Composable
-private fun ProfilePreview(state: ProfileUiState) {
+private fun ProfilePreview(
+    state: ProfileUiState,
+    syncState: DataSyncUiState = DataSyncUiState(),
+) {
     MueTheme {
         ProfileScreen(
             state = state,
@@ -416,6 +528,7 @@ private fun ProfilePreview(state: ProfileUiState) {
             onSaveConfirmationFinished = {},
             onHapticsEnabledChange = {},
             onExport = {},
+            syncState = syncState,
             today = PreviewToday,
         )
     }
@@ -450,6 +563,23 @@ private fun ProfileValueOnlyPreview() {
 @Composable
 private fun ProfileNoBmiPreview() {
     ProfilePreview(ProfileUiState(hapticsEnabled = false))
+}
+
+/** Sync PRD 9.1 with a server behind it, which is the state the section is really for. */
+@Preview(name = "Profile — synced", widthDp = 390, heightDp = 1600)
+@Composable
+private fun ProfileSyncedPreview() {
+    ProfilePreview(
+        state = ProfileUiState(displayName = "Kris", heightInput = "180"),
+        syncState = DataSyncUiState(
+            status = SyncStatus.CHANGES_PENDING,
+            serverName = "mue.home.arpa",
+            account = "kris@example.org",
+            lastSuccessAt = 1_756_240_000_000L,
+            outstandingChanges = 2,
+            undeliverableChanges = 1,
+        ),
+    )
 }
 
 @Preview(name = "Profile — validation error", widthDp = 390, heightDp = 1500)
