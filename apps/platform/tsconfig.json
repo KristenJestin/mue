@@ -1,4 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts"]
+  "compilerOptions": {
+    // The consent page of PRD section 15.1 is a React component, so this package needs
+    // the DOM and JSX. `react-jsx` keeps the transform out of the source, which is what
+    // lets Bun and Vite strip types without a resolver round-trip.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
