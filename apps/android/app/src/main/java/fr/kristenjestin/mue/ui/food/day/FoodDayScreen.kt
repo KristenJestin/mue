@@ -37,9 +37,9 @@ import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
-import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.FoodViewScaffold
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
@@ -112,7 +112,7 @@ internal fun FoodDayScreen(
 ) {
     val spacing = MueTheme.spacing
 
-    MueScreenScaffold(modifier = modifier, topFade = MueContentTopFade) {
+    FoodViewScaffold(modifier = modifier, topFade = MueContentTopFade) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag(FoodTestTags.DAY),
             contentPadding = PaddingValues(top = MueContentTopFade, bottom = spacing.xxxl),

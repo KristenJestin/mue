@@ -41,6 +41,12 @@ val MueContentTopFade: Dp = 24.dp
  * across and the screen reads as truncated rather than scrolled. Entry does not scroll and
  * leaves it at zero.
  *
+ * [header] is a band between the wordmark and the content, drawn **edge to edge** and outside
+ * [topFade]: a control that belongs to the whole screen rather than to what it scrolls. The Food
+ * tab's view switcher is what asked for it — a rail that has to be able to scroll past the gutter,
+ * and that must not be the thing dissolving under the ramp meant for the content below it. It is
+ * null on every other screen, which is why nothing else in the app moved when it landed.
+ *
  * The bottom tab bar is intentionally *not* part of this scaffold: it lives above the
  * navigation host so it never moves during a tab transition (PRD 8).
  */
@@ -51,6 +57,7 @@ fun MueScreenScaffold(
     trailing: @Composable (() -> Unit)? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     topFade: Dp = 0.dp,
+    header: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val spacing = MueTheme.spacing
@@ -83,6 +90,8 @@ fun MueScreenScaffold(
                 )
                 trailing?.invoke()
             }
+
+            header?.invoke()
 
             Column(
                 modifier = Modifier

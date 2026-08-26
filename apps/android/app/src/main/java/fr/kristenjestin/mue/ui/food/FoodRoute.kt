@@ -160,6 +160,24 @@ sealed interface FoodRoute {
         val VIEWS: List<View> = listOf(Day, Trends, Recipes, Foods)
 
         /**
+         * The views the switcher actually offers: [VIEWS] less the ones still drawing nothing.
+         *
+         * `Trends` is the one it leaves out, and leaving it out is the honest answer rather than
+         * an omission. Its route still draws `FoodPlaceholder`, which is a deliberately wordless
+         * empty `Box` — the right thing to show while a whole tab is unbuilt, and the wrong thing
+         * to reach through a control that offers it as the peer of three finished screens. A
+         * reader who taps `Trends` and lands on a blank canvas has found a defect, not an honest
+         * confession; the confession would need copy PRD_FOOD 17 does not write, over a screen
+         * that does not exist yet.
+         *
+         * It costs nothing to put back: PRD_FOOD 10.5's screen lands, and its route stops
+         * answering `FoodPlaceholder`, and this list becomes [VIEWS]. The order is [VIEWS]' own,
+         * so the switcher and the animation that follows a view change never disagree about which
+         * way sideways is.
+         */
+        val SWITCHABLE: List<View> = VIEWS.filterNot { it == Trends }
+
+        /**
          * The inverse of [key]. An unreadable key falls back to [Day] rather than throwing: a
          * saved stack outlives the code that wrote it, and losing a screen is a better outcome
          * than a crash on the first frame after an update.

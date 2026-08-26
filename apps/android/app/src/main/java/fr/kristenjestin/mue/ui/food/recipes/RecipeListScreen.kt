@@ -43,7 +43,6 @@ import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
-import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSearchField
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
@@ -51,6 +50,7 @@ import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodIcons
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.FoodViewScaffold
 import fr.kristenjestin.mue.ui.food.day.announcedAs
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -118,7 +118,7 @@ internal fun RecipeListScreen(
     var actionHeight by remember { mutableStateOf(0.dp) }
 
     Box(modifier = modifier.fillMaxSize().testTag(FoodTestTags.RECIPES)) {
-        MueScreenScaffold(topFade = MueContentTopFade) {
+        FoodViewScaffold(topFade = MueContentTopFade) {
             LazyColumn(
                 state = list,
                 modifier = Modifier.fillMaxSize().testTag(FoodTestTags.RECIPE_LIST),

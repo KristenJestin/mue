@@ -11,6 +11,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
@@ -119,24 +120,37 @@ internal fun FoodNavHost(
     val opening = foodSheetTransition(opening = true)
     val closing = foodSheetTransition(opening = false)
 
-    AnimatedContent(
-        targetState = stack.entries,
-        modifier = modifier,
-        transitionSpec = {
-            val from = initialState.viewOrNull()
-            val to = targetState.viewOrNull()
-            when {
-                // A view change is a sibling switch, and PRD_FOOD 7's order is its direction.
-                from != to -> if (indexOf(to) > indexOf(from)) rightwards else leftwards
-                targetState.size >= initialState.size -> opening
-                else -> closing
-            }
-        },
-        contentKey = { entries -> entries.last().key },
-        label = "foodStack",
-    ) { entries ->
-        val route = entries.last()
-        screenStates.SaveableStateProvider(route.key) { content(route) }
+    /*
+     * PRD_FOOD 7's switcher, published once for whichever view is showing.
+     *
+     * It is provided *around* the animated content rather than drawn beside it, because the
+     * switcher belongs under each view's own wordmark — where the prototype puts it — and that
+     * seam lives inside `MueScreenScaffold`, which each view raises for itself. `FoodViewScaffold`
+     * is what reads this; a sheet raises `MueSubScreenScaffold` instead and therefore cannot show
+     * a switcher, with no condition written down anywhere.
+     */
+    val selection = FoodViewSelection(selected = stack.view, onSelect = stack::select)
+
+    CompositionLocalProvider(LocalFoodViewSelection provides selection) {
+        AnimatedContent(
+            targetState = stack.entries,
+            modifier = modifier,
+            transitionSpec = {
+                val from = initialState.viewOrNull()
+                val to = targetState.viewOrNull()
+                when {
+                    // A view change is a sibling switch, and PRD_FOOD 7's order is its direction.
+                    from != to -> if (indexOf(to) > indexOf(from)) rightwards else leftwards
+                    targetState.size >= initialState.size -> opening
+                    else -> closing
+                }
+            },
+            contentKey = { entries -> entries.last().key },
+            label = "foodStack",
+        ) { entries ->
+            val route = entries.last()
+            screenStates.SaveableStateProvider(route.key) { content(route) }
+        }
     }
 }
 

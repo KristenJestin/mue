@@ -3,6 +3,7 @@ package fr.kristenjestin.mue.ui.food
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.MealSlot
+import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueIcons
 
 /**
@@ -58,6 +59,22 @@ object FoodIcons {
 
     /** FR-RECIPE-005: a recipe is a favourite or it is not. Nothing else in Food is starred. */
     const val STAR: String = "ic_star"
+
+    /**
+     * The glyph beside a view's name in the switcher (PRD_FOOD 7).
+     *
+     * Not a fifth table but a reading of the two above: a recipe is a chef's hat wherever it
+     * appears, and the generic catalogue is the fruit [forSource] already gives it — so the
+     * switcher names the same things the module already names, and a reader who has seen a
+     * recipe row recognises the view that holds them. `Day` takes the calendar the module's
+     * own date sheet opens with, and `Trends` the chart the app's `Progress` tab already uses.
+     */
+    fun forView(view: FoodRoute.View): String = when (view) {
+        FoodRoute.Day -> MueIcons.CALENDAR_DAYS
+        FoodRoute.Trends -> ActivityIcons.TAB_PROGRESS
+        FoodRoute.Recipes -> CHEF_HAT
+        FoodRoute.Foods -> APPLE
+    }
 
     /**
      * PRD_FOOD 19: the four moments are told apart by their icon.

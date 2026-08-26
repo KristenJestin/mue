@@ -40,7 +40,6 @@ import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
-import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSearchField
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
@@ -48,6 +47,7 @@ import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.FoodViewScaffold
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
@@ -113,7 +113,7 @@ internal fun FoodsScreen(
     var actionHeight by remember { mutableStateOf(0.dp) }
 
     Box(modifier = modifier.fillMaxSize().testTag(FoodTestTags.FOODS)) {
-        MueScreenScaffold(
+        FoodViewScaffold(
             modifier = Modifier.fillMaxSize(),
             topFade = MueContentTopFade,
             trailing = { PreferencesButton(onOpenPreferences) },
