@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
-    "start": "bun run dist/server/serve.js",
+    "start": "bun run dist/server/main.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun test src",
     "lint": "vp lint src",

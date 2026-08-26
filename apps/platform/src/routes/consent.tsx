@@ -220,7 +220,6 @@ export function OAuthConsentPage(): React.ReactElement {
             })}
           </ul>
         </fieldset>
-
         {/* Allow is the submit so the keyboard does what the mouse does; refusing is
             never the default action of a form the owner may have opened by accident. */}
         <button type="submit" className="primary" disabled={busy}>

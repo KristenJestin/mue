@@ -54,9 +54,8 @@ function HomePage(): ReactElement {
       <h1>Mue Platform</h1>
       <p>{WORDING[readiness]}</p>
       <p>
-        This server holds your weight, activity and health data, synchronises it with the
-        Mue app on your phone, and lets an agent you have authorised read and write it
-        over MCP.
+        This server holds your weight, activity and health data, synchronises it with the Mue app on
+        your phone, and lets an agent you have authorised read and write it over MCP.
       </p>
       <p>
         <Link to="/sign-in">Sign in</Link> to link this browser to it.

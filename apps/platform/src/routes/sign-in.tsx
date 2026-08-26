@@ -59,16 +59,19 @@ interface Credentials {
  * carries nothing the caller did not already know.
  */
 async function authenticate(mode: Mode, credentials: Credentials): Promise<void> {
-  const response = await fetch(mode === "sign-up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(
-      mode === "sign-up"
-        ? { name: credentials.name, email: credentials.email, password: credentials.password }
-        : { email: credentials.email, password: credentials.password },
-    ),
-  });
+  const response = await fetch(
+    mode === "sign-up" ? "/api/auth/sign-up/email" : "/api/auth/sign-in/email",
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        mode === "sign-up"
+          ? { name: credentials.name, email: credentials.email, password: credentials.password }
+          : { email: credentials.email, password: credentials.password },
+      ),
+    },
+  );
   if (response.ok) return;
 
   const body = (await response.json().catch(() => null)) as { message?: string } | null;
@@ -106,9 +109,7 @@ export function SignInPage(): ReactElement {
         // A full navigation, not a router one: the next stop is either the Hono half of
         // the entry point or a page that must be rendered with the new session cookie.
         window.location.assign(
-          continuation === null
-            ? "/"
-            : `/api/auth/oauth2/authorize?${continuation.oauthQuery}`,
+          continuation === null ? "/" : `/api/auth/oauth2/authorize?${continuation.oauthQuery}`,
         );
       })
       .catch((error: unknown) => {
@@ -124,8 +125,8 @@ export function SignInPage(): ReactElement {
         <p>This is your own server. Signing in links this browser to it.</p>
       ) : (
         <p>
-          <code>{continuation.clientId}</code> is asking for access to your Mue data. Sign
-          in first; you will be asked what to allow on the next screen.
+          <code>{continuation.clientId}</code> is asking for access to your Mue data. Sign in first;
+          you will be asked what to allow on the next screen.
         </p>
       )}
 

@@ -7,8 +7,9 @@ import { routeTree } from "./routeTree.gen";
  * Both halves of Start import it: the browser bundle hydrates the router this builds,
  * and `createStartHandler` calls `getRouter()` once per server-rendered request. So
  * everything reachable from here is reachable from the browser, and nothing that reads
- * a secret may be imported into this graph -- section 15.1. `src/client-bundle.test.ts`
- * is what holds that line.
+ * a secret may be imported into this graph -- section 15.1. The `mue:bundle-guard`
+ * plugin in `vite.config.ts` holds that line: when `BETTER_AUTH_SECRET` is in the build
+ * environment it fails the build if the value appears in any client chunk.
  *
  * The factory shape is required: a module-scope router would be shared by every
  * concurrent request on the server and would leak one visitor's state into another's.
