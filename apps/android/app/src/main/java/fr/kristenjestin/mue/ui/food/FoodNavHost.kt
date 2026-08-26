@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
+import fr.kristenjestin.mue.ui.food.day.FoodDayRoute
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 
@@ -34,16 +35,16 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * showing, as the Activity tab's own stack does. The direction of each is resolved once, above
  * the animation, because `transitionSpec` runs outside composition.
  *
- * Every route currently draws [FoodPlaceholder]. Six screens land after this one, each in a
- * directory of its own; the routes, the tags and the icons they need are already here, so none of
- * them has to reopen a file another is editing.
+ * `Day` is the first route with a screen behind it; the rest still draw [FoodPlaceholder]. They
+ * land one directory at a time, and the routes, the tags and the icons they need are already here,
+ * so none of them has to reopen a file another is editing.
  */
 @Composable
 fun FoodNavHost(modifier: Modifier = Modifier) {
     val stack = rememberFoodStack()
 
     FoodNavHost(stack = stack, modifier = modifier) { route ->
-        FoodDestination(route = route, modifier = Modifier.fillMaxSize())
+        FoodDestination(route = route, stack = stack, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -113,15 +114,34 @@ private fun List<FoodRoute>.viewOrNull(): FoodRoute.View? = firstOrNull() as? Fo
 private fun indexOf(view: FoodRoute.View?): Int = FoodRoute.VIEWS.indexOf(view)
 
 /**
- * Where each screen's callbacks will land on the stack.
+ * Where each screen's callbacks land on the stack.
  *
- * The `when` is exhaustive today over placeholders, which is the point: each of the six screens
- * that follow replaces exactly one branch of it, and touches nothing else that is shared.
+ * The `when` is exhaustive today over placeholders, which is the point: each of the screens that
+ * follow replaces exactly one branch of it, and touches nothing else that is shared. `Day` is the
+ * first of them, and the only thing it needed from this file was the stack the three routes it
+ * opens are pushed onto.
  */
 @Composable
-private fun FoodDestination(route: FoodRoute, modifier: Modifier = Modifier) {
+private fun FoodDestination(
+    route: FoodRoute,
+    stack: FoodStack,
+    modifier: Modifier = Modifier,
+) {
     when (route) {
-        FoodRoute.Day -> FoodPlaceholder(modifier)
+        /*
+         * PRD_FOOD 10.1. The day being viewed is deliberately absent from every route below:
+         * see the note on `FoodRoute`. What the screen hands back is the day it was on, so a `+`
+         * pressed on Tuesday's lunch opens `Add food` already aimed at Tuesday's lunch.
+         */
+        FoodRoute.Day -> FoodDayRoute(
+            onAddToSlot = { date, slot ->
+                stack.push(FoodRoute.AddFood(date = date, slot = slot))
+            },
+            onEditEntry = { entryId -> stack.push(FoodRoute.AddFood(entryId = entryId)) },
+            onSwapPlan = { plan -> stack.push(FoodRoute.Swap(plan)) },
+            modifier = modifier,
+        )
+
         FoodRoute.Trends -> FoodPlaceholder(modifier)
         FoodRoute.Recipes -> FoodPlaceholder(modifier)
         FoodRoute.Foods -> FoodPlaceholder(modifier)
@@ -136,7 +156,7 @@ private fun FoodDestination(route: FoodRoute, modifier: Modifier = Modifier) {
 }
 
 /**
- * What the tab draws until `Day` arrives: the space, and nothing in it.
+ * What a route draws until its screen arrives: the space, and nothing in it.
  *
  * Deliberately wordless. PRD_FOOD 17 writes the module's empty states — "Nothing logged yet", and
  * the rest — against real screens with real data behind them, and putting one of those sentences
