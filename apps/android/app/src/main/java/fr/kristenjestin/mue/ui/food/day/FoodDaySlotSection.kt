@@ -56,8 +56,16 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.theme.MueTypography
 import java.util.Locale
 
-/** The prototype's glyph tile, grown to the touch minimum of PRD_FOOD 18. */
-private val IconTileSize: Dp = MueMinTouchTarget
+/**
+ * The prototype's glyph tile on a journal line: `h-10 w-10`, so 40 dp.
+ *
+ * It had been grown to [MueMinTouchTarget] on the grounds of PRD_FOOD 18, but that rule sizes
+ * *targets* and this tile is not one: the card around it carries the click, and the glyph inside
+ * is explicitly decorative because the title beside it already names the line. Growing it bought
+ * no reachability and cost the row its proportions — a 48 dp block of amber is the heaviest thing
+ * on a line whose subject is the food's name.
+ */
+private val IconTileSize: Dp = 40.dp
 
 /** The small tile of the add row: decoration inside a target, not a target of its own. */
 private val AddTileSize: Dp = 32.dp
