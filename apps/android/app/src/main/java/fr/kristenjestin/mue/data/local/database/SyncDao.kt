@@ -93,6 +93,24 @@ interface SyncDao : SyncJournalDao {
     @Query("SELECT COUNT(*) FROM sync_mutations WHERE state = 'failed'")
     fun observeFailedCount(): Flow<Int>
 
+    /**
+     * PRD 9.1's "le nombre de changements locaux en attente", live.
+     *
+     * The observable twin of [countInState] with `'pending'` bound, and it exists because
+     * `Data & sync` has to be able to contradict itself the moment a weight is saved: the
+     * section is shown beside `Synced`, and a screen that says `Synced` while a row sits in the
+     * outbox lies about the only thing the outbox is for. [observeSyncState] cannot carry it —
+     * Room invalidates a Flow per table, and that one watches `sync_state`, which a new mutation
+     * does not touch.
+     *
+     * Every `pending` row is counted, of every aggregate type, including the ones this build has
+     * no wire branch for. They are what [countPendingOfOtherTypes] names separately, and they are
+     * still local changes that are not on the server, so hiding them here would produce the same
+     * comfortable lie in a smaller number.
+     */
+    @Query("SELECT COUNT(*) FROM sync_mutations WHERE state = 'pending'")
+    fun observePendingCount(): Flow<Int>
+
     @Query("UPDATE sync_mutations SET state = :state WHERE mutation_id IN (:mutationIds)")
     suspend fun setState(mutationIds: List<String>, state: String)
 
