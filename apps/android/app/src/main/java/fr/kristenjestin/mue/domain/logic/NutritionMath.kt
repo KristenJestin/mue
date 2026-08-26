@@ -60,9 +60,10 @@ object NutritionMath {
      * unrepresentable weight is not known, and [foodContribution] turns it into unknown values
      * rather than into a wrong number.
      *
-     * It deliberately does not delegate to [Quantity.toReferenceWeightOrNull], which truncates:
-     * rounding half-up is what [Nutrients.scaled] already does to every metric, and it is what
-     * makes 250 g of pasta at 2.3 read `108.696 g` rather than `108.695 g`.
+     * The division itself lives on [Quantity.toReferenceWeightOrNull], which rounds half-up like
+     * [Nutrients.scaled] does to every metric. This function owns only the three identity cases
+     * above; one rounding rule for the module is what keeps a weight and the nutrients derived
+     * from it on the same side of a thousandth.
      */
     fun referenceWeightOrNull(
         weighed: Quantity,
@@ -70,12 +71,7 @@ object NutritionMath {
         weighedCooked: Boolean,
     ): Quantity? {
         if (!weighedCooked || cookedRatio == null) return weighed
-        return Quantity.ofThousandthsOrNull(
-            roundedDiv(
-                weighed.thousandths.toLong() * CookedRatio.THOUSANDTHS_PER_UNIT,
-                cookedRatio.thousandths.toLong(),
-            ),
-        )
+        return weighed.toReferenceWeightOrNull(cookedRatio)
     }
 
     /**

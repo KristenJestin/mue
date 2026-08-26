@@ -53,11 +53,18 @@ value class Quantity private constructor(val thousandths: Int) : Comparable<Quan
      *
      * Counted in `Long` before it is narrowed. The intermediate product by a thousand passes an
      * `Int` on its own well before the division brings it back down.
+     *
+     * The division rounds half-up, which is what [Nutrients.scaled] applies to every metric. One
+     * rounding rule for the whole module is the point: a truncating division here would make
+     * 250 g of pasta at 2.3 read `108.695 g` where every nutrient derived from it was computed
+     * against `108.696 g`, and the two would disagree about which side of a thousandth they fall
+     * on.
      */
-    fun toReferenceWeightOrNull(cookedRatio: CookedRatio): Quantity? =
-        ofThousandthsOrNull(
-            thousandths.toLong() * CookedRatio.THOUSANDTHS_PER_UNIT / cookedRatio.thousandths,
-        )
+    fun toReferenceWeightOrNull(cookedRatio: CookedRatio): Quantity? {
+        val numerator = thousandths.toLong() * CookedRatio.THOUSANDTHS_PER_UNIT
+        val denominator = cookedRatio.thousandths.toLong()
+        return ofThousandthsOrNull((numerator + denominator / 2) / denominator)
+    }
 
     override fun compareTo(other: Quantity): Int = thousandths.compareTo(other.thousandths)
 
