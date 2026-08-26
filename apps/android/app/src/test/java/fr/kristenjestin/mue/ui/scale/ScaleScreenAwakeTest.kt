@@ -52,7 +52,7 @@ class ScaleScreenAwakeTest {
             ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF),
             // « Ce maintien cesse dès qu'un poids stable est reçu » (FR-SCALE-020).
             ScaleSessionState.Stable(reading),
-            ScaleSessionState.Complete(reading),
+            ScaleSessionState.Complete(reading, impedanceRefused = false),
         )
 
         awake.forEach { assertTrue(it.keepsScreenAwake, "$it doit garder l'écran éveillé") }

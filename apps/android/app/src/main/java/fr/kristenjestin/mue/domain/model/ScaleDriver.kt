@@ -68,6 +68,13 @@ data class ScaleAdvertisement(
  * l'appairage, qu'aucune composition corporelle ne viendra jamais d'un appareil sans impédance, et
  * donc de ne rien promettre. Une balance qui *peut* mesurer l'impédance mais n'y parvient pas ce
  * jour-là relève d'un autre cas, celui de FR-BODY-002.
+ *
+ * @property providesWeight Déclaratif : **aucun code ne le lit aujourd'hui**, et pour cause, tous
+ *   les pilotes livrés valent `true` — un appareil qui ne pèse pas n'est pas une balance. Il reste
+ *   du contrat de domaine écrit en vague 0 ; le retirer toucherait des fichiers hors du périmètre
+ *   de ce correctif et se décide au niveau du contrat, pas ici.
+ * @property providesImpedance Lu par la machine à états : un pilote qui ne fournit pas d'impédance
+ *   conclut sur `Complete` sans attendre les dix secondes de PRD_SCALE 14.3.
  */
 data class ScaleCapabilities(
     val providesWeight: Boolean,

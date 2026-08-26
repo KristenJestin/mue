@@ -3,7 +3,10 @@ package fr.kristenjestin.mue.data.sync
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import fr.kristenjestin.mue.data.local.database.BodyCompositionEntity
+import fr.kristenjestin.mue.data.local.database.MeasurementEntity
 import fr.kristenjestin.mue.data.local.database.MueDatabase
+import fr.kristenjestin.mue.data.local.database.ScaleEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
@@ -15,6 +18,8 @@ import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.OriginDto
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.WIRE_AGGREGATE_MEASUREMENT
+import fr.kristenjestin.mue.domain.model.MeasurementSource
+import fr.kristenjestin.mue.domain.model.Sex
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -223,6 +228,109 @@ class RoomSyncStoreTest {
         assertEquals(at, syncDao.syncState()?.lastSuccessAt)
     }
 
+    // --- une descente est un payload partiel (BR-SCALE-008) --------------------------------
+
+    /**
+     * Rien en local : la mesure est créée nue, et rien n'est inventé.
+     *
+     * `server` plutôt que `manual` — [MeasurementSource] a la constante exactement pour ce cas, et
+     * `manual` affirmerait une saisie à la main que personne n'a faite. Ni impédance ni
+     * composition, parce que `MeasurementPayloadV1Dto` n'en porte aucune.
+     */
+    @Test
+    fun anUpsertOnAnUnknownDateInsertsABareServerMeasurement() = runTest {
+        store.applyPage(listOf(upsert("2026-08-27", 7_845, "4")), "eyJ2IjoxfQ", at)
+
+        val stored = database.measurementDao().findByDate("2026-08-27")
+        assertNotNull(stored)
+        assertEquals(7_845, stored?.measurement?.weightCg)
+        assertEquals(MeasurementSource.SERVER.wireValue, stored?.measurement?.sourceType)
+        assertNull(stored?.measurement?.impedanceOhm)
+        assertNull(stored?.measurement?.sourceScaleId)
+        assertNull(stored?.composition)
+        assertEquals(0, database.measurementDao().compositionCount())
+    }
+
+    /**
+     * **Le défaut qui détruisait des données de santé.** Une pesée pieds nus porte une provenance
+     * matérielle, une balance émettrice, une impédance et une composition ; le serveur renvoie en
+     * écho la poussée que cet appareil vient de faire, avec le même poids. Rien dans ce paquet ne
+     * filtre les échos par `origin` ni ne compare les révisions, donc ce changement *sera* appliqué
+     * — et il ne doit rien coûter.
+     *
+     * L'impédance est la partie irremplaçable (BR-SCALE-008, FR-BODY-004) : le fil ne la transporte
+     * pas, le serveur ne l'a donc jamais reçue et ne pourra jamais la redescendre. Une fois remise
+     * à `NULL`, le calcul rétroactif de FR-BODY-006 ne peut plus reconstruire l'estimation.
+     */
+    @Test
+    fun anUpsertOfTheSameWeightKeepsTheImpedanceTheCompositionAndTheProvenance() = runTest {
+        seedScaleMeasurement("2026-08-27", weightCg = 7_845)
+
+        store.applyPage(listOf(upsert("2026-08-27", 7_845, "4")), "eyJ2IjoxfQ", at)
+
+        val stored = database.measurementDao().findByDate("2026-08-27")
+        assertEquals(7_845, stored?.measurement?.weightCg)
+        assertEquals(
+            "BR-SCALE-008 : le fil ne peut pas la redescendre, donc rien ne peut l'effacer",
+            545,
+            stored?.measurement?.impedanceOhm,
+        )
+        assertNotNull(
+            "BR-SCALE-007 ne s'applique pas à un payload qui ne porte pas de composition",
+            stored?.composition,
+        )
+        assertEquals(
+            "la provenance matérielle n'est pas une information que le serveur corrige",
+            MeasurementSource.SCALE.wireValue,
+            stored?.measurement?.sourceType,
+        )
+        assertEquals("scale-1", stored?.measurement?.sourceScaleId)
+    }
+
+    /**
+     * Poids différent : vraie modification distante, et la règle locale s'applique telle quelle.
+     *
+     * PRD_SCALE 21.1 (BR-SCALE-013) veut qu'un poids modifié perde à la fois sa composition et son
+     * impédance : cette impédance a été mesurée en même temps que le poids d'origine, la rattacher
+     * à une autre valeur en ferait une donnée fausse et non une donnée ancienne.
+     */
+    @Test
+    fun anUpsertOfADifferentWeightDropsTheCompositionTheImpedanceAndTheScaleLink() = runTest {
+        seedScaleMeasurement("2026-08-27", weightCg = 7_845)
+
+        store.applyPage(listOf(upsert("2026-08-27", 7_910, "4")), "eyJ2IjoxfQ", at)
+
+        val stored = database.measurementDao().findByDate("2026-08-27")
+        assertEquals(7_910, stored?.measurement?.weightCg)
+        assertNull(
+            "BR-SCALE-013 : une impédance rattachée à un autre poids est une donnée fausse",
+            stored?.measurement?.impedanceOhm,
+        )
+        assertNull(stored?.composition)
+        assertNull(stored?.measurement?.sourceScaleId)
+        assertEquals(MeasurementSource.SERVER.wireValue, stored?.measurement?.sourceType)
+        assertEquals(
+            "aucune composition orpheline ne survit au poids dont elle est dérivée",
+            0,
+            database.measurementDao().compositionCount(),
+        )
+    }
+
+    /**
+     * Une suppression descendue reste complète : elle ne décrit aucun champ, elle retire la mesure
+     * entière, et la composition suit par `ON DELETE CASCADE` (BR-SCALE-007).
+     */
+    @Test
+    fun aDeleteStillTakesTheCompositionWithIt() = runTest {
+        seedScaleMeasurement("2026-08-27", weightCg = 7_845)
+        assertEquals(1, database.measurementDao().compositionCount())
+
+        store.applyPage(listOf(deleteOf("2026-08-27", "10")), "eyJ2IjoxfQ", at)
+
+        assertNull(database.measurementDao().findByDate("2026-08-27"))
+        assertEquals(0, database.measurementDao().compositionCount())
+    }
+
     // --- acknowledge and reject ------------------------------------------------------------
 
     @Test
@@ -316,6 +424,50 @@ class RoomSyncStoreTest {
     }
 
     // --- helpers ----------------------------------------------------------------------------
+
+    /**
+     * Une pesée pieds nus telle que le module balance l'écrit (PRD_SCALE 21.1) : provenance
+     * matérielle, balance émettrice, impédance et composition, dans une seule transaction.
+     *
+     * La ligne de `scale` est écrite d'abord parce que `measurements.source_scale_id` la référence
+     * (BR-SCALE-010, `ON DELETE SET NULL`) et que Room ouvre ses bases avec les clés étrangères
+     * actives : sans elle, la mesure ne s'insérerait pas.
+     */
+    private suspend fun seedScaleMeasurement(date: String, weightCg: Int) {
+        database.scaleDao().upsert(
+            ScaleEntity(
+                id = "scale-1",
+                driverId = "homebuds-hb9027",
+                address = "FF:10:00:1F:52:C3",
+                advertisedName = "HB9027",
+                displayName = "Homebuds HB9027",
+                lastSeenAt = null,
+                createdAt = 1_772_000_000_000L,
+            )
+        )
+        database.measurementDao().upsertAggregate(
+            MeasurementEntity(
+                date = date,
+                weightCg = weightCg,
+                sourceType = MeasurementSource.SCALE.wireValue,
+                sourceScaleId = "scale-1",
+                impedanceOhm = 545,
+            ),
+            BodyCompositionEntity(
+                date = date,
+                formulaId = "mue-foot-to-foot-v1",
+                formulaVersion = 1,
+                inputWeightCg = weightCg,
+                inputHeightCm = 178,
+                inputAgeYears = 36,
+                inputSex = Sex.MALE.wireValue,
+                bodyFatDeciPercent = 183,
+                fatFreeMassCg = 6_409,
+                bodyWaterDeciPercent = 552,
+                restingEnergyKcal = 1_742,
+            ),
+        )
+    }
 
     private fun mutation(id: String, state: String, createdAt: Long) = SyncMutationEntity(
         mutationId = id,

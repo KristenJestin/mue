@@ -422,12 +422,12 @@ class EntryViewModel(
             // compris (BR-SCALE-012, BR-SCALE-013).
             is ScaleSessionState.Stable -> {
                 if (state.reading.isStale()) return
-                acceptReading(state.reading, impedanceRefused = false)
+                acceptReading(state.weight, state.reading, impedanceRefused = false)
             }
 
             is ScaleSessionState.Complete -> {
                 if (state.reading.isStale()) return
-                acceptReading(state.reading, state.impedanceRefused)
+                acceptReading(state.weight, state.reading, state.impedanceRefused)
             }
 
             ScaleSessionState.Idle -> updateScale {
@@ -489,15 +489,20 @@ class EntryViewModel(
      *
      * Une trame de la session close n'arrive jamais ici : [onScaleState] la filtre avant, pour que
      * l'ignorer ne change **rien du tout** (BR-SCALE-012, BR-SCALE-013).
+     *
+     * **Le poids arrive validé et n'est pas revalidé ici** (PRD_SCALE 14.4, BR-SCALE-002). L'arrondi
+     * au pas et les bornes sont appliqués « à la frontière du domaine », c'est-à-dire dans la couche
+     * BLE, et [ScaleSessionState.Stable] comme [ScaleSessionState.Complete] portent la garantie
+     * jusqu'ici sous la forme d'un [Weight]. Cet écran revalidait autrefois par un second
+     * algorithme — `ofKilogramsOrNull`, donc un `Double` et un arrondi au plus proche — qui pouvait
+     * refuser ce que la couche BLE venait d'accepter et transformer une mesure posée en avis « hors
+     * bornes ». Une seule frontière de validation, et c'est celle qui parle à la balance.
      */
-    private fun acceptReading(reading: ScaleReading, impedanceRefused: Boolean) {
-        // BR-SCALE-002 : `ofHundredthsClamped` ne valide jamais une mesure reçue (contrat §2), et
-        // `ofKilogramsOrNull` est le seul constructeur qui arrondisse au pas de PRD BR-003 avant
-        // de refuser hors domaine. La couche de liaison arrondit déjà ; le faire aussi ici coûte
-        // une division et ferme la porte à un demi-centième qui n'existe sur aucune règle.
-        val weight = Weight.ofKilogramsOrNull(reading.weightHundredthsKg / 100.0)
-            ?: return outOfRange()
-
+    private fun acceptReading(
+        weight: Weight,
+        reading: ScaleReading,
+        impedanceRefused: Boolean,
+    ) {
         val previous = acceptedReading
         val alreadyOnScreen = previous?.sessionId == reading.sessionId &&
             _uiState.value.scale.fromScale &&

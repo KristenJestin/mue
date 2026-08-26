@@ -133,9 +133,24 @@ internal fun Measurement.toEntity(): MeasurementEntity = MeasurementEntity(
  * La ligne enfant à écrire, ou `null` quand la mesure n'en porte pas — auquel cas
  * [MeasurementDao.upsertAggregate] retire celle qui existait (BR-SCALE-007).
  *
- * La date de l'enfant est reprise de la mesure et non de [Measurement.bodyComposition] : les deux
- * doivent être égales, et prendre celle du parent rend l'inégalité impossible à écrire plutôt que
- * détectable après coup.
+ * **Les deux champs que la mesure parente possède sont repris d'elle, pas de
+ * [Measurement.bodyComposition]** : `date`, identité de la composition, et `input_weight_cg`, dont
+ * BR-SCALE-015 dit qu'il « est toujours égal au poids de sa mesure parente ». Les prendre du
+ * parent rend l'inégalité impossible à écrire plutôt que détectable après coup — la seule forme
+ * qu'une règle de ce genre puisse prendre, puisqu'il n'existe aucune requête qui la vérifierait
+ * après coup et personne pour la lancer.
+ *
+ * Les deux appelants du dépôt calculent déjà leur composition à partir du poids qu'ils
+ * enregistrent (`EntryViewModel`, `RetroactiveBodyComposition` via
+ * `BodyCompositionCalculator.calculate`), donc cette reprise ne corrige aucun appel existant :
+ * elle retire au troisième la possibilité de se tromper. Une composition dont `inputWeightCg`
+ * divergerait serait un instantané d'entrée mensonger (FR-BODY-004, BR-SCALE-014) — la masse
+ * grasse affichée aurait été dérivée d'un poids que la ligne parente ne montre pas — et c'est
+ * exactement l'incohérence que [MeasurementDao.upsertAggregate] efface par l'autre bout quand un
+ * poids change sans composition fournie.
  */
 internal fun Measurement.toCompositionEntity(): BodyCompositionEntity? =
-    bodyComposition?.toEntity()?.copy(date = date.toString())
+    bodyComposition?.toEntity()?.copy(
+        date = date.toString(),
+        inputWeightCg = weight.hundredthsKg,
+    )

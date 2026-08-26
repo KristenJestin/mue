@@ -207,7 +207,12 @@ class EntryScaleTest {
         val scale = paired()
         val repository = FakeMeasurementRepository()
         val model = viewModel(scale, profile = completeProfile, repository = repository)
-        scale.emit(ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520)))
+        scale.emit(
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520),
+                impedanceRefused = false,
+            ),
+        )
 
         model.onStep(1)
 
@@ -265,7 +270,10 @@ class EntryScaleTest {
         model.onStep(1)
 
         scale.emit(
-            ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520, sessionId = "s1")),
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520, sessionId = "s1"),
+                impedanceRefused = false,
+            ),
         )
 
         val state = model.uiState.value
@@ -297,7 +305,12 @@ class EntryScaleTest {
         val scale = paired()
         val repository = FakeMeasurementRepository()
         val model = viewModel(scale, profile = completeProfile, repository = repository)
-        scale.emit(ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520)))
+        scale.emit(
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520),
+                impedanceRefused = false,
+            ),
+        )
 
         model.onDateSelected(TODAY.minusDays(1))
 
@@ -335,7 +348,12 @@ class EntryScaleTest {
         val model = viewModel(scale, repository = repository)
 
         scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35)))
-        scale.emit(ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520)))
+        scale.emit(
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520),
+                impedanceRefused = false,
+            ),
+        )
 
         assertTrue(repository.stored.isEmpty())
     }
@@ -359,7 +377,10 @@ class EntryScaleTest {
 
         // La composition n'est jamais ajoutée en silence après la confirmation `Saved`.
         scale.emit(
-            ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520, sessionId = "s1")),
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520, sessionId = "s1"),
+                impedanceRefused = false,
+            ),
         )
 
         assertNull(repository.stored.single().bodyComposition)
@@ -373,7 +394,12 @@ class EntryScaleTest {
             val scale = paired()
             val repository = FakeMeasurementRepository()
             val model = viewModel(scale, profile = completeProfile, repository = repository)
-            scale.emit(ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520)))
+            scale.emit(
+                ScaleSessionState.Complete(
+                    scaleReadingOf(74.35, impedanceOhm = 520),
+                    impedanceRefused = false,
+                ),
+            )
 
             model.onSave()
 
@@ -393,7 +419,12 @@ class EntryScaleTest {
         val scale = paired()
         val repository = FakeMeasurementRepository()
         val model = viewModel(scale, profile = UserProfile.EMPTY, repository = repository)
-        scale.emit(ScaleSessionState.Complete(scaleReadingOf(74.35, impedanceOhm = 520)))
+        scale.emit(
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 520),
+                impedanceRefused = false,
+            ),
+        )
 
         model.onSave()
 

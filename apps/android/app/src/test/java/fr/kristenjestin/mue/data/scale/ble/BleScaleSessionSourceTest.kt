@@ -10,6 +10,7 @@ import fr.kristenjestin.mue.data.scale.protocol.REAL_WEIGHT_ACK
 import fr.kristenjestin.mue.data.scale.protocol.hexToBytes
 import fr.kristenjestin.mue.data.scale.protocol.toHex
 import fr.kristenjestin.mue.domain.model.ScaleDevice
+import fr.kristenjestin.mue.domain.model.ScaleReading
 import fr.kristenjestin.mue.domain.model.ScaleSessionState
 import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
 import fr.kristenjestin.mue.domain.model.Weight
@@ -20,6 +21,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -706,6 +708,110 @@ class BleScaleSessionSourceTest {
             assertEquals(8_575, stable.reading.weightHundredthsKg)
             assertNotNull(Weight.ofHundredthsOrNull(stable.reading.weightHundredthsKg))
         }
+
+    /**
+     * **Une seule frontière de validation** (PRD_SCALE 14.4, BR-SCALE-002).
+     *
+     * L'arrondi au pas et les bornes s'appliquent « à la frontière du domaine », c'est-à-dire ici :
+     * un poids stable hors de `30.0–250.0 kg` devient [ScaleSessionState.OutOfRange] et n'atteint
+     * jamais [ScaleSessionState.Stable]. Le type porte donc la garantie, et ce test est ce qui
+     * l'empêche de n'être qu'une phrase de KDoc : `EntryViewModel` revalidait autrefois par un
+     * second algorithme — un `Double`, un arrondi au plus proche, un refus — capable de transformer
+     * un `Stable` en avis « hors bornes », c'est-à-dire de contredire la couche qui parle à la
+     * balance. Il lit désormais [ScaleSessionState.Stable.weight] et n'a plus rien à décider.
+     */
+    @Test
+    fun `un état Stable ou Complete ne peut pas porter un poids hors du domaine`() {
+        val outOfDomain = ScaleReading(
+            sessionId = "session-1",
+            weightHundredthsKg = 2_100,
+            isStable = true,
+            impedanceOhm = null,
+            receivedAt = TEST_NOW,
+            scaleId = hbScale.id,
+        )
+
+        assertFailsWith<IllegalArgumentException> { ScaleSessionState.Stable(outOfDomain) }
+        assertFailsWith<IllegalArgumentException> {
+            ScaleSessionState.Complete(outOfDomain, impedanceRefused = false)
+        }
+
+        val inDomain = outOfDomain.copy(weightHundredthsKg = 8_575)
+        assertEquals(8_575, ScaleSessionState.Stable(inDomain).weight.hundredthsKg)
+        assertEquals(
+            8_575,
+            ScaleSessionState.Complete(inDomain, impedanceRefused = false).weight.hundredthsKg,
+        )
+    }
+
+    // endregion
+
+    // region « invalider d'abord, annuler ensuite » jusqu'au fil
+
+    /**
+     * PRD_SCALE 21.2 : la garde de `sessionId` est le **premier** rideau, et doit tenir seule.
+     *
+     * L'annulation coopérative est le second : elle n'est pas instantanée, et une coroutine
+     * suspendue dans `link.write()` au moment du `stop()` reprend son cours avant de l'observer.
+     * Sans la garde relue entre chaque écriture, la séquence d'initialisation finissait de partir
+     * vers une balance dont plus personne n'attend la réponse. Aucun état n'en était corrompu ;
+     * c'est la promesse « invalider d'abord » qui ne tenait pas jusqu'au fil.
+     *
+     * La liaison factice retient ses écritures sur une suspension **non annulable**, comme le ferait
+     * un rappel de pile BLE, précisément pour que le second rideau ne masque pas l'absence du
+     * premier.
+     */
+    @Test
+    fun `un stop pendant une écriture n'en laisse plus partir aucune autre`() = runTest {
+        val f = fixture(listOf(hbScale))
+        f.transport.blockWritesOnNewLinks = true
+
+        f.reachWaitingForStepOn(this)
+
+        // La première des trois commandes de PRD_SCALE 14.3 est en vol, aucune n'est arrivée.
+        assertTrue(f.link.writes.isEmpty())
+
+        f.source.stop()
+        runCurrent()
+        assertEquals(ScaleSessionState.Idle, f.state)
+
+        f.link.releaseWrites()
+        runCurrent()
+
+        // Celle qui était déjà partie se pose — on ne rattrape pas des octets en vol — et les deux
+        // suivantes ne partent jamais.
+        assertEquals(REAL_INIT_COMMANDS.take(1), f.link.writes)
+        assertEquals(ScaleSessionState.Idle, f.state)
+    }
+
+    /**
+     * `markSeen` franchit une suspension — une transaction Room — après la garde qui la précède.
+     *
+     * La session peut donc être invalidée pendant l'écriture de `Last seen`, et la machine
+     * reprenait alors son cours au nom d'une session close : elle enchaînait sur l'attente des
+     * trames d'une liaison que plus personne n'observait. La ligne déjà écrite, elle, ne se défait
+     * pas — une transaction partie est partie — et ce test l'assume explicitement plutôt que de
+     * prétendre l'inverse.
+     */
+    @Test
+    fun `une session invalidée pendant markSeen n'attend plus aucune trame`() = runTest {
+        val f = fixture(listOf(hbScale))
+        f.scales.blockMarkSeen()
+
+        f.reachWaitingForStepOn(this)
+        assertTrue(f.scales.contacts.isEmpty())
+
+        f.source.stop()
+        runCurrent()
+
+        f.scales.releaseMarkSeen()
+        runCurrent()
+
+        assertEquals(1, f.scales.contacts.size)
+        assertTrue(f.link.writes.isEmpty())
+        assertEquals(0, f.link.frameRequests)
+        assertEquals(ScaleSessionState.Idle, f.state)
+    }
 
     // endregion
 }

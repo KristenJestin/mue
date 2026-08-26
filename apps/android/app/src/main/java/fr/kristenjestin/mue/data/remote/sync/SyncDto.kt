@@ -112,6 +112,17 @@ data class AggregateMetaDto(
  * unit exists to avoid. [date] repeats the aggregate identifier because PRD 12.2 requires an
  * upsert to carry the complete aggregate: a payload that only made sense next to its envelope
  * could not be replayed from the journal on its own.
+ *
+ * **Ce payload est incomplet depuis le module balance, et quelque chose s'appuie là-dessus.**
+ * Une mesure porte désormais une impédance, une composition corporelle et une provenance
+ * (PRD_SCALE 21.1) qu'aucun champ ci-dessous ne transporte. `RoomSyncStore.applyMeasurementUpsert`
+ * en tire une règle provisoire : un changement descendu qui répète le poids connu ne touche à rien,
+ * parce qu'appliquer la règle du payload complet de BR-SCALE-007 à un payload connu pour être
+ * partiel effacerait une impédance irremplaçable.
+ *
+ * Le jour où PRD_SCALE 22 ajoute ces champs ici, cette prémisse tombe : le payload redevient
+ * complet, BR-SCALE-007 s'applique à la lettre, et cette règle provisoire doit être retirée dans
+ * le même changement. Ne pas ajouter de champ ci-dessous sans aller lire cette fonction.
  */
 @Serializable
 data class MeasurementPayloadV1Dto(

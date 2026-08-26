@@ -385,17 +385,25 @@ internal class BleScaleSessionSource(
             // « markSeen sur la balance à chaque contact réussi » : l'adresse et le nom annoncé
             // sont des indices rafraîchis à chaque rencontre, l'id et le nom donné ne bougent pas
             // (FR-SCALE-001).
+            //
+            // La garde encadre cet appel des **deux** côtés. `markSeen` franchit une suspension —
+            // une transaction Room — après la vérification qui la précède, et un `stop()` peut
+            // invalider la session pendant ce temps. La relecture d'après ne défait pas la ligne
+            // déjà écrite, mais elle est ce qui empêche la séquence de continuer au nom d'une
+            // session close : sans elle, la machine enchaînait sur l'attente des trames d'une
+            // liaison que plus personne n'observait (PRD_SCALE 21.2).
             scales.markSeen(
                 id = candidate.device.id,
                 address = candidate.advertisement.address,
                 advertisedName = candidate.advertisement.name ?: candidate.device.advertisedName,
                 at = now(),
             )
+            if (activeSessionId != sessionId) return true
 
             val protocol = candidate.driver.newSession()
             // PRD_SCALE 14.3 : la séquence part une fois l'abonnement effectif, ce que le contrat
             // de ScaleTransport.connect garantit, et une écriture à la fois.
-            sendAll(link, protocol.onSubscribed())
+            sendAll(sessionId, link, protocol.onSubscribed())
             publish(sessionId, ScaleSessionState.WaitingForStepOn)
 
             return when (val outcome = awaitStableWeight(sessionId, link, protocol, candidate)) {
@@ -440,7 +448,7 @@ internal class BleScaleSessionSource(
 
                 // Une impédance avant tout poids ne veut rien dire ; on l'acquitte pour ne pas
                 // laisser le protocole en suspens, et on continue d'attendre le poids.
-                is ScaleFrameEvent.Impedance -> sendAll(link, event.replies)
+                is ScaleFrameEvent.Impedance -> sendAll(sessionId, link, event.replies)
 
                 is ScaleFrameEvent.Weight -> {
                     val hundredths = roundedToStep(event.hundredthsKg)
@@ -448,7 +456,7 @@ internal class BleScaleSessionSource(
 
                     if (!event.stable) {
                         if (withinBounds) publish(sessionId, ScaleSessionState.Measuring(hundredths))
-                        sendAll(link, event.replies)
+                        sendAll(sessionId, link, event.replies)
                         continue
                     }
 
@@ -473,7 +481,7 @@ internal class BleScaleSessionSource(
                     // attendre un aller-retour GATT, et l'enregistrement est déjà possible
                     // (FR-SCALE-023, « le poids stable suffit »).
                     publish(sessionId, ScaleSessionState.Stable(reading))
-                    sendAll(link, event.replies)
+                    sendAll(sessionId, link, event.replies)
                     return WeightOutcome.Stable(reading)
                 }
             }
@@ -543,10 +551,10 @@ internal class BleScaleSessionSource(
                 // La balance répète sa trame stable ; le pilote sait n'acquitter qu'une fois
                 // (PRD_SCALE 14.3 point 6), et aucune autre source ne peut plus remplacer la mesure
                 // (FR-SCALE-015).
-                is ScaleFrameEvent.Weight -> sendAll(link, event.replies)
+                is ScaleFrameEvent.Weight -> sendAll(sessionId, link, event.replies)
 
                 is ScaleFrameEvent.Impedance -> {
-                    sendAll(link, event.replies)
+                    sendAll(sessionId, link, event.replies)
                     return event.ohm?.let(ImpedanceOutcome::Measured) ?: ImpedanceOutcome.Refused
                 }
             }
@@ -557,9 +565,22 @@ internal class BleScaleSessionSource(
 
     // region écritures, état, bornes
 
-    /** Les écritures du pilote, dans l'ordre, **une à la fois** (PRD_SCALE 14.3). */
-    private suspend fun sendAll(link: ScaleLink, writes: List<ScaleWrite>) {
-        for (write in writes) link.write(write)
+    /**
+     * Les écritures du pilote, dans l'ordre, **une à la fois** (PRD_SCALE 14.3).
+     *
+     * La garde de `sessionId` est relue **entre chaque écriture**, et pas seulement à l'entrée.
+     * `link.write` suspend jusqu'à l'acquittement de la pile ; un `stop()` — l'utilisateur quitte
+     * `Entry`, l'application passe en arrière-plan — peut invalider la session pendant cette
+     * suspension, et sans cette relecture les octets suivants partaient quand même vers la balance.
+     * Aucun état n'était corrompu, mais PRD_SCALE 21.2 promet « invalider d'abord, annuler
+     * ensuite » : l'annulation coopérative n'est pas instantanée, et la promesse ne vaut que si
+     * elle va jusqu'au fil.
+     */
+    private suspend fun sendAll(sessionId: String, link: ScaleLink, writes: List<ScaleWrite>) {
+        for (write in writes) {
+            if (activeSessionId != sessionId) return
+            link.write(write)
+        }
     }
 
     /** La seule écriture d'état d'une session vivante. Garde de PRD_SCALE 21.2 incluse. */

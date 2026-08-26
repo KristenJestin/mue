@@ -67,7 +67,11 @@ sealed interface ScaleSessionState {
      * Poids stable reçu et dans le domaine de Mue. La valeur se pose sur la règle et
      * l'enregistrement est immédiatement possible.
      */
-    data class Stable(val reading: ScaleReading) : ScaleSessionState
+    data class Stable(val reading: ScaleReading) : ScaleSessionState {
+
+        /** Voir [ScaleSessionState.weightOf] : la garantie du KDoc, portée par le type. */
+        val weight: Weight = weightOf(reading)
+    }
 
     /**
      * La session est terminée : l'impédance est arrivée, ou les dix secondes qui suivent le poids
@@ -76,11 +80,21 @@ sealed interface ScaleSessionState {
      * [ScaleReading.impedanceOhm] vaut `null` quand la balance a signalé une mesure impossible ou
      * quand le délai a expiré. Ces deux cas se distinguent par [impedanceRefused], parce que le
      * conseil « pieds nus » ne doit être affiché que dans le premier (FR-BODY-002, 18.3).
+     *
+     * [impedanceRefused] **n'a délibérément pas de valeur par défaut**. Ce drapeau est la seule
+     * chose qui sépare « la balance a signalé une impédance impossible » de « les dix secondes se
+     * sont écoulées », et c'est lui qui décide d'un conseil affiché ou non. Un site de construction
+     * qui l'omettrait perdrait la règle en silence, sans que le compilateur ne bronche ; l'obliger
+     * coûte quatre mots à l'appelant et fait de l'oubli une erreur de compilation.
      */
     data class Complete(
         val reading: ScaleReading,
-        val impedanceRefused: Boolean = false,
-    ) : ScaleSessionState
+        val impedanceRefused: Boolean,
+    ) : ScaleSessionState {
+
+        /** Voir [ScaleSessionState.weightOf] : la garantie du KDoc, portée par le type. */
+        val weight: Weight = weightOf(reading)
+    }
 
     /**
      * Un poids **stable** hors de `30.0–250.0 kg` a été reçu.
@@ -103,11 +117,17 @@ sealed interface ScaleSessionState {
     data class Unavailable(val reason: ScaleUnavailableReason) : ScaleSessionState
 
     /**
-     * La valeur reçue est-elle enregistrable en l'état ?
+     * La lecture portée par cet état, ou `null` quand il n'y en a aucune.
      *
-     * Utilisé par l'écran pour décider s'il affiche la marque de provenance et s'il joint une
-     * impédance à l'enregistrement. Volontairement porté par le domaine plutôt que recopié dans
-     * chaque `when` de l'interface.
+     * Ce que cet accesseur rend, ce sont les deux seuls états enregistrables — [Stable] et
+     * [Complete] — sans avoir à les distinguer. Il sert là où la question posée est « une mesure
+     * est-elle déjà tombée ? » et où la réponse ne dépend pas de laquelle : la machine à états
+     * l'interroge pour savoir si l'échéance des deux minutes doit encore conclure sur `NotFound`
+     * (FR-SCALE-020).
+     *
+     * Il ne remplace pas le `when` de l'écran, et ne prétend pas le faire : `Entry` doit, lui,
+     * distinguer les deux — seul [Complete] porte [Complete.impedanceRefused], donc le conseil
+     * « pieds nus » de FR-BODY-002.
      */
     val stableReading: ScaleReading?
         get() = when (this) {
@@ -115,4 +135,28 @@ sealed interface ScaleSessionState {
             is Complete -> this.reading
             else -> null
         }
+
+    companion object {
+
+        /**
+         * Le poids d'une lecture **déjà validée**, et la vérification qui le prouve.
+         *
+         * PRD_SCALE 14.4 et BR-SCALE-002 placent l'arrondi au pas et les bornes « à la frontière du
+         * domaine » : la couche BLE arrondit puis refuse hors de `30.0–250.0 kg`, et un poids qui
+         * n'y entre pas devient [OutOfRange] au lieu de [Stable]. Autrement dit, [Stable] et
+         * [Complete] *portent* la garantie — mais tant qu'ils ne transportaient qu'un `Int` nu, rien
+         * n'obligeait leur lecteur à s'y fier, et `EntryViewModel` revalidait par un second
+         * algorithme (`Double`, arrondi au plus proche, refus) capable de transformer un état
+         * `Stable` en avis « hors bornes ». Deux frontières de validation valent moins qu'une : le
+         * type vérifie ici, une fois, avec **exactement** le prédicat de la couche BLE, et l'écran
+         * lit [Stable.weight] sans avoir à envisager l'échec.
+         *
+         * Le message est un diagnostic interne, jamais affiché (PRD_SCALE 18.5).
+         */
+        private fun weightOf(reading: ScaleReading): Weight =
+            requireNotNull(Weight.ofHundredthsOrNull(reading.weightHundredthsKg)) {
+                "a reading of ${reading.weightHundredthsKg} hundredths of a kilogram is outside " +
+                    "the domain and is never Stable nor Complete (BR-SCALE-002)"
+            }
+    }
 }

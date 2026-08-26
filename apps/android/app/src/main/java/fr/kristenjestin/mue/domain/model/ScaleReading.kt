@@ -27,8 +27,13 @@ import java.time.Instant
  * @property sessionId UUID de la tentative de pesée en mémoire. Ne survit pas au processus.
  * @property weightHundredthsKg Poids en centièmes de kilogramme, l'unité de vérité de tout Mue.
  *   Non validé : voir ci-dessus.
- * @property isStable Une lecture instable est affichée mais n'est jamais enregistrable
- *   (BR-SCALE-001).
+ * @property isStable Toujours `true`. **Le type ne peut pas porter l'état que ce champ suggère** :
+ *   une trame instable ne devient jamais une lecture, elle devient un
+ *   `ScaleSessionState.Measuring(Int)` délibérément nu, précisément pour qu'il soit impossible de
+ *   l'enregistrer (BR-SCALE-001). Le champ est donc constant à son unique site de construction et
+ *   lu par personne ; il est conservé parce qu'il appartient au contrat de domaine écrit en vague 0
+ *   et que le retirer toucherait des fichiers hors du périmètre de ce correctif. Son KDoc, lui,
+ *   décrivait un cas inatteignable et se lisait comme si un appelant devait le tester.
  * @property impedanceOhm Impédance corporelle totale, `null` quand la balance a signalé une mesure
  *   impossible — pieds nus insuffisants, contact partiel (FR-BODY-002, BR-SCALE-005). Une absence,
  *   jamais une valeur.

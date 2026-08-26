@@ -283,6 +283,36 @@ class RoomMeasurementRepositoryTest {
         )
     }
 
+    /**
+     * BR-SCALE-015 rendue structurelle : « `inputWeightCg` est toujours égal au poids de sa mesure
+     * parente ».
+     *
+     * Aucune contrainte SQL ne peut la tenir — le poids vit dans l'autre table — et aucune
+     * vérification après coup ne serait lancée par qui que ce soit. La seule forme qui la rende
+     * vraie est une conversion qui n'offre pas l'occasion de la violer : le domaine qu'on passe ici
+     * est délibérément incohérent, et la ligne écrite ne l'est pas.
+     */
+    @Test
+    fun aCompositionWhoseInputWeightDivergesCannotReachTheDatabase() = runTest {
+        val coherent = scaleMeasurement("2026-08-23", withComposition = true)
+
+        repository.save(
+            coherent.copy(
+                bodyComposition = coherent.bodyComposition?.copy(inputWeightCg = 6_000),
+            ),
+        )
+
+        assertEquals(
+            "l'instantané d'entrée est le poids de la ligne parente, pas celui qu'on a fourni",
+            7_845,
+            database.measurementDao().findComposition("2026-08-23")?.inputWeightCg,
+        )
+        assertEquals(
+            7_845,
+            repository.findByDate(LocalDate.of(2026, 8, 23))?.bodyComposition?.inputWeightCg,
+        )
+    }
+
     private fun measurement(isoDate: String, weightCg: Int) =
         Measurement(LocalDate.parse(isoDate), Weight.ofHundredthsClamped(weightCg))
 

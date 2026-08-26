@@ -22,6 +22,38 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.update
 import java.time.Instant
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+
+/**
+ * Une suspension dont la reprise **n'est pas annulable**.
+ *
+ * `suspendCoroutine` et non `CompletableDeferred.await()`, délibérément. Le KDoc de
+ * [BleScaleSessionSource] pose que « l'annulation coopérative des coroutines est un second rideau,
+ * pas le premier : elle n'est pas instantanée ». Une attente annulable ferait tomber la coroutine de
+ * session à la milliseconde où le test appelle `stop()`, et masquerait donc l'absence du premier
+ * rideau — la garde de `sessionId` — au lieu de l'éprouver. Ici, la reprise se fait comme un rappel
+ * de pile BLE : elle rend la main au code appelant, qui continue de s'exécuter jusqu'à sa prochaine
+ * suspension réelle. C'est exactement la fenêtre que la garde doit couvrir (PRD_SCALE 21.2).
+ */
+private class TestLatch {
+
+    private val waiting = mutableListOf<Continuation<Unit>>()
+
+    var closed: Boolean = false
+
+    suspend fun pass() {
+        if (closed) suspendCoroutine { waiting += it }
+    }
+
+    fun open() {
+        closed = false
+        val resumed = waiting.toList()
+        waiting.clear()
+        resumed.forEach { it.resume(Unit) }
+    }
+}
 
 /*
  * Les doubles de la machine à états de session (PRD_SCALE 21.3).
@@ -124,6 +156,21 @@ internal class FakeScaleRepository(initial: List<ScaleDevice> = emptyList()) : S
 
     val contacts: MutableList<Contact> = mutableListOf()
 
+    private val markSeenLatch = TestLatch()
+
+    /**
+     * Retient [markSeen] au milieu de sa transaction, jusqu'à [releaseMarkSeen].
+     *
+     * `markSeen` est une écriture en base : elle franchit une suspension entre la garde qui la
+     * précède et la ligne réellement écrite, et c'est cette fenêtre-là qu'un test doit pouvoir
+     * ouvrir à volonté.
+     */
+    fun blockMarkSeen() {
+        markSeenLatch.closed = true
+    }
+
+    fun releaseMarkSeen() = markSeenLatch.open()
+
     override fun observeAll(): Flow<List<ScaleDevice>> = devices.asStateFlow()
 
     override suspend fun getAll(): List<ScaleDevice> = devices.value
@@ -139,6 +186,7 @@ internal class FakeScaleRepository(initial: List<ScaleDevice> = emptyList()) : S
     }
 
     override suspend fun markSeen(id: String, address: String, advertisedName: String, at: Instant) {
+        markSeenLatch.pass()
         contacts += Contact(id, address, advertisedName, at)
         devices.update { list ->
             list.map {
@@ -183,6 +231,15 @@ internal class FakeScaleTransport : ScaleTransport {
 
     /** Durée d'une connexion, en temps virtuel. Sert à éprouver la fenêtre de deux minutes. */
     var connectDelayMs: Long = 0L
+
+    /**
+     * Les liaisons ouvertes à partir de maintenant retiennent leurs écritures.
+     *
+     * Sur le transport et non sur la liaison, parce que c'est lui qui la fabrique : la séquence
+     * d'initialisation part dans la foulée de la connexion, bien avant qu'un test ait la main sur
+     * la [FakeScaleLink] qui vient de naître.
+     */
+    var blockWritesOnNewLinks: Boolean = false
 
     var availabilityChecks: Int = 0
         private set
@@ -234,7 +291,11 @@ internal class FakeScaleTransport : ScaleTransport {
             connectionsToRefuse -= 1
             throw ScaleTransportException("connection refused by the fake transport")
         }
-        return FakeScaleLink(advertisement.address).also { links += it }
+        return FakeScaleLink(advertisement.address)
+            .also { link ->
+                if (blockWritesOnNewLinks) link.blockWrites()
+                links += link
+            }
     }
 
     /** Une balance passe devant la radio. Sans scan en cours, l'annonce est perdue, comme en vrai. */
@@ -264,15 +325,40 @@ internal class FakeScaleLink(val address: String) : ScaleLink {
     /** Les trames présentées après la fermeture de la liaison. */
     val lateFrames: MutableList<String> = mutableListOf()
 
+    /**
+     * Nombre de fois où la machine s'est mise à attendre une trame.
+     *
+     * Une session close ne doit plus rien attendre du tout : ce compteur est ce qui distingue « la
+     * machine s'est arrêtée » de « la machine attend une balance que plus personne n'écoute ».
+     */
+    var frameRequests: Int = 0
+        private set
+
     var closed: Boolean = false
         private set
 
     private var lost: Boolean = false
 
-    override suspend fun nextFrame(): ByteArray? = frames.receiveCatching().getOrNull()
+    private val writeLatch = TestLatch()
+
+    /** Les écritures suivantes resteront en vol jusqu'à [releaseWrites]. */
+    fun blockWrites() {
+        writeLatch.closed = true
+    }
+
+    fun releaseWrites() = writeLatch.open()
+
+    override suspend fun nextFrame(): ByteArray? {
+        frameRequests += 1
+        return frames.receiveCatching().getOrNull()
+    }
 
     override suspend fun write(write: ScaleWrite) {
         if (closed || lost) throw ScaleTransportException("write on a dead link")
+        // La suspension est **avant** l'enregistrement : une écriture retenue est une écriture qui
+        // n'a pas encore atteint la balance, exactement comme celle qu'une pile BLE n'a pas encore
+        // acquittée (PRD_SCALE 14.3).
+        writeLatch.pass()
         writes += HbFrames.hex(write.bytes)
     }
 

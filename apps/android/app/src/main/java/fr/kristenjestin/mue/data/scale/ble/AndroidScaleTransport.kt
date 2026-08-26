@@ -22,19 +22,11 @@ import fr.kristenjestin.mue.domain.model.ScaleGattProfile
 import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
 import fr.kristenjestin.mue.domain.model.ScaleWrite
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeout
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicReference
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /** Étiquette du journal technique de PRD_SCALE 18.5. */
 private const val LOG_TAG = "MueScale"
@@ -53,15 +45,6 @@ private val CLIENT_CONFIGURATION_DESCRIPTOR = bluetoothUuid16(0x2902)
 private const val FRAME_BUFFER = 64
 
 /**
- * Plafond d'attente d'un acquittement d'écriture.
- *
- * Le spike a constaté qu'un périphérique bon marché peut ne jamais rappeler `onCharacteristicWrite`,
- * ce qui bloquerait la séquence de mesure pour toujours ; il s'en protégeait par un chien de garde
- * de quatre secondes. La valeur est reprise telle quelle, éprouvée sur l'appareil réel.
- */
-private const val WRITE_TIMEOUT_MS = 4_000L
-
-/**
  * La liaison Bluetooth réelle (PRD_SCALE 21.2).
  *
  * **Ce fichier est le seul du module à importer `android.bluetooth`**, et il ne contient aucune
@@ -74,8 +57,8 @@ private const val WRITE_TIMEOUT_MS = 4_000L
  * 1. **Une opération GATT à la fois.** La pile d'Android n'en accepte qu'une en vol et rejette les
  *    suivantes sans erreur. Les trois commandes d'initialisation enchaînées sans attente en perdent
  *    deux, et la pesée reste bloquée en attente d'un flux de poids qui ne viendra jamais
- *    (PRD_SCALE 14.3). [AndroidScaleLink.write] sérialise par un `Mutex` et n'est rendue qu'au
- *    callback d'acquittement.
+ *    (PRD_SCALE 14.3). [AndroidScaleLink.write] délègue à [ScaleWriteQueue], qui sérialise et ne
+ *    rend la main qu'à l'acquittement **de cette écriture-là**.
  * 2. **L'abonnement avant la séquence.** Écrire la commande de démarrage avant que le descripteur
  *    `0x2902` soit écrit revient à parler dans le vide. [connect] ne rend donc la main qu'après
  *    `onDescriptorWrite`.
@@ -188,9 +171,14 @@ internal class AndroidScaleTransport(
  *
  * Le pont entre les callbacks d'Android — qui arrivent sur un fil de liaison quelconque — et les
  * coroutines de l'appelant tient en trois objets : un [CompletableDeferred] pour l'abonnement, une
- * file pour les trames, une continuation pour l'écriture en vol. Aucun `Handler`, contrairement au
+ * file pour les trames, une [ScaleWriteQueue] pour les écritures. Aucun `Handler`, contrairement au
  * spike : la sérialisation qu'il obtenait par une file d'opérations sur le fil principal, une
  * fonction suspendante l'obtient par sa propre séquence d'exécution.
+ *
+ * **Cette classe ne fait plus que de la plomberie.** Tout ce qui est une règle — un seul GATT en
+ * vol, quelle écriture un acquittement acquitte, le chien de garde, la traduction en
+ * [ScaleTransportException] — vit dans [ScaleWriteQueue], qui ne connaît ni `BluetoothGatt` ni
+ * `Looper` et se couvre donc entièrement en JVM pure (PRD_SCALE 21.3, 23).
  */
 @SuppressLint("MissingPermission")
 private class AndroidScaleLink(
@@ -200,14 +188,22 @@ private class AndroidScaleLink(
 
     private val frames = Channel<ByteArray>(FRAME_BUFFER)
 
-    /** Une écriture à la fois, sur toute la durée de la liaison (PRD_SCALE 14.3). */
-    private val writeGate = Mutex()
-
     /** Complété quand l'abonnement est effectif, en échec si la liaison meurt avant. */
     private val subscribed = CompletableDeferred<Unit>()
 
-    /** La continuation de l'écriture en vol. `AtomicReference` : le callback arrive d'un autre fil. */
-    private val pendingWrite = AtomicReference<kotlinx.coroutines.CancellableContinuation<Unit>?>(null)
+    /**
+     * La sérialisation des écritures (PRD_SCALE 14.3).
+     *
+     * L'émetteur relit [gatt] et [writeCharacteristic] à chaque émission plutôt que de les capturer :
+     * ils ne sont connus qu'après `onServicesDiscovered`, c'est-à-dire bien après la construction de
+     * cette liaison.
+     */
+    private val writes = ScaleWriteQueue(log) { bytes ->
+        val client = gatt ?: throw ScaleTransportException("write without a GATT client")
+        val characteristic = writeCharacteristic
+            ?: throw ScaleTransportException("write characteristic ${profile.write} missing")
+        send(client, characteristic, bytes)
+    }
 
     @Volatile
     private var gatt: BluetoothGatt? = null
@@ -235,52 +231,14 @@ private class AndroidScaleLink(
 
     override suspend fun write(write: ScaleWrite) {
         if (closed) throw ScaleTransportException("write on a closed link")
-        writeGate.withLock {
-            val client = gatt ?: throw ScaleTransportException("write without a GATT client")
-            val characteristic = writeCharacteristic
-                ?: throw ScaleTransportException("write characteristic ${profile.write} missing")
-
-            if (!write.awaitAck) {
-                if (!send(client, characteristic, write.bytes)) {
-                    throw ScaleTransportException("write refused by the stack")
-                }
-                return@withLock
-            }
-
-            try {
-                withTimeout(WRITE_TIMEOUT_MS) {
-                    suspendCancellableCoroutine { continuation ->
-                        if (!pendingWrite.compareAndSet(null, continuation)) {
-                            continuation.resumeWithException(
-                                ScaleTransportException("a write is already in flight"),
-                            )
-                            return@suspendCancellableCoroutine
-                        }
-                        continuation.invokeOnCancellation { pendingWrite.compareAndSet(continuation, null) }
-                        if (!send(client, characteristic, write.bytes)) {
-                            if (pendingWrite.compareAndSet(continuation, null)) {
-                                continuation.resumeWithException(
-                                    ScaleTransportException("write refused by the stack"),
-                                )
-                            }
-                        }
-                    }
-                }
-            } catch (timeout: TimeoutCancellationException) {
-                // Traduit en panne de liaison, et surtout **pas** laissé remonter comme une
-                // annulation : une CancellationException fermerait la session de deux minutes, là
-                // où une écriture perdue ne justifie qu'une nouvelle tentative (FR-SCALE-021).
-                pendingWrite.set(null)
-                throw ScaleTransportException("no write acknowledgement in ${WRITE_TIMEOUT_MS} ms", timeout)
-            }
-        }
+        writes.write(write)
     }
 
     override fun close() {
         if (closed) return
         closed = true
         frames.close()
-        failPending("link closed")
+        writes.fail("link closed")
         gatt?.let {
             runCatching { it.disconnect() }
             runCatching { it.close() }
@@ -354,20 +312,27 @@ private class AndroidScaleLink(
             }
         }
 
+        /**
+         * L'acquittement d'une écriture — **pas** forcément de celle qu'on attend.
+         *
+         * La corrélation est faite par [ScaleWriteQueue] sur un rang croissant, et non ici sur la
+         * caractéristique : toutes les écritures de la séquence portent la même, `0xFFF2`, si bien
+         * qu'une comparaison d'UUID laisserait passer l'acquittement tardif d'une écriture déjà
+         * abandonnée par le chien de garde. Aucun filtrage n'a lieu ici non plus : chaque appel
+         * correspond à une émission de ce client et doit donc consommer exactement un rang, sans
+         * quoi tous les acquittements suivants seraient décalés (PRD_SCALE 14.3).
+         */
         override fun onCharacteristicWrite(
             client: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             status: Int,
-        ) {
-            val continuation = pendingWrite.getAndSet(null) ?: return
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                continuation.resume(Unit)
+        ) = writes.acknowledge(
+            failure = if (status == BluetoothGatt.GATT_SUCCESS) {
+                null
             } else {
-                continuation.resumeWithException(
-                    ScaleTransportException("write rejected by the scale, status=$status"),
-                )
-            }
-        }
+                "write rejected by the scale, status=$status"
+            },
+        )
     }
 
     /** Seule la caractéristique de notification du pilote compte ; le reste est du bavardage. */
@@ -385,11 +350,7 @@ private class AndroidScaleLink(
     private fun onLinkLost(reason: String) {
         subscribed.completeExceptionally(ScaleTransportException(reason))
         frames.close()
-        failPending(reason)
-    }
-
-    private fun failPending(reason: String) {
-        pendingWrite.getAndSet(null)?.resumeWithException(ScaleTransportException(reason))
+        writes.fail(reason)
     }
 
     private fun send(
