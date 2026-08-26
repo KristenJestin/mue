@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -103,24 +104,28 @@ class FoodDayScreenTest {
      * The heart of PRD_FOOD 13: three facts, three drawings, on one screen.
      *
      * The lunch holds an espresso whose protein is a **known zero**; the snack holds a quick add
-     * whose protein nobody wrote down; the breakfast holds nothing at all. Each moment is
-     * scrolled to before it is read, because a `LazyColumn` composes what is near the viewport
-     * and an assertion made from the wrong scroll position proves nothing about either.
+     * whose protein nobody wrote down; the dinner holds nothing at all — only an unconfirmed
+     * proposal, which enters no total. Each moment is scrolled to before it is read, because a
+     * `LazyColumn` composes what is near the viewport and an assertion made from the wrong
+     * scroll position proves nothing about either.
      */
     @Test
     fun aKnownZeroAndAnUnknownAreDrawnDifferently() {
         setDay(previewDayState())
 
         scrollTo(FoodTestTags.slot(MealSlot.LUNCH))
-        compose.onNodeWithText("≈ 0.0 g protein", useUnmergedTree = true).assertExists()
+        assertDrawn(entryTag(FoodDayPreviewData.espresso().id), "≈ 0.0 g protein")
 
         scrollTo(FoodTestTags.slot(MealSlot.SNACK))
-        compose.onNodeWithText("${FoodLabels.UNKNOWN} protein", useUnmergedTree = true)
-            .assertExists()
+        assertDrawn(entryTag(FoodDayPreviewData.tiramisu().id), "${FoodLabels.UNKNOWN} protein")
 
-        // Breakfast holds nothing, so it draws neither of the two.
-        scrollTo(FoodTestTags.slot(MealSlot.BREAKFAST))
-        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.BREAKFAST), useUnmergedTree = true)
+        /*
+         * Dinner holds no line at all — its proposal is not one, and PRD_FOOD 12 keeps it out
+         * of every total — so it draws neither of the two readings above. Breakfast would not
+         * do: it holds the oat bowl, and a moment with a line shows its own total.
+         */
+        scrollTo(FoodTestTags.slot(MealSlot.DINNER))
+        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.DINNER), useUnmergedTree = true)
             .assertDoesNotExist()
     }
 
@@ -167,11 +172,10 @@ class FoodDayScreenTest {
 
         // One line, protein unknown: the moment is recorded, and says so metric by metric.
         assertEquals(listOf(MealSlot.SNACK), momentsShowingATotal())
-        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.SNACK), useUnmergedTree = true)
-            .assertExists()
-        compose.onNodeWithText("≈ 420 kcal", useUnmergedTree = true).assertExists()
-        compose.onNodeWithText("${FoodLabels.UNKNOWN} protein", useUnmergedTree = true)
-            .assertExists()
+        val snackTotal = FoodTestTags.slotTotal(MealSlot.SNACK)
+        compose.onNodeWithTag(snackTotal, useUnmergedTree = true).assertExists()
+        assertDrawn(snackTotal, "≈ 420 kcal")
+        assertDrawn(snackTotal, "${FoodLabels.UNKNOWN} protein")
 
         val unknown = drawnText()
         assertTrue(
@@ -198,9 +202,10 @@ class FoodDayScreenTest {
 
         scrollTo(FoodTestTags.slot(MealSlot.SNACK))
 
-        compose.onNodeWithTag(FoodTestTags.slotTotal(MealSlot.SNACK), useUnmergedTree = true)
-            .assertExists()
-        compose.onNodeWithText("≈ 420 kcal", useUnmergedTree = true).assertExists()
+        val snackTotal = FoodTestTags.slotTotal(MealSlot.SNACK)
+        compose.onNodeWithTag(snackTotal, useUnmergedTree = true).assertExists()
+        assertDrawn(snackTotal, "≈ 420 kcal")
+        assertDrawn(snackTotal, "${FoodLabels.UNKNOWN} protein")
     }
 
     // endregion
@@ -347,6 +352,31 @@ class FoodDayScreenTest {
     // endregion
 
     // region harness
+
+    /** The handle of one journal line, which is the only thing that tells two lines apart. */
+    private fun entryTag(id: FoodLogEntryId): String = FoodTestTags.logEntry(id.value)
+
+    /**
+     * Asserts that the node handled by [tag] draws [text] somewhere inside itself.
+     *
+     * A moment holding exactly one line necessarily totals to that line's own figures, so
+     * `≈ 420 kcal` and `— protein` are each drawn twice on such a screen — once on the line
+     * and once on the moment's heading — and both of them are right (PRD_FOOD 10.1: a moment
+     * shows its own total as soon as it holds a line). A sweep of the whole tree for one of
+     * those strings therefore cannot say *which* of the two it means, and fails for being
+     * ambiguous rather than for finding anything wrong.
+     *
+     * Scoping the search to a tagged subtree is what names the node instead: the assertion says
+     * "the espresso line reads a known zero" or "the snack's own total reads a dash", and it
+     * goes on saying exactly that when a fixture gains a line. Counting the matches would only
+     * restate today's fixture, and would still not name what it is talking about.
+     */
+    private fun assertDrawn(tag: String, text: String) {
+        compose.onNode(
+            hasTestTag(tag) and hasAnyDescendant(hasText(text)),
+            useUnmergedTree = true,
+        ).assertExists()
+    }
 
     private fun assertTallEnough(tag: String) {
         val height = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot().height
