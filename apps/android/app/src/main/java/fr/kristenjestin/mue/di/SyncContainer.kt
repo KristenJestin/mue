@@ -6,6 +6,11 @@ import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.datastore.syncTokenDataStore
 import fr.kristenjestin.mue.data.local.datastore.userProfileDataStore
+import fr.kristenjestin.mue.data.pairing.KeystoreTokenStore
+import fr.kristenjestin.mue.data.pairing.KtorPairingApi
+import fr.kristenjestin.mue.data.pairing.PairingApi
+import fr.kristenjestin.mue.data.pairing.RoomPairingStore
+import fr.kristenjestin.mue.data.pairing.ServerPairing
 import fr.kristenjestin.mue.data.remote.sync.KtorSyncApi
 import fr.kristenjestin.mue.data.remote.sync.SyncApi
 import fr.kristenjestin.mue.data.sync.HealthProfileSeeding
@@ -89,4 +94,32 @@ class SyncContainer(
 
     /** One engine per process, so `Sync now` and the periodic worker share its gate. */
     val engine: SyncEngine by lazy { SyncEngine(store = store, api = api, scope = engineScope) }
+
+    /**
+     * The Better Auth half of PRD 9.2, on the **same** [httpClient] as [api].
+     *
+     * Sharing it is not thrift. PRD 16 has the pairing verify the certificate of the address that
+     * was entered, and the certificate that matters is the one every later synchronisation will
+     * be checked against — a second client is a second trust configuration, and a pairing proved
+     * against one of them would say nothing about the other.
+     */
+    val pairingApi: PairingApi by lazy { KtorPairingApi(httpClient) }
+
+    /**
+     * `Connect` and `Disconnect server`, whole (PRD 9.2 and 9.3).
+     *
+     * It takes [engine] because a successful pairing has to trigger the initial synchronisation,
+     * and taking the same instance is what makes that run share the gate with the worker instead
+     * of racing it.
+     */
+    val pairing: ServerPairing by lazy {
+        ServerPairing(
+            store = RoomPairingStore(syncDao),
+            tokenStore = KeystoreTokenStore(tokenStore),
+            api = pairingApi,
+            // The engine is resolved when the pairing succeeds, not when the container is built,
+            // so opening `Server settings` still does not run the `inflight` recovery.
+            firstSync = { engine.sync() },
+        )
+    }
 }
