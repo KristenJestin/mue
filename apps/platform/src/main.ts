@@ -1,5 +1,6 @@
 import { runtime } from "./serve";
 import { isDelegatedPath } from "./server";
+import { readTlsFiles, schemeFor } from "./tls";
 
 /**
  * The process entry: `bun run dist/server/main.js`, and nothing else.
@@ -10,9 +11,9 @@ import { isDelegatedPath } from "./server";
  * raced for the same port and the process died on `EADDRINUSE` before answering a
  * single request. This module exports nothing, so only the `Bun.serve` below listens.
  *
- * It reads `PORT`, `HOST` and `MUE_CLIENT_DIR`; `serve.ts` and the packages under it
- * read everything else. No test imports either, so `bun test` still runs with
- * `DATABASE_URL` unset.
+ * It reads `PORT`, `HOST`, `MUE_CLIENT_DIR` and the two TLS paths of `./tls`; `serve.ts`
+ * and the packages under it read everything else. No test imports either, so `bun test`
+ * still runs with `DATABASE_URL` unset.
  */
 
 const port = Number(process.env["PORT"] ?? 3000);
@@ -20,6 +21,34 @@ const port = Number(process.env["PORT"] ?? 3000);
 // Loopback by default: no Mue service listens on a public interface unless it was
 // configured to (PRD section 22.5).
 const hostname = process.env["HOST"] ?? "127.0.0.1";
+
+/**
+ * Absent unless both variables are set, and it throws rather than downgrade if only one
+ * is -- see `./tls`. Read before `Bun.serve` so a half-configured certificate stops the
+ * process here, with a message, instead of opening a plaintext port that answers
+ * `/health/ready` and looks healthy.
+ */
+const tlsFiles = readTlsFiles(process.env);
+
+/**
+ * Spread into the options below rather than written as `tls: undefined`.
+ *
+ * `exactOptionalPropertyTypes` is on, and Bun's `tls` is optional but not nullable, so an
+ * explicit `undefined` is a type error rather than an absence. Spreading `{}` is the only
+ * shape that means what this needs to mean: for a deployment that sets neither variable,
+ * the key is not there at all and the options object is the one that shipped before.
+ */
+const tlsOption =
+  tlsFiles === undefined
+    ? {}
+    : {
+        tls: {
+          // `BunFile`, not a string: Bun reads the PEM off disk itself, and the paths in the
+          // failure it raises for a missing or unreadable file are the ones from `.env`.
+          cert: Bun.file(tlsFiles.certificateFile),
+          key: Bun.file(tlsFiles.keyFile),
+        },
+      };
 
 /**
  * Section 20.5: "Les assets TanStack Start et le serveur Hono sont livrés dans la
@@ -51,6 +80,7 @@ async function serveAsset(pathname: string): Promise<Response | null> {
 const server = Bun.serve({
   port,
   hostname,
+  ...tlsOption,
   fetch: async (request) => {
     const { pathname } = new URL(request.url);
     /**
@@ -69,7 +99,10 @@ const server = Bun.serve({
   },
 });
 
-console.log(`Mue Platform listening on http://${server.hostname}:${server.port}`);
+// The scheme comes from the configuration that was actually read, not from a literal:
+// the line is the only place anyone checks whether TLS came up, so it must not be able
+// to say `https` about a plaintext port.
+console.log(`Mue Platform listening on ${schemeFor(tlsFiles)}://${server.hostname}:${server.port}`);
 
 /**
  * Section 20.5: "L'arrêt et le redémarrage ne perdent aucune mutation acquittée."

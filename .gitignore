@@ -25,3 +25,9 @@ proto/
 
 # Les PRD vivent à la racine du projet, hors du dépôt, avec les prototypes.
 docs/
+
+# Matériel cryptographique de développement : l'autorité locale et le certificat
+# que `scripts/dev-tls-cert.ts` fabrique pour que le téléphone atteigne le serveur
+# en HTTPS sur le réseau de la maison (§16). Une clé privée ne se versionne pas, et
+# celle-ci signe tout ce que ce PC prétend être.
+/certs/
