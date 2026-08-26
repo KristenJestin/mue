@@ -29,7 +29,7 @@ class AppContainer(private val applicationContext: Context) {
     private val database: MueDatabase by lazy { MueDatabase.build(applicationContext) }
 
     val measurementRepository: MeasurementRepository by lazy {
-        RoomMeasurementRepository(database.measurementDao())
+        RoomMeasurementRepository(database.measurementDao(), sync.outbox)
     }
 
     val activityRepository: ActivityRepository by lazy {
@@ -41,7 +41,10 @@ class AppContainer(private val applicationContext: Context) {
     }
 
     val userProfileRepository: UserProfileRepository by lazy {
-        DataStoreUserProfileRepository(applicationContext.userProfileDataStore)
+        DataStoreUserProfileRepository(
+            applicationContext.userProfileDataStore,
+            database.healthProfileDao(),
+        )
     }
 
     val userPreferencesRepository: UserPreferencesRepository by lazy {
@@ -57,4 +60,7 @@ class AppContainer(private val applicationContext: Context) {
      * changed without this file moving again.
      */
     val timer: TimerContainer by lazy { TimerContainer(applicationContext, database) }
+
+    /** Server synchronisation, whole, for the same reason as [timer]. */
+    val sync: SyncContainer by lazy { SyncContainer(applicationContext, database) }
 }

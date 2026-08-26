@@ -3,10 +3,18 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      Mue runs entirely offline. The absence of android.permission.INTERNET is a
-      deliberate, verifiable guarantee that no measurement ever leaves the device.
-      Do not add it.
+      PRD_SERVER_SYNC_MCP 19 supersedes the offline-only guarantee this file used to state.
+      Mue is still local-first — every write lands in Room first and the app is fully usable
+      with no server — but it now synchronises with the owner's private server, so the network
+      permission is required rather than forbidden. It is asked for at install time and grants
+      access to nothing but the server the user paired with.
+
+      PRD 20.4 and PRD_ACTIVITY_TIMER 17 still describe the old guarantee; PRD_SERVER_SYNC_MCP
+      is the later authority and 19 also requires the privacy policy and the store listing to
+      be updated, since neither may claim a total absence of network permission any more.
     -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--

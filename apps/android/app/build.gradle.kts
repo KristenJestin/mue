@@ -108,8 +108,18 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     // An activity draft is a nested structure, so `SavedStateHandle` holds it as one JSON
-    // string rather than as a flat set of Bundle keys.
+    // string rather than as a flat set of Bundle keys. A sync payload is stored the same way.
     implementation(libs.kotlinx.serialization.json)
+
+    // Server synchronisation (sync PRD 19). The client, its engine and the deferred worker are
+    // declared together so one Ktor version answers for all of them; see the note on the force
+    // block below for why that version is not simply the newest.
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.client.auth)
+    implementation(libs.ktor.serialization.kotlinx.json)
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Local unit tests
     testImplementation(libs.junit)
@@ -140,6 +150,13 @@ dependencies {
  * shared classes from the app's classloader first, so pinning the test side alone would change
  * nothing. The app now serializes its activity draft with the very same version it declares
  * above, so the force only moves a library every party here already expects to share.
+ *
+ * Ktor is the third party to this pin, and it is why the client is on 3.2.4 rather than on the
+ * newest release: 3.2.4 is the last version whose `ktor-serialization-kotlinx` asks for exactly
+ * 1.8.1, so nothing here has to be re-derived. From 3.3.0 onward Ktor asks for 1.9.0, which
+ * would force the pin up and put `MigrationTestHelper` back on a version of the runtime it is
+ * not built against. Bumping Ktor past 3.2.x therefore means re-deriving this force and
+ * re-running the instrumented suite, not editing one number.
  */
 configurations.configureEach {
     resolutionStrategy.force(

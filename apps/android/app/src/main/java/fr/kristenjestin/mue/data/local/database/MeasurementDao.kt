@@ -8,7 +8,7 @@ import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface MeasurementDao {
+interface MeasurementDao : SyncJournalDao {
 
     @Query("SELECT * FROM measurements ORDER BY date ASC")
     fun observeAll(): Flow<List<MeasurementEntity>>
@@ -57,5 +57,68 @@ interface MeasurementDao {
             deleteByDate(originalDate)
         }
         upsert(entity)
+    }
+
+    /**
+     * The three writes below are the same three above with the outbox row added — and the
+     * addition is the whole point of them existing separately.
+     *
+     * Sync FR-SYNC-001 says *the same transaction* enqueues the mutation. Calling `upsert` and
+     * then a journal method would be two transactions, and a process death between them keeps
+     * the measurement while losing every trace that it has to be sent: the change would then
+     * exist on the phone forever and never on the server, with nothing to detect it.
+     *
+     * The base revision is read here rather than passed in, so it is read under the same lock
+     * that writes the row; a revision fetched before the transaction could already be stale.
+     */
+    @Transaction
+    suspend fun upsertWithMutation(entity: MeasurementEntity, mutation: SyncMutationEntity) {
+        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        upsert(entity)
+        insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+        )
+        markAggregateAlive(mutation.aggregateType, mutation.aggregateId, mutation.mutationId)
+        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+    }
+
+    /**
+     * The row goes, the tombstone stays (FR-SYNC-005). Without it, a copy of the same date
+     * still sitting in another client's outbox would come back on the next pull and the
+     * deletion would silently undo itself.
+     */
+    @Transaction
+    suspend fun deleteWithMutation(date: String, mutation: SyncMutationEntity) {
+        val baseRevision = revisionOf(mutation.aggregateType, mutation.aggregateId)
+        deleteByDate(date)
+        insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(mutation.aggregateType, mutation.aggregateId)
+        )
+        markAggregateDeleted(
+            aggregateType = mutation.aggregateType,
+            aggregateId = mutation.aggregateId,
+            deletedAt = mutation.createdAt,
+            mutationId = mutation.mutationId,
+        )
+        enqueueMutation(mutation.copy(baseRevision = baseRevision))
+    }
+
+    /**
+     * An edit that moves a measurement to another date is two aggregates changing, because the
+     * date *is* the aggregate id: the old one is deleted and the new one written. One mutation
+     * carrying both would be unapplicable on a server that stores measurements by date, so
+     * [deleteMutation] is spent exactly when the shipped [replace] deletes the old row.
+     */
+    @Transaction
+    suspend fun replaceWithMutation(
+        originalDate: String,
+        entity: MeasurementEntity,
+        deleteMutation: SyncMutationEntity,
+        upsertMutation: SyncMutationEntity,
+    ) {
+        if (originalDate != entity.date) {
+            deleteWithMutation(originalDate, deleteMutation)
+        }
+        upsertWithMutation(entity, upsertMutation)
     }
 }
