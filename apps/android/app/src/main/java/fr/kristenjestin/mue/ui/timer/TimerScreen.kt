@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -38,6 +39,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -64,6 +66,7 @@ import fr.kristenjestin.mue.ui.components.MueHaptics
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
+import fr.kristenjestin.mue.ui.components.MueSplitRow
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueValueChip
@@ -269,11 +272,13 @@ internal fun TimerScreenContent(
                             .testTag(TimerTestTags.ELAPSED)
                             .semantics { contentDescription = timer.elapsedDescription },
                     )
+                    // No ceiling: at the largest font size the dial read `Started at 12:20 …`,
+                    // and the two glyphs it dropped are the ones that tell midday from midnight.
                     MueText(
                         text = timer.startedAtText,
                         style = type.caption,
                         color = colors.textTertiary,
-                        maxLines = 1,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier
                             .padding(top = spacing.sm)
                             .testTag(TimerTestTags.STARTED_AT),
@@ -406,7 +411,21 @@ private fun TimerActionButton(
     )
     val content = if (primary) colors.onAccent else colors.textPrimary
 
-    Row(
+    /*
+     * The glyph moves above the word when the word will not fit beside it.
+     *
+     * `Pause` takes the narrower of the two weights, and at the largest font size on a 360 dp
+     * phone what was left beside the glyph came to less than the word: the principal control of
+     * the running timer was drawn `Pau…`. Dropping the ceiling would not have helped — `Pause` is
+     * one word, and a line break in the middle of it is not an improvement on an ellipsis — and
+     * PRD 11 asks for an icon *and* the word, so neither could go. Stacking them hands the word
+     * the whole button and keeps both, which is what a taller button costs.
+     *
+     * The threshold is measured: the label is laid out at the button's own type style, at the
+     * current density and font scale, against the width left beside the glyph. At the ordinary
+     * size both labels fit and the control is the row it always was.
+     */
+    BoxWithConstraints(
         modifier = modifier
             .graphicsLayer {
                 scaleX = scale
@@ -425,17 +444,50 @@ private fun TimerActionButton(
             )
             .heightIn(min = ActionMinHeight)
             .padding(horizontal = MueTheme.spacing.md, vertical = MueTheme.spacing.lg),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        MueIcon(iconName = iconName, tint = content, size = ActionIconSize)
-        MueText(
-            text = label,
-            style = MueTheme.typography.button,
-            color = content,
-            maxLines = 1,
-            modifier = Modifier.padding(start = MueTheme.spacing.sm),
-        )
+        val glyph = @Composable { MueIcon(iconName = iconName, tint = content, size = ActionIconSize) }
+        val word = @Composable { padding: Dp ->
+            MueText(
+                text = label,
+                style = MueTheme.typography.button,
+                color = content,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(start = padding),
+            )
+        }
+
+        if (labelFitsBesideGlyph(label, maxWidth)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                glyph()
+                word(MueTheme.spacing.sm)
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                glyph()
+                word(0.dp)
+            }
+        }
+    }
+}
+
+/** Whether [label] can be drawn whole in [room] once the glyph and its gap are taken out. */
+@Composable
+private fun labelFitsBesideGlyph(label: String, room: Dp): Boolean {
+    val measurer = rememberTextMeasurer()
+    val style = MueTheme.typography.button
+    val gap = MueTheme.spacing.sm
+    val beside = with(LocalDensity.current) { (room - ActionIconSize - gap).roundToPx() }
+
+    return remember(measurer, label, style, beside) {
+        beside > 0 && measurer.measure(label, style, maxLines = 1).size.width <= beside
     }
 }
 
@@ -489,11 +541,12 @@ private fun TimerOverflow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 MueIcon(iconName = MueIcons.TRASH, tint = colors.error, size = ActionIconSize)
+                // No ceiling: the one entry of this menu read `Discard …` at the largest font
+                // size, which does not say what would be discarded.
                 MueText(
                     text = TimerMessages.DISCARD_TIMER,
                     style = MueTheme.typography.chip,
                     color = colors.error,
-                    maxLines = 1,
                     modifier = Modifier.padding(start = MueTheme.spacing.sm),
                 )
             }
@@ -536,27 +589,33 @@ private fun BackgroundNote(modifier: Modifier = Modifier) {
                     .weight(1f)
                     .padding(start = spacing.md),
             ) {
-                Row(
+                /*
+                 * Measured rather than weighted, and with no ceiling on either line. At the
+                 * largest font size the title came out `Availab…` beside its badge and the
+                 * sentence stopped at `the Mue notificati…`, so the card that promises the timer
+                 * keeps running with the screen off said neither what is available nor where.
+                 */
+                MueSplitRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MueText(
-                        text = TimerMessages.BACKGROUND_TITLE,
-                        style = MueTheme.typography.micro,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    MueValueChip(
-                        text = TimerMessages.SILENT_BADGE,
-                        modifier = Modifier.padding(start = spacing.sm),
-                    )
-                }
+                    gap = 0.dp,
+                    stackedGap = spacing.xs,
+                    start = {
+                        MueText(
+                            text = TimerMessages.BACKGROUND_TITLE,
+                            style = MueTheme.typography.micro,
+                        )
+                    },
+                    end = {
+                        MueValueChip(
+                            text = TimerMessages.SILENT_BADGE,
+                            modifier = Modifier.padding(start = spacing.sm),
+                        )
+                    },
+                )
                 MueText(
                     text = TimerMessages.BACKGROUND_BODY,
                     style = MueTheme.typography.micro,
                     color = colors.textQuiet,
-                    maxLines = 2,
                     modifier = Modifier.padding(top = spacing.xs),
                 )
             }
