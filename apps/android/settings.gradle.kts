@@ -31,3 +31,7 @@ plugins {
 
 rootProject.name = "Mue"
 include(":app")
+
+// Throwaway BLE scale spike. Lives only on this branch; `:app` neither depends on it nor knows
+// it exists. Deleting the branch removes it whole.
+include(":spike-scale")

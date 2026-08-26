@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Android 12+ regime. `neverForLocation` is deliberate: the spike must read the scale's
+      raw advertising bytes, and asserting that it never derives location is what lets it
+      scan without ACCESS_FINE_LOCATION and without the phone's location services being on.
+      Both of those are classic silent-failure sources on a first BLE bring-up.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!--
+      Pre-31 regime, inert on the Android 13 test phone but carried because the real feature
+      has to ship it: below API 31 a BLE scan needs the old pair plus fine location, and the
+      phone's location services switched on.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Mue Scale Spike"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MueSpike">
+        <activity
+            android:name=".SpikeActivity"
+            android:exported="true"
+            android:label="Mue Scale Spike"
+            android:theme="@style/Theme.MueSpike">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
