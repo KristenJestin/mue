@@ -48,6 +48,10 @@ class FakeUserPreferencesRepository(
     override suspend fun setHapticsEnabled(enabled: Boolean) {
         state.value = state.value.copy(hapticsEnabled = enabled)
     }
+
+    override suspend fun setShowEnergy(enabled: Boolean) {
+        state.value = state.value.copy(showEnergy = enabled)
+    }
 }
 
 class FakeMeasurementRepository(measurements: List<Measurement> = emptyList()) :

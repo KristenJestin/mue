@@ -82,6 +82,9 @@ class FakeUserPreferencesRepository(
     override suspend fun setHapticsEnabled(enabled: Boolean) {
         state.value = state.value.copy(hapticsEnabled = enabled)
     }
+    override suspend fun setShowEnergy(enabled: Boolean) {
+        state.value = state.value.copy(showEnergy = enabled)
+    }
 }
 
 /** `viewModelScope` runs on the main dispatcher, which does not exist on the JVM. */

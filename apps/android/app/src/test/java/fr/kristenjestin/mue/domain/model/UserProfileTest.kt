@@ -51,4 +51,28 @@ class UserPreferencesTest {
     fun `haptics can be turned off`() {
         assertEquals(UserPreferences(false), UserPreferences.DEFAULT.copy(hapticsEnabled = false))
     }
+
+    /** PRD_FOOD 13.2 and FR-FOOD-010: the figures are shown until someone asks otherwise. */
+    @Test
+    fun `energy is shown by default`() {
+        assertTrue(UserPreferences.DEFAULT.showEnergy)
+        assertTrue(UserPreferences().showEnergy)
+    }
+
+    @Test
+    fun `energy can be hidden`() {
+        assertEquals(
+            UserPreferences(hapticsEnabled = true, showEnergy = false),
+            UserPreferences.DEFAULT.copy(showEnergy = false),
+        )
+    }
+
+    /** The two preferences are independent: hiding the figures must not silence the phone. */
+    @Test
+    fun `the two preferences do not move together`() {
+        val hidden = UserPreferences.DEFAULT.copy(showEnergy = false)
+
+        assertTrue(hidden.hapticsEnabled)
+        assertTrue(UserPreferences.DEFAULT.copy(hapticsEnabled = false).showEnergy)
+    }
 }

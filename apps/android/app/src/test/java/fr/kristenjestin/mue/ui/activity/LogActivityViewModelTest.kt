@@ -1786,6 +1786,8 @@ private class FakeUserPreferencesRepository : UserPreferencesRepository {
     override val preferences: Flow<UserPreferences> = flowOf(UserPreferences.DEFAULT)
 
     override suspend fun setHapticsEnabled(enabled: Boolean) = Unit
+
+    override suspend fun setShowEnergy(enabled: Boolean) = Unit
 }
 
 // endregion

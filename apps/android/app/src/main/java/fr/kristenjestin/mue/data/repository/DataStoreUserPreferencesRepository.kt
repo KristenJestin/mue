@@ -29,6 +29,8 @@ class DataStoreUserPreferencesRepository(
             UserPreferences(
                 hapticsEnabled = stored[KEY_HAPTICS_ENABLED]
                     ?: UserPreferences.DEFAULT.hapticsEnabled,
+                showEnergy = stored[KEY_SHOW_ENERGY]
+                    ?: UserPreferences.DEFAULT.showEnergy,
             )
         }
         .flowOn(ioDispatcher)
@@ -39,7 +41,19 @@ class DataStoreUserPreferencesRepository(
         }
     }
 
+    override suspend fun setShowEnergy(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { it[KEY_SHOW_ENERGY] = enabled }
+        }
+    }
+
     private companion object {
         val KEY_HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+
+        /**
+         * PRD_FOOD FR-FOOD-010. A key of its own, so an install that predates the Food module
+         * simply finds nothing under it and falls back to the default rather than migrating.
+         */
+        val KEY_SHOW_ENERGY = booleanPreferencesKey("show_energy")
     }
 }

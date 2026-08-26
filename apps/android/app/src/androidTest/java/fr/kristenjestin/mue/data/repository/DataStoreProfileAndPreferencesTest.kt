@@ -125,6 +125,48 @@ class DataStoreProfileAndPreferencesTest {
         assertEquals(UserPreferences(true), preferencesRepository.preferences.first())
     }
 
+    /** PRD_FOOD 13.2 and FR-FOOD-010: the figures are shown until someone asks otherwise. */
+    @Test
+    fun energyIsShownUntilTheUserSaysOtherwise() = runTest {
+        assertTrue(preferencesRepository.preferences.first().showEnergy)
+    }
+
+    @Test
+    fun energyCanBeHiddenAndShownAgain() = runTest {
+        preferencesRepository.setShowEnergy(false)
+        assertEquals(
+            UserPreferences(hapticsEnabled = true, showEnergy = false),
+            preferencesRepository.preferences.first(),
+        )
+
+        preferencesRepository.setShowEnergy(true)
+        assertEquals(
+            UserPreferences(hapticsEnabled = true, showEnergy = true),
+            preferencesRepository.preferences.first(),
+        )
+    }
+
+    /**
+     * The two preferences share one file and must not share one key: writing either has to leave
+     * the other exactly where it was.
+     */
+    @Test
+    fun theTwoPreferencesAreStoredUnderKeysOfTheirOwn() = runTest {
+        preferencesRepository.setHapticsEnabled(false)
+        preferencesRepository.setShowEnergy(false)
+
+        assertEquals(
+            UserPreferences(hapticsEnabled = false, showEnergy = false),
+            preferencesRepository.preferences.first(),
+        )
+
+        preferencesRepository.setHapticsEnabled(true)
+
+        val stored = preferencesRepository.preferences.first()
+        assertTrue(stored.hapticsEnabled)
+        assertEquals(false, stored.showEnergy)
+    }
+
     @Test
     fun theProfileAndThePreferencesDoNotShareAFile() = runTest {
         profileRepository.save(UserProfile("Kristen", 178, null))

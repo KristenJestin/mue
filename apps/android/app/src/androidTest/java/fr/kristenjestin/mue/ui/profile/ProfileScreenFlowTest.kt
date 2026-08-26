@@ -242,6 +242,10 @@ private class FakePreferences : UserPreferencesRepository {
     override suspend fun setHapticsEnabled(enabled: Boolean) {
         state.value = state.value.copy(hapticsEnabled = enabled)
     }
+
+    override suspend fun setShowEnergy(enabled: Boolean) {
+        state.value = state.value.copy(showEnergy = enabled)
+    }
 }
 
 private class FakeMeasurements : MeasurementRepository {
