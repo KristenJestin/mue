@@ -114,7 +114,14 @@ fun MueSubScreenScaffold(
                     text = title,
                     style = MueTheme.typography.sectionTitle,
                     color = MueTheme.colors.textPrimary,
-                    maxLines = 1,
+                    /*
+                     * No ceiling: at the largest font size on a 360 dp phone the two screens this
+                     * scaffold carries announced themselves as `Activity in pr…` and
+                     * `Strength ses…`, and a screen that will not say its own name is the one
+                     * thing a header is for. The title is already centred and already weighted,
+                     * so a second line simply makes the header a line taller; at the ordinary
+                     * size every title still fits on one and nothing moves.
+                     */
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .weight(1f)

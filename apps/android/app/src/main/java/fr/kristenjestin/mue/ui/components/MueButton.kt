@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -39,6 +40,9 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -56,6 +60,15 @@ const val MueSaveConfirmationLabel: String = "Saved"
 
 /**
  * The one loud control of the app: full-width amber slab, ink label, press contraction.
+ *
+ * **The label takes a second line rather than losing its end.** Both buttons were pinned to
+ * `maxLines = 1`, and at the largest font size on a 360 dp phone that turned `Export weight data`
+ * into `Export weight …` and `Delete measurement` into `Delete measurem…` — the second of them a
+ * destructive action whose object was the part that went. Nothing could see it: the semantics
+ * string, and so `onNodeWithText`, stayed the whole label. The slab is already full width, so
+ * there is nowhere to widen to; a taller button is what a bigger text size asks for, and it says
+ * everything. A label that still fits on one line is drawn exactly where it was drawn before —
+ * see [wrappedLabelAlign] for why the centring is asked for only once there are two lines.
  *
  * The success state is driven by the caller ([success]) but timed here: after
  * [successDurationMillis] the component calls [onSuccessFinished] so the screen can flip its
@@ -164,7 +177,7 @@ fun MuePrimaryButton(
 
     val shape = MueTheme.shapes.button
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             // Outside the scale layer on purpose: the light has left the button, so it must
@@ -197,11 +210,12 @@ fun MuePrimaryButton(
             .semantics { liveRegion = LiveRegionMode.Polite },
         contentAlignment = Alignment.Center,
     ) {
+        val drawn = if (quiet) successLabel else label
         MueText(
-            text = if (quiet) successLabel else label,
+            text = drawn,
             style = MueTheme.typography.button,
             color = contentColor,
-            maxLines = 1,
+            textAlign = wrappedLabelAlign(drawn, maxWidth),
             modifier = Modifier.graphicsLayer { alpha = labelAlpha.value },
         )
     }
@@ -230,7 +244,7 @@ fun MueSecondaryButton(
     )
     val shape = MueTheme.shapes.button
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -255,9 +269,35 @@ fun MueSecondaryButton(
             text = label,
             style = MueTheme.typography.button,
             color = if (enabled) contentColor else colors.textTertiary,
-            maxLines = 1,
+            textAlign = wrappedLabelAlign(label, maxWidth),
         )
     }
+}
+
+/**
+ * `TextAlign.Center` for a label that has had to wrap, and nothing at all for one that has not.
+ *
+ * A button's word is centred by the slab around it, and while the label holds a single line that
+ * `Box` does all the centring there is to do. Setting `TextAlign.Center` on top of it is not
+ * free: the paragraph is laid out at `ceil(width)`, so a centred single line is nudged by up to
+ * half a pixel and every button in the app rasterises differently. The alignment is therefore
+ * asked for only in the case that needs it — two lines, which the slab cannot centre one against
+ * the other.
+ *
+ * The measurement is the label itself, laid out at the button's own type style, at the current
+ * density and font scale, against the width the slab actually offers. No `dp` breakpoint is
+ * written down, so a longer word or a wider phone moves the answer by itself.
+ */
+@Composable
+private fun wrappedLabelAlign(label: String, room: Dp): TextAlign? {
+    val measurer = rememberTextMeasurer()
+    val style = MueTheme.typography.button
+    val roomPx = with(LocalDensity.current) { room.roundToPx() }
+
+    val wraps = remember(measurer, label, style, roomPx) {
+        roomPx > 0 && measurer.measure(label, style).size.width > roomPx
+    }
+    return if (wraps) TextAlign.Center else null
 }
 
 // region Halo
