@@ -35,7 +35,9 @@
       "dependencies": {
         "@hono/mcp": "catalog:",
         "@modelcontextprotocol/sdk": "catalog:",
+        "@mue/auth": "workspace:*",
         "@mue/contracts": "workspace:*",
+        "@mue/db": "workspace:*",
         "@mue/domain": "workspace:*",
         "hono": "catalog:",
       },
@@ -78,6 +80,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@mue/contracts": "workspace:*",
+        "@mue/db": "workspace:*",
+        "drizzle-orm": "catalog:",
       },
     },
     "packages/ui": {

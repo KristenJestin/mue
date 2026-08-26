@@ -12,12 +12,15 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "vp lint src",
     "format": "vp fmt src",
-    "format:check": "vp fmt --check src"
+    "format:check": "vp fmt --check src",
+    "test": "bun --env-file=../../.env test"
   },
   "dependencies": {
     "@hono/mcp": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@mue/auth": "workspace:*",
     "@mue/contracts": "workspace:*",
+    "@mue/db": "workspace:*",
     "@mue/domain": "workspace:*",
     "hono": "catalog:"
   }
