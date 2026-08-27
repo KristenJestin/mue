@@ -63,7 +63,17 @@ internal fun FoodEditorRoute(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     prefillName: String? = null,
-    viewModel: FoodEditorViewModel = foodEditorViewModel(foodId, prefillName),
+    /**
+     * PRD_FOOD 17: the barcode a fruitless Open Food Facts lookup came back with.
+     *
+     * Beside [prefillName] rather than folded into it: the two arrive from two different dead
+     * ends — a search that matched nothing, and a code no card exists for — and they fill two
+     * different fields. A creation reached from the scan therefore opens with the number already
+     * in place, which is the half of PRD_FOOD 9.2 that makes scanning the same jar again find
+     * the food that was typed out by hand today.
+     */
+    prefillBarcode: String? = null,
+    viewModel: FoodEditorViewModel = foodEditorViewModel(foodId, prefillName, prefillBarcode),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 

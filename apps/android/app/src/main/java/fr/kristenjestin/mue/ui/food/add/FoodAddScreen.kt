@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -67,6 +69,9 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.food.FoodIcons
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.scan.BarcodeScannerPreview
+import fr.kristenjestin.mue.ui.food.scan.FoodCameraPermission
+import fr.kristenjestin.mue.ui.food.scan.rememberFoodCameraPermission
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
@@ -82,6 +87,16 @@ private val StepButtonSize: Dp = MueMinTouchTarget
 
 /** How far a step button fades when the counter has reached PRD_FOOD 15's end of the range. */
 private const val DisabledStepAlpha = 0.2f
+
+/**
+ * The viewfinder's height (FR-FOOD-003).
+ *
+ * Fixed rather than an aspect ratio, and short rather than full-bleed. A barcode is read at
+ * arm's length from thirty centimetres away and needs a band, not a portrait frame; keeping it
+ * short is also what leaves the barcode field and its button on the same screenful at a large
+ * font scale, which is the whole of PRD_FOOD 18's claim that the two are equals.
+ */
+private val ScannerPreviewHeight: Dp = 220.dp
 
 /**
  * `Add food` (PRD_FOOD 7), wired to the journal and the catalogue.
@@ -100,6 +115,11 @@ internal fun FoodAddRoute(
     onClose: () -> Unit,
     onSearchFood: () -> Unit,
     onUseRecipe: () -> Unit,
+    /**
+     * PRD_FOOD 17: "Produit absent d'Open Food Facts → bascule vers la création manuelle
+     * **pré-remplie**." The sheet knows the number; only the stack can open the editor.
+     */
+    onCreateFood: (barcode: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: FoodAddViewModel = foodAddViewModel(),
 ) {
@@ -128,12 +148,44 @@ internal fun FoodAddRoute(
     }
     BackHandler(onBack = leave)
 
-    val actions = remember(viewModel, leave, onSearchFood, onUseRecipe) {
+    /*
+     * PRD_FOOD 18's camera, read here rather than inside the panel.
+     *
+     * It is a property of the process and not of the draft, so it is read where a composable can
+     * read it and folded into the state that is already computed. `withCamera` is a pure function
+     * and owns every sentence it produces, which is what keeps PRD_FOOD 17's three explanations
+     * provable on the JVM while the permission itself cannot be.
+     */
+    val camera = rememberFoodCameraPermission()
+    val context = LocalContext.current
+
+    val actions = remember(viewModel, leave, onSearchFood, onUseRecipe, onCreateFood, camera) {
         FoodAddActions(
             onClose = leave,
             onSearchFood = onSearchFood,
             onUseRecipe = onUseRecipe,
             onQuickAdd = viewModel::onQuickAddChosen,
+            onScan = viewModel::onScanChosen,
+            onBarcodeChange = viewModel::onBarcodeChange,
+            onBarcodeScanned = viewModel::onBarcodeScanned,
+            onLookUpBarcode = viewModel::onLookUpBarcode,
+            onRetryLookup = viewModel::onRetryLookup,
+            onUseScannedProduct = viewModel::onUseScannedProduct,
+            onCreateFromBarcode = { viewModel.barcodeToCreateFrom()?.let(onCreateFood) },
+            /*
+             * One control, two doors, and which one it is depends on whether Android would still
+             * show a prompt. Before the first ask it is the prompt; after a refusal Android
+             * refuses to show one at all, so offering it again would be a button that does
+             * nothing — FR-TIMER-012 learned this on the notification permission and answered it
+             * from `Profile` the same way. The label says which door it is; `withCamera` writes it.
+             */
+            onCameraAction = {
+                if (camera.canRequest) {
+                    camera.request()
+                } else {
+                    context.startActivity(FoodCameraPermission.settingsIntent(context))
+                }
+            },
             onBackToPaths = viewModel::onBackToPaths,
             onQuantityChange = viewModel::onQuantityChange,
             onPortionStep = viewModel::onPortionStep,
@@ -159,7 +211,19 @@ internal fun FoodAddRoute(
         )
     }
 
-    FoodAddScreen(state = state, actions = actions, modifier = modifier)
+    FoodAddScreen(
+        // The scan panel is the only part of this state a ViewModel cannot finish, so it is
+        // finished here and nowhere else. Every other stage is untouched by this line.
+        state = state.copy(
+            scan = state.scan?.withCamera(
+                isGranted = camera.isGranted,
+                isAvailable = camera.isAvailable,
+                canRequest = camera.canRequest,
+            ),
+        ),
+        actions = actions,
+        modifier = modifier,
+    )
 }
 
 /** Everything the sheet can ask for, so its layout can be driven with no database behind it. */
@@ -169,6 +233,22 @@ internal class FoodAddActions(
     val onSearchFood: () -> Unit = {},
     val onUseRecipe: () -> Unit = {},
     val onQuickAdd: () -> Unit = {},
+    /** FR-FOOD-003: the fourth way in — the camera and the typed number, one path. */
+    val onScan: () -> Unit = {},
+    val onBarcodeChange: (String) -> Unit = {},
+    /** A code the camera read. It lands in the field, then takes the field's own road. */
+    val onBarcodeScanned: (String) -> Unit = {},
+    val onLookUpBarcode: () -> Unit = {},
+    val onRetryLookup: () -> Unit = {},
+    /** PRD_FOOD 9.2: the copy into the local catalogue happens here and nowhere earlier. */
+    val onUseScannedProduct: () -> Unit = {},
+    /** PRD_FOOD 17: the creation prefilled with the code nothing was found for. */
+    val onCreateFromBarcode: () -> Unit = {},
+    /**
+     * PRD_FOOD 18: the system prompt, at most once in the life of the install — and after a
+     * refusal, the Android settings page instead, because a second prompt is never shown.
+     */
+    val onCameraAction: () -> Unit = {},
     /** PRD_FOOD 7: back to the ways in, from whichever one was taken. */
     val onBackToPaths: () -> Unit = {},
     val onQuantityChange: (String) -> Unit = {},
@@ -256,7 +336,7 @@ internal fun FoodAddScreen(
             }
         }
 
-        if (state.stage != FoodAddStage.PATHS && !state.isLoading) {
+        if (state.showsSaveAction && !state.isLoading) {
             MueStickyBottomAction(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -285,6 +365,9 @@ private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
 
     when (state.stage) {
         FoodAddStage.PATHS -> WaysIn(actions)
+
+        // FR-FOOD-003. The panel owns its own action, so no `Save entry` is raised under it.
+        FoodAddStage.SCAN -> state.scan?.let { ScanSection(it, actions) }
 
         FoodAddStage.AMOUNT -> {
             ChosenFood(state, actions)
@@ -316,14 +399,16 @@ private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
 // region the ways in (PRD_FOOD 7)
 
 /**
- * PRD_FOOD 7's ways in.
+ * PRD_FOOD 7's four ways in, all four of them.
  *
- * **The barcode is absent, deliberately.** FR-FOOD-003 wants it, and PRD_FOOD 18 wants the manual
- * number beside it, but neither can be built here: the app has no ML Kit dependency, no camera
- * permission, and `ProductLookup` has no implementation and no registration on
- * `AppContainer.food`. A tile that opened nothing would be worse than one that is not there yet —
- * `FoodNavHost` makes the same argument about placeholder copy. The handles it will need
- * (`SCANNER_PREVIEW`, `BARCODE_FIELD`) are already agreed in `FoodTestTags`.
+ * The barcode used to be missing from this list, and the note that stood here said why: no ML Kit
+ * dependency, no camera permission, no `ProductLookup` implementation and nothing registered on
+ * `AppContainer.food`. All four now exist, and the tile leads to a stage that works with the
+ * camera and works without it — which is the condition PRD_FOOD 18 sets, not an extra.
+ *
+ * Its position is second, between the search and the recipes, because it is the other way of
+ * reaching a *catalogue* food: the two paths that end on `How much?` sit together, and the two
+ * that do not follow them.
  */
 @Composable
 private fun ColumnScope.WaysIn(actions: FoodAddActions) {
@@ -339,6 +424,13 @@ private fun ColumnScope.WaysIn(actions: FoodAddActions) {
         description = FoodAddMessages.SEARCH_PATH_DESCRIPTION,
         testTag = FoodTestTags.ADD_BY_SEARCH,
         onClick = actions.onSearchFood,
+    )
+    WayIn(
+        iconName = FoodIcons.BARCODE,
+        title = FoodAddMessages.SCAN_PATH,
+        description = FoodAddMessages.SCAN_PATH_DESCRIPTION,
+        testTag = FoodTestTags.ADD_BY_SCAN,
+        onClick = actions.onScan,
     )
     WayIn(
         iconName = FoodIcons.CHEF_HAT,
@@ -664,6 +756,224 @@ private fun StepButton(
         contentAlignment = Alignment.Center,
     ) {
         MueIcon(iconName = iconName, tint = colors.textSecondary, size = 18.dp)
+    }
+}
+
+// endregion
+
+// region the scan (FR-FOOD-003, PRD_FOOD 9.2, 17 and 18)
+
+/**
+ * The scan stage: a viewfinder when there is one, a field always, and whatever the lookup said.
+ *
+ * **Read the order.** The camera is on top because it is what most people came for, and the field
+ * is *not* hidden behind it: PRD_FOOD 18 makes the typed number "une alternative complète", and a
+ * complete alternative that only appears once something has failed is a fallback wearing a
+ * different word. Both are on screen at once, always, and the camera fills the field rather than
+ * bypassing it — so what was decoded can be checked against the packet before it is looked up.
+ *
+ * Every branch below is one row of PRD_FOOD 17's table, and none of them empties the screen: an
+ * unreadable code leaves the scanner running, a refused camera leaves the field, a failed lookup
+ * leaves both plus the creation the number is already in.
+ */
+@Composable
+private fun ColumnScope.ScanSection(scan: FoodScanUiState, actions: FoodAddActions) {
+    val colors = MueTheme.colors
+
+    FoodSectionCard(title = FoodAddMessages.SCAN_SECTION) {
+        Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
+            if (scan.isCameraLive) {
+                BarcodeScannerPreview(
+                    onBarcode = actions.onBarcodeScanned,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(ScannerPreviewHeight)
+                        .testTag(FoodTestTags.SCANNER_PREVIEW),
+                    contentDescription = FoodAddMessages.SCANNER_DESCRIPTION,
+                )
+            }
+
+            /*
+             * PRD_FOOD 17's explanation, in the accent rather than the error colour, because
+             * nothing has gone wrong: a person who prefers not to give a camera to a food diary
+             * has made a reasonable choice, and the path they are on is the same path.
+             */
+            scan.cameraExplanation?.let { explanation ->
+                MueText(
+                    text = explanation,
+                    style = MueTheme.typography.caption,
+                    color = colors.textSecondary,
+                )
+            }
+
+            scan.cameraActionLabel?.let { label ->
+                MueSecondaryButton(label = label, onClick = actions.onCameraAction)
+            }
+
+            MueTextField(
+                label = FoodAddMessages.BARCODE_LABEL,
+                value = scan.barcode,
+                onValueChange = actions.onBarcodeChange,
+                modifier = Modifier.testTag(FoodTestTags.BARCODE_FIELD),
+                placeholder = FoodAddMessages.BARCODE_PLACEHOLDER,
+                // The refusal is `FoodValidation.validateBarcode`'s own sentence, never a second
+                // wording of the same rule — the module's standing arrangement.
+                errorMessage = scan.barcodeError,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+
+            MueText(
+                text = if (scan.isCameraLive) {
+                    FoodAddMessages.BARCODE_HINT
+                } else {
+                    // No camera on screen means no sentence about pointing one at anything.
+                    FoodAddMessages.BARCODE_HINT_TYPED_ONLY
+                },
+                style = MueTheme.typography.micro,
+                color = colors.textQuiet,
+            )
+
+            MuePrimaryButton(
+                label = if (scan.isLookingUp) FoodAddMessages.LOOKING_UP else FoodAddMessages.LOOK_UP,
+                onClick = actions.onLookUpBarcode,
+                enabled = scan.canLookUp,
+            )
+        }
+    }
+
+    scan.found?.let { found -> ScannedProduct(found, scan.saveError, actions) }
+    scan.notice?.let { notice -> ScanNotice(notice, actions) }
+}
+
+/**
+ * The product a lookup found, before anything has been written (PRD_FOOD 9.2 and 17).
+ *
+ * It exists as a screen at all because of one line of PRD_FOOD 9.2: the product is copied locally
+ * "au moment de l'**ajout**". Showing the card first is what turns that clause into behaviour —
+ * an incomplete record is visibly incomplete, with its dashes, before it becomes a row somebody
+ * has to find and correct later.
+ *
+ * The five figures go through [Figures]' own component, so a fibre Open Food Facts marked
+ * `estimate` reads `—` here exactly as it will on the food's card and in the journal. Nothing on
+ * this path can turn it into `≈ 0 g`, because nothing on this path computes anything.
+ */
+@Composable
+private fun ColumnScope.ScannedProduct(
+    found: FoodScanFoundUiState,
+    saveError: String?,
+    actions: FoodAddActions,
+) {
+    val colors = MueTheme.colors
+    FoodSectionCard(title = FoodAddMessages.SCANNED_PRODUCT_SECTION) {
+        Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clearAndSetSemantics { contentDescription = found.description },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(MueMinTouchTarget)
+                        .clip(MueTheme.shapes.field)
+                        .background(colors.accentSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MueIcon(iconName = found.iconName, tint = colors.onAccentSoft, size = 18.dp)
+                }
+                Column(
+                    modifier = Modifier.weight(1f).padding(start = MueTheme.spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
+                ) {
+                    // Never capped: a product name is what tells somebody they scanned the right
+                    // jar, and half of one tells them nothing.
+                    MueText(found.name, MueTheme.typography.bodyStrong)
+                    MueText(found.meta, MueTheme.typography.caption, color = colors.textTertiary)
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = found.per100.description },
+                verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xs),
+            ) {
+                MueText(
+                    text = found.per100.header,
+                    style = MueTheme.typography.label,
+                    color = colors.textTertiary,
+                )
+                found.per100.rows.forEach { row ->
+                    FoodFigureRow(
+                        label = row.label,
+                        value = row.value,
+                        modifier = Modifier.testTag(FoodTestTags.nutrientField(row.key)),
+                    )
+                }
+            }
+
+            found.incompleteNote?.let { note ->
+                MueText(
+                    text = note,
+                    style = MueTheme.typography.micro,
+                    color = colors.textQuiet,
+                )
+            }
+
+            saveError?.let { message ->
+                MueText(
+                    text = message,
+                    style = MueTheme.typography.caption,
+                    color = colors.error,
+                    modifier = Modifier.semantics { error(message) },
+                )
+            }
+
+            MuePrimaryButton(label = found.actionLabel, onClick = actions.onUseScannedProduct)
+        }
+    }
+}
+
+/**
+ * What the panel says when there is no product (PRD_FOOD 17).
+ *
+ * The message is a live region: it arrives after a wait nobody watched, and a screen-reader user
+ * who has put the phone down while a request was out must be told the answer rather than having
+ * to go looking for it. It does not take focus — PRD_FOOD 18 forbids that of an added line, and
+ * the same courtesy applies here.
+ */
+@Composable
+private fun ColumnScope.ScanNotice(notice: FoodScanNoticeUiState, actions: FoodAddActions) {
+    val colors = MueTheme.colors
+    FoodSectionCard(title = notice.message) {
+        Column(
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
+        ) {
+            notice.detail?.let { detail ->
+                MueText(
+                    text = detail,
+                    style = MueTheme.typography.caption,
+                    color = colors.textSecondary,
+                )
+            }
+
+            // The order is the order of what is likely to help. A failure is worth one more
+            // attempt before anybody types a label out; a missing product never is, and offers
+            // only the creation.
+            if (notice.canRetry) {
+                MuePrimaryButton(
+                    label = FoodAddMessages.TRY_LOOKUP_AGAIN,
+                    onClick = actions.onRetryLookup,
+                )
+            }
+            if (notice.canCreate) {
+                MueSecondaryButton(
+                    label = FoodAddMessages.CREATE_FROM_BARCODE,
+                    onClick = actions.onCreateFromBarcode,
+                )
+            }
+        }
     }
 }
 
@@ -1028,6 +1338,45 @@ private fun FoodAddNarrowPreview() {
     MuePreviewHost(padding = 0) {
         FoodAddScreen(
             state = previewLongNameState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The scan with the camera refused (PRD_FOOD 17 and 18).
+ *
+ * What to look for: the field is a full control with its own label, placeholder and button, and
+ * the sentence above it explains without scolding. Nothing here is smaller, greyer or further
+ * down than it would be with the camera on — a "complete alternative" that looked like a
+ * consolation would not be one.
+ */
+@Preview(name = "Add food — scan, camera refused", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodAddScanRefusedPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewScanRefusedState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * A product found, with a hole in it (PRD_FOOD 9.2, 13.1 and 17).
+ *
+ * What to look for: four figures and one `—`, on a real card, before anything has been written to
+ * the catalogue. Open Food Facts *has* a fibre number for this product and marked it `estimate`;
+ * refusing it is the difference between "Mue does not know" and "Mue made something up".
+ */
+@Preview(name = "Add food — scanned product", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodAddScanFoundPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewScanFoundState(),
             actions = FoodAddActions(),
             modifier = Modifier.fillMaxSize(),
         )

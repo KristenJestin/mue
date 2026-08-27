@@ -5,6 +5,7 @@ import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.ReferenceUnit
+import fr.kristenjestin.mue.domain.repository.LookupFailure
 import java.util.Locale
 
 /**
@@ -53,6 +54,17 @@ internal object FoodAddMessages {
     const val RECIPE_PATH: String = "Use a recipe"
     const val RECIPE_PATH_DESCRIPTION: String = "One of your saved preparations"
 
+    const val SCAN_PATH: String = "Scan a barcode"
+
+    /**
+     * The description says **both** ways in, and that is PRD_FOOD 18 rather than a flourish.
+     *
+     * The section calls the typed number "une alternative complète à la caméra", and a card that
+     * advertised only the camera would read, to somebody who has refused it or has no camera, as
+     * a path that is closed. It is not: everything past the number is identical.
+     */
+    const val SCAN_PATH_DESCRIPTION: String = "Read a packaged product, or type its number"
+
     const val QUICK_PATH: String = "Quick add"
     const val QUICK_PATH_DESCRIPTION: String = "A name and an energy, when that is all you know"
 
@@ -91,6 +103,86 @@ internal object FoodAddMessages {
     const val CARBS_NOUN: String = "Carbohydrate"
     const val FAT_NOUN: String = "Fat"
     const val FIBRE_NOUN: String = "Fibre"
+
+    // endregion
+
+    // region the scan (FR-FOOD-003, PRD_FOOD 9.2, 17 and 18)
+
+    const val SCAN_SECTION: String = "Scan a barcode"
+
+    /** What the viewfinder is, for a screen reader that cannot be shown a viewfinder. */
+    const val SCANNER_DESCRIPTION: String =
+        "Camera viewfinder. Point it at a barcode, or type the number below."
+
+    /**
+     * The field's label, and the sentence under it.
+     *
+     * "Or type it" and not "if the camera fails": PRD_FOOD 18 puts the two on the same footing,
+     * and a label that framed one as the other's repair would tell a person using a screen
+     * reader, or a phone with no camera, that they are on the degraded path. They are not — the
+     * lookup, the copy and the prefilled creation are byte-identical either way.
+     */
+    const val BARCODE_LABEL: String = "Barcode"
+    const val BARCODE_PLACEHOLDER: String = "3017620422003"
+    const val BARCODE_HINT: String = "Point the camera at it, or type the number under the bars."
+
+    /** The hint on a device that has no camera at all: no mention of a camera it cannot use. */
+    const val BARCODE_HINT_TYPED_ONLY: String = "Type the number printed under the bars."
+
+    const val LOOK_UP: String = "Look it up"
+    const val LOOKING_UP: String = "Looking it up…"
+
+    /** PRD_FOOD 9.2: the product is copied into the local catalogue at the moment of adding. */
+    const val ADD_THIS_PRODUCT: String = "Add this product"
+
+    /**
+     * The same button when the barcode is already in the catalogue.
+     *
+     * A different word because it is a different act: nothing is copied, nothing is downloaded,
+     * and the row being chosen is the one the person may have corrected by hand since. PRD_FOOD
+     * 9.2's "une modification ultérieure de la fiche distante ne change rien" is exactly what
+     * makes re-scanning a kept product a *local* lookup, and the label says so.
+     */
+    const val USE_THIS_FOOD: String = "Use this food"
+
+    const val SCANNED_PRODUCT_SECTION: String = "Found"
+
+    /** PRD_FOOD 9.2 and 17: an incomplete card is nominal, and its gaps stay gaps. */
+    const val INCOMPLETE_CARD: String =
+        "Open Food Facts does not document every value for this product. " +
+            "The missing ones stay empty and can be filled in after adding it."
+
+    const val PRODUCT_NOT_FOUND: String = "Open Food Facts has no card for this barcode"
+
+    /** PRD_FOOD 17: "Bascule vers la création manuelle pré-remplie." */
+    const val CREATE_FROM_BARCODE: String = "Create it from the label"
+
+    const val TRY_LOOKUP_AGAIN: String = "Try again"
+
+    /** PRD_FOOD 17: a refused camera is explained, and the rest of the path is untouched. */
+    const val CAMERA_REFUSED: String =
+        "Mue cannot use the camera. Type the barcode below instead — it does exactly the same " +
+            "thing. You can allow the camera again in Android settings."
+
+    const val CAMERA_NOT_YET_ALLOWED: String =
+        "Mue can read the barcode for you if you allow the camera. Typing it works just as well."
+
+    const val ALLOW_CAMERA: String = "Allow the camera"
+
+    /**
+     * The way back after a refusal, and **not** a second prompt.
+     *
+     * FR-TIMER-012 already paid for this lesson on the notification permission: Android does not
+     * show the dialog again once it has been refused, so a control still labelled "Allow" would
+     * be a button that visibly does nothing. This one names where the answer can actually change.
+     */
+    const val OPEN_CAMERA_SETTINGS: String = "Open Android settings"
+
+    /** No camera on the device: nothing to grant, so nothing about a permission is said. */
+    const val CAMERA_ABSENT: String = "This device has no camera. Type the barcode below."
+
+    /** The promise the module already makes on a failed write: nothing was lost. */
+    const val COPY_FAILED: String = "Couldn't add the product. Nothing was changed."
 
     // endregion
 
@@ -273,6 +365,54 @@ internal object FoodAddMessages {
     /** What the save button announces it will do, moment and day included (PRD_FOOD 18). */
     fun saveDescription(label: String, slot: MealSlot, dateLabel: String): String =
         "$label, ${slot.label}, $dateLabel"
+
+    /**
+     * PRD_FOOD 17: "Réseau indisponible pendant un scan → **message explicite**."
+     *
+     * Four values, four sentences, and the `when` is exhaustive so a fifth failure could not be
+     * added without a sentence being written for it. That exhaustiveness is the whole guarantee:
+     * a `else ->` here is how four named causes become one shrug, and the four lead to four
+     * genuinely different next moves — wait for a signal, try again in a moment, stop trying this
+     * product today, or tell somebody the service is broken.
+     *
+     * None of them says "try again" on its own. That is the button's job, and PRD_FOOD 17 keeps
+     * the other three ways of adding a line reachable throughout, which is what
+     * [lookupFailureDetail] says out loud.
+     */
+    fun lookupFailure(reason: LookupFailure): String = when (reason) {
+        LookupFailure.OFFLINE -> "No connection to Open Food Facts"
+        LookupFailure.TIMEOUT -> "Open Food Facts did not answer in time"
+        LookupFailure.SERVICE_ERROR -> "Open Food Facts could not answer"
+        LookupFailure.MALFORMED_RESPONSE -> "Open Food Facts sent something Mue could not read"
+    }
+
+    /** What to do about it — one sentence per cause, for the same reason as above. */
+    fun lookupFailureDetail(reason: LookupFailure): String = when (reason) {
+        LookupFailure.OFFLINE ->
+            "The barcode never left this phone. Try again when you are back online, " +
+                "or create the food from its label."
+
+        LookupFailure.TIMEOUT ->
+            "The request was given twelve seconds. Try again, or create the food from its label."
+
+        LookupFailure.SERVICE_ERROR ->
+            "The service is having trouble, not your phone. " +
+                "Try again in a moment, or create the food from its label."
+
+        LookupFailure.MALFORMED_RESPONSE ->
+            "This is not something you can fix. Create the food from its label; " +
+                "the barcode is kept."
+    }
+
+    /**
+     * PRD_FOOD 17: "Produit absent d'Open Food Facts → bascule vers la création manuelle
+     * pré-remplie." The number is printed because it is what the creation will carry, and because
+     * a barcode read by a camera is worth checking against the packet before anything is built
+     * on it.
+     */
+    fun productNotFoundDetail(barcode: String): String =
+        "Nothing is filed under $barcode. Create the food from its label — " +
+            "Mue keeps the barcode, so scanning it again will find it."
 
     /** PRD_FOOD 9.4 and FR-CATALOG-004: a result row says where its food came from. */
     fun sourceLabel(source: FoodSource): String = when (source) {

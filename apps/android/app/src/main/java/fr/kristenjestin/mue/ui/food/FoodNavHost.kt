@@ -70,12 +70,26 @@ fun FoodNavHost(modifier: Modifier = Modifier) {
      */
     var editorPrefill by rememberSaveable { mutableStateOf<String?>(null) }
 
+    /*
+     * PRD_FOOD 17: "Produit absent d'Open Food Facts → bascule vers la création manuelle
+     * **pré-remplie du code-barres**."
+     *
+     * A second holder beside the first rather than a pair in one, for the same reason and with
+     * the same shortcoming: `FoodRoute.FoodEditor` carries an optional `FoodId` and nothing else.
+     * Two `String?`s keep both saveable with no custom `Saver` and keep them independent — a
+     * fruitless *search* prefills a name and no barcode, a fruitless *lookup* prefills a barcode
+     * and no name, and neither can leak into the other's creation.
+     */
+    var editorBarcode by rememberSaveable { mutableStateOf<String?>(null) }
+
     FoodNavHost(stack = stack, modifier = modifier) { route ->
         FoodDestination(
             route = route,
             stack = stack,
             editorPrefill = editorPrefill,
             onEditorPrefillChange = { editorPrefill = it },
+            editorBarcode = editorBarcode,
+            onEditorBarcodeChange = { editorBarcode = it },
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -173,6 +187,8 @@ private fun FoodDestination(
     stack: FoodStack,
     editorPrefill: String?,
     onEditorPrefillChange: (String?) -> Unit,
+    editorBarcode: String?,
+    onEditorBarcodeChange: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (route) {
@@ -228,6 +244,17 @@ private fun FoodDestination(
             onClose = { stack.pop() },
             onSearchFood = { stack.push(FoodRoute.FoodPicker) },
             onUseRecipe = { stack.select(FoodRoute.Recipes) },
+            /*
+             * PRD_FOOD 17's fourth row: a barcode Open Food Facts has no card for opens the
+             * editor already holding it. `push` and not `replaceTop`, so back returns to the
+             * scan with the number still in the field — a lookup that failed for the network's
+             * reasons is worth another try, and the person has not lost the digits either way.
+             */
+            onCreateFood = { barcode ->
+                onEditorPrefillChange(null)
+                onEditorBarcodeChange(barcode)
+                stack.push(FoodRoute.FoodEditor())
+            },
             modifier = modifier,
         )
 
@@ -287,12 +314,16 @@ private fun FoodDestination(
         is FoodRoute.FoodEditor -> FoodEditorRoute(
             foodId = route.foodId,
             prefillName = editorPrefill.takeIf { route.foodId == null },
+            prefillBarcode = editorBarcode.takeIf { route.foodId == null },
             onFinished = {
                 /*
                  * The term dies with the sheet. Kept, it would prefill the *next* blank editor
-                 * with a word from a search nobody remembers making.
+                 * with a word from a search nobody remembers making — and the barcode would be
+                 * worse still, since a stale one would attach another product's number to a food
+                 * typed out by hand a week later.
                  */
                 onEditorPrefillChange(null)
+                onEditorBarcodeChange(null)
                 stack.pop()
             },
             modifier = modifier,

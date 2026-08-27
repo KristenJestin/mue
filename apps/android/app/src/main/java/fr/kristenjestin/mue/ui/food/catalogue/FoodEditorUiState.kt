@@ -67,9 +67,24 @@ data class FoodEditorDraft(
             return runCatching { FORMAT.decodeFromString(serializer(), raw) }.getOrNull()
         }
 
-        /** A blank card, optionally already carrying the term a fruitless search was made on. */
-        fun blank(prefillName: String? = null): FoodEditorDraft =
-            FoodEditorDraft(name = prefillName.orEmpty())
+        /**
+         * A blank card, optionally already carrying what a dead end handed over.
+         *
+         * Two prefills, from PRD_FOOD 17's two rows: the term a fruitless *search* was made on
+         * (9.4), and the code a fruitless Open Food Facts *lookup* was made with (9.2). They fill
+         * two different fields and arrive from two different screens, so neither can stand in for
+         * the other and both are optional.
+         *
+         * The barcode is filtered to digits on the way in. It reaches here from a decoder or from
+         * a keyboard and neither is trusted: `FoodValidation.validateBarcode` would refuse
+         * anything else on save, and a form that opens holding a value it will not accept is a
+         * form that blames the person for something they did not type.
+         */
+        fun blank(prefillName: String? = null, prefillBarcode: String? = null): FoodEditorDraft =
+            FoodEditorDraft(
+                name = prefillName.orEmpty(),
+                barcode = prefillBarcode.orEmpty().filter(Char::isDigit),
+            )
 
         /**
          * An existing card, opened to be corrected or duplicated.

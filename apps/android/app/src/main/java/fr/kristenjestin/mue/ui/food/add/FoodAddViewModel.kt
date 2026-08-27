@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import fr.kristenjestin.mue.MueApplication
+import fr.kristenjestin.mue.data.remote.openfoodfacts.OpenFoodFactsUrl
 import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.logic.MealSlotRules
 import fr.kristenjestin.mue.domain.logic.NutritionMath
@@ -18,11 +19,15 @@ import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
+import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.FoodLogRepository
+import fr.kristenjestin.mue.domain.repository.ProductLookup
+import fr.kristenjestin.mue.domain.repository.ProductLookupResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -63,10 +68,21 @@ import java.util.Locale
 internal class FoodAddViewModel(
     private val logs: FoodLogRepository,
     private val foods: FoodCatalogueRepository,
+    /**
+     * FR-FOOD-003's one network call, behind the domain interface PRD_FOOD 20.2 requires.
+     *
+     * A constructor parameter and never a container lookup, so the whole scan flow — the local
+     * hit, the four named failures, the missing product, the copy into the catalogue — is proved
+     * on the JVM against a fake, with no socket and no emulator.
+     */
+    private val lookup: ProductLookup,
     private val savedState: SavedStateHandle,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val locale: () -> Locale = Locale::getDefault,
 ) : ViewModel() {
+
+    /** The request currently out, so a second scan replaces the first rather than racing it. */
+    private var lookupJob: Job? = null
 
     private val _draft = MutableStateFlow(
         FoodAddDraft.fromJson(savedState[KEY_DRAFT])
@@ -159,6 +175,182 @@ internal class FoodAddViewModel(
     fun onQuickAddChosen() {
         clearErrors()
         updateDraft { it.copy(kindId = FoodLogKind.QUICK.id, foodId = null) }
+    }
+
+    // endregion
+
+    // region the scan (FR-FOOD-003, PRD_FOOD 9.2, 17 and 18)
+
+    /** FR-FOOD-003: the camera and the typed number, which are the same path (PRD_FOOD 18). */
+    fun onScanChosen() {
+        clearErrors()
+        transient.update { it.copy(scan = FoodScanState.Idle, scanAttempted = false) }
+        updateDraft { it.copy(kindId = FoodLogKind.FOOD.id, foodId = null, scanning = true) }
+    }
+
+    /**
+     * The barcode field, typed into.
+     *
+     * Filtered to digits because that is what a barcode is and what `FoodValidation.validateBarcode`
+     * accepts, and capped at [Food.BARCODE_LENGTH_RANGE]'s longest so a stuck key cannot build a
+     * string nothing will ever look up. Any edit takes back the last outcome: a result that stayed
+     * on screen under a *different* number would be a product card attributed to the wrong jar.
+     */
+    fun onBarcodeChange(raw: String) {
+        val digits = raw.filter(Char::isDigit).take(Food.BARCODE_LENGTH_RANGE.last)
+        cancelLookup()
+        transient.update {
+            it.copy(scan = FoodScanState.Idle, scanAttempted = false, scanSaveError = null)
+        }
+        updateDraft { it.copy(scanBarcode = digits) }
+    }
+
+    /**
+     * A code the camera read (PRD_FOOD 9.2).
+     *
+     * It goes into the **same field** the fingers would have filled and then takes the same road,
+     * which is PRD_FOOD 18's equality made structural rather than promised: there is one lookup,
+     * one validation and one set of outcomes, and no branch anywhere below asks how the digits
+     * arrived.
+     *
+     * Ignored while a lookup is running or while a result is on screen. The analyser delivers
+     * frames continuously and PRD_FOOD 17 keeps it running — "le scanner continue" — so without
+     * this guard a barcode left in front of the lens would re-issue the request behind the answer
+     * it already produced. Re-scanning the *same* number after clearing the field works, because
+     * clearing it is an edit and an edit returns the panel to [FoodScanState.Idle].
+     */
+    fun onBarcodeScanned(code: String) {
+        if (transient.value.scan != FoodScanState.Idle) return
+        if (_draft.value.scanBarcode == code) return
+        updateDraft { it.copy(scanBarcode = code) }
+        lookUp(code)
+    }
+
+    /** The button under the field. PRD_FOOD 15's refusal appears here rather than while typing. */
+    fun onLookUpBarcode() {
+        val typed = _draft.value.scanBarcode.trim()
+        transient.update { it.copy(scanAttempted = true, scanSaveError = null) }
+        if (!OpenFoodFactsUrl.isBarcode(typed)) return
+        lookUp(typed)
+    }
+
+    /** PRD_FOOD 17: a failed lookup can be tried again; a missing product cannot. */
+    fun onRetryLookup() {
+        val barcode = when (val scan = transient.value.scan) {
+            is FoodScanState.Unavailable -> scan.barcode
+            else -> return
+        }
+        lookUp(barcode)
+    }
+
+    /**
+     * PRD_FOOD 9.2: "Le produit est **copié** dans le catalogue local au moment de l'ajout."
+     *
+     * This is that moment, and it is a tap rather than the arrival of a response — which is what
+     * lets somebody see an incomplete card, with its dashes, *before* a row exists for it. A card
+     * already in the catalogue is chosen and not rewritten: it may have been corrected by hand
+     * since, and PRD_FOOD 9.2 is explicit that a later remote edit changes nothing locally.
+     *
+     * The write is the repository's ordinary [FoodCatalogueRepository.save], so the copy is
+     * journalled to the outbox exactly like a hand-written food (PRD_FOOD 21.1) and carries its
+     * `source`, its barcode, its `sourceId` and its `sourceVersion` with it.
+     */
+    fun onUseScannedProduct() {
+        val found = transient.value.scan as? FoodScanState.Found ?: return
+        if (found.alreadyInCatalogue) {
+            onFoodChosen(found.food.id)
+            return
+        }
+        viewModelScope.launch {
+            transient.update { it.copy(scanSaveError = null) }
+            runCatching { foods.save(found.food) }
+                .onSuccess { stored ->
+                    if (stored) {
+                        onFoodChosen(found.food.id)
+                    } else {
+                        // `save` refuses exactly one thing: a read-only Ciqual row. An Open Food
+                        // Facts copy is never one, so reaching here means the id collided with a
+                        // reference entry — vanishingly unlikely, and still not a crash.
+                        transient.update { it.copy(scanSaveError = FoodAddMessages.COPY_FAILED) }
+                    }
+                }
+                .onFailure {
+                    transient.update { it.copy(scanSaveError = FoodAddMessages.COPY_FAILED) }
+                }
+        }
+    }
+
+    /**
+     * The barcode a manual creation should be prefilled with (PRD_FOOD 17), or null.
+     *
+     * Read by the screen at the moment it navigates, rather than pushed out as an event: the
+     * editor is a route and this ViewModel does not know the stack. It is the *looked-up* number
+     * and not whatever is in the field, so a code corrected after a failed lookup cannot send the
+     * editor a number nobody searched for.
+     */
+    fun barcodeToCreateFrom(): String? = when (val scan = transient.value.scan) {
+        is FoodScanState.NotFound -> scan.barcode
+        is FoodScanState.Unavailable -> scan.barcode
+        else -> null
+    }
+
+    /**
+     * One lookup, replacing whichever one was already out.
+     *
+     * The job is held so a second scan cancels the first: two answers arriving out of order would
+     * put the wrong product on screen, and `ProductLookup` is explicitly allowed to be slow.
+     * Cancellation is also what makes closing the sheet mid-request free.
+     *
+     * The **local catalogue is asked first**, and that is PRD_FOOD 9.2 rather than a cache: a
+     * scanned product is copied locally and "scanning it again finds this row" — the row the
+     * person may since have corrected. It also means re-scanning a kept product works with no
+     * network at all, which is the offline half of the same rule.
+     */
+    private fun lookUp(barcode: String) {
+        cancelLookup()
+        transient.update {
+            it.copy(scan = FoodScanState.LookingUp, scanAttempted = true, scanSaveError = null)
+        }
+        lookupJob = viewModelScope.launch {
+            val local = runCatching { localCopyOf(barcode) }.getOrNull()
+            if (local != null) {
+                transient.update {
+                    it.copy(scan = FoodScanState.Found(local, alreadyInCatalogue = true))
+                }
+                return@launch
+            }
+            val outcome = when (val result = lookup.byBarcode(barcode)) {
+                is ProductLookupResult.Found ->
+                    FoodScanState.Found(result.food, alreadyInCatalogue = false)
+
+                ProductLookupResult.NotFound -> FoodScanState.NotFound(barcode)
+
+                is ProductLookupResult.Unavailable ->
+                    FoodScanState.Unavailable(barcode, result.reason)
+            }
+            transient.update { it.copy(scan = outcome) }
+        }
+    }
+
+    /**
+     * The catalogue row this number already belongs to, by either of the two names it can have.
+     *
+     * `Food` keeps **two** identifiers for a copied product and PRD_FOOD 9.2 is why: `barcode` is
+     * what was scanned, and `sourceId` is what Open Food Facts files the card under. They differ
+     * more often than one would guess — a UPC-A reads back as twelve digits where the card is
+     * filed under thirteen, which `MlKitBarcodeDecoderTest` measures on a device — so looking up
+     * only one of them would fetch, and copy, a product this catalogue already holds.
+     *
+     * The order matters: the scanned number first, because that is the one this phone recorded
+     * and the one a re-scan produces.
+     */
+    private suspend fun localCopyOf(barcode: String): Food? =
+        foods.findByBarcode(barcode)
+            ?: foods.findBySourceId(FoodSource.OPEN_FOOD_FACTS, barcode)
+
+    private fun cancelLookup() {
+        lookupJob?.cancel()
+        lookupJob = null
     }
 
     /**
@@ -394,6 +586,9 @@ internal class FoodAddViewModel(
         justDeleted = flags.justDeleted,
         isTimePickerVisible = flags.isTimePickerVisible,
         isLoading = flags.isLoading,
+        scan = flags.scan,
+        scanAttempted = flags.scanAttempted,
+        scanSaveError = flags.scanSaveError,
         locale = locale(),
     )
 
@@ -435,6 +630,7 @@ internal class FoodAddViewModel(
         savedState[KEY_TARGET] = null
         savedState[KEY_DRAFT] = null
         original.value = null
+        cancelLookup()
         transient.value = Transient()
         _draft.value = FoodAddDraft.forTarget(date = null, slot = null, today = today(), now = now())
     }
@@ -457,6 +653,10 @@ internal class FoodAddViewModel(
         val justDeleted: Boolean = false,
         val isTimePickerVisible: Boolean = false,
         val isLoading: Boolean = false,
+        /** FR-FOOD-003: where the scan path is. Never saved; see [FoodScanState]. */
+        val scan: FoodScanState = FoodScanState.Idle,
+        val scanAttempted: Boolean = false,
+        val scanSaveError: String? = null,
     )
 
     companion object {
@@ -490,6 +690,7 @@ internal class FoodAddViewModel(
                 FoodAddViewModel(
                     logs = app.container.food.foodLogRepository,
                     foods = app.container.food.foodCatalogueRepository,
+                    lookup = app.container.food.productLookup,
                     savedState = createSavedStateHandle(),
                 )
             }

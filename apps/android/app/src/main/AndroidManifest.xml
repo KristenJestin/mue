@@ -31,6 +31,23 @@
     -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+      FR-FOOD-003's barcode scanner (PRD_FOOD 9.2 and 18).
+
+      Asked for at runtime, once, in the context of opening the scan path, and refused without
+      consequence: PRD_FOOD 18 makes the manual barcode field "une alternative complète à la
+      caméra", so a refusal lands on that field with an explanation and the lookup works exactly
+      as well from it. Nothing else in the app opens a camera.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+      `required="false"`, deliberately. A device with no camera at all installs Mue and uses every
+      other path, including the typed barcode; declaring the feature as required would remove the
+      app from those devices to protect one of four ways of adding a line.
+    -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".MueApplication"
         android:allowBackup="false"
@@ -90,6 +107,43 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          ML Kit's telemetry uploader, removed.
+
+          `com.google.mlkit:barcode-scanning` transitively brings
+          `com.google.android.datatransport:transport-backend-cct`, and ML Kit's own classes hold
+          a `TransportFactory` aimed at `CCTDestination` under the log source `FIREBASE_ML_SDK`.
+          Google documents what that sends — "device information (such as manufacturer, model, OS
+          version and build)", "package name and app versions", "device identifier used for
+          diagnostics and usage analytics", latency and error codes — and documents **no opt-out**
+          (https://developers.google.com/ml-kit/android-data-disclosure).
+
+          PRD_FOOD 9.2 and 22 promise that a scan sends the number and nothing else, and
+          PRD_SERVER_SYNC_MCP 16 keeps this app's traffic to the server its owner paired with. A
+          library that posts the phone's model to a third party the moment the scanner opens
+          breaks both, and it does so on a path the person cannot see.
+
+          The three components below are how `TransportRuntime` finds a backend for the name
+          `cct` and how it schedules the upload. Removing them leaves every class present — so no
+          `NoClassDefFoundError`, and ML Kit's logging calls still succeed — while the events they
+          would have carried reach no network: backend resolution happens on the uploader's own
+          background thread and its failure is logged, never thrown. **Decoding is unaffected, and
+          that is asserted rather than assumed**: `MlKitBarcodeDecoderTest` decodes a real EAN-13
+          on a device built from this manifest.
+
+          `tools:node="remove"` and not a Gradle `exclude`: the classes have to stay, because they
+          are what ML Kit calls into. Only the registration goes.
+        -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            tools:node="remove" />
+        <service
+            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
+            tools:node="remove" />
+        <receiver
+            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"
+            tools:node="remove" />
 
         <!-- Shares the generated CSV without exposing the app's private storage. -->
         <provider

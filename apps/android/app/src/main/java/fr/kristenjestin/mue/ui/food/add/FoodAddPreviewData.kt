@@ -163,6 +163,36 @@ internal object FoodAddPreviewData {
     fun draft(slot: MealSlot = MealSlot.DINNER): FoodAddDraft =
         FoodAddDraft.forTarget(date = TODAY, slot = slot, today = TODAY, now = NOW)
 
+    /** The barcode every scan fixture is built around: the recorded Nutella card's own. */
+    const val SCANNED_BARCODE: String = "3017620422003"
+
+    /**
+     * A product card as Open Food Facts really returns one, with a gap in it (PRD_FOOD 9.2).
+     *
+     * Its shape is the recorded Nutella fixture's: four values from the manufacturer, and **no
+     * fibre**, because the only figure Open Food Facts has for it is one it estimated from the
+     * ingredient list and PRD_FOOD 17 refuses estimates. It is the fixture that makes an
+     * incomplete card visible in a preview and in a test — a `—` on a real product, beside four
+     * real numbers, rather than an invented `0`.
+     */
+    fun scannedProduct(): Food = Food(
+        id = FoodId("preview-scanned"),
+        name = "Nutella",
+        source = FoodSource.OPEN_FOOD_FACTS,
+        referenceUnit = ReferenceUnit.GRAM,
+        per100 = Nutrients(
+            energy = Energy.ofKilocaloriesOrNull(539.0),
+            protein = Macro.ofGramsOrNull(6.3),
+            carbs = Macro.ofGramsOrNull(57.5),
+            fat = Macro.ofGramsOrNull(30.9),
+            fibre = null,
+        ),
+        brand = "Ferrero",
+        barcode = SCANNED_BARCODE,
+        sourceId = SCANNED_BARCODE,
+        sourceVersion = "v3.6/947",
+    )
+
     private fun quantity(amount: Double): Quantity =
         requireNotNull(Quantity.ofIngredientOrNull(amount)) { "$amount is not a quantity" }
 
@@ -175,6 +205,44 @@ internal fun previewPathsState(): FoodAddUiState = FoodAddUiState.of(
     draft = FoodAddPreviewData.draft(),
     today = FoodAddPreviewData.TODAY,
 )
+
+/**
+ * The scan stage as somebody with **no camera permission** meets it (PRD_FOOD 17 and 18).
+ *
+ * The picture that has to be checked by eye rather than only by test: the explanation is quiet
+ * rather than alarming, the field under it is a full-width control with its own label and its own
+ * button, and nothing about the panel reads as a degraded version of another one. That is what
+ * "une alternative complète à la caméra" has to look like.
+ */
+internal fun previewScanRefusedState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft().copy(scanning = true),
+    today = FoodAddPreviewData.TODAY,
+).let { state ->
+    state.copy(
+        scan = state.scan?.withCamera(isGranted = false, isAvailable = true, canRequest = false),
+    )
+}
+
+/**
+ * A product found, before it is copied into the catalogue (PRD_FOOD 9.2).
+ *
+ * What to look at: the fibre row reads `—` while the four around it carry numbers. Open Food
+ * Facts does have a fibre figure for this card and it marked it `estimate`; PRD_FOOD 17 refuses
+ * estimates, so Mue does not know it. The value stays empty and stays editable once the product
+ * is added — which is the sentence printed under the figures.
+ */
+internal fun previewScanFoundState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft().copy(
+        scanning = true,
+        scanBarcode = FoodAddPreviewData.SCANNED_BARCODE,
+    ),
+    today = FoodAddPreviewData.TODAY,
+    scan = FoodScanState.Found(FoodAddPreviewData.scannedProduct(), alreadyInCatalogue = false),
+).let { state ->
+    state.copy(
+        scan = state.scan?.withCamera(isGranted = true, isAvailable = true, canRequest = false),
+    )
+}
 
 /**
  * 600 g of rice **weighed cooked** (PRD_FOOD 8.6 and 13.1).

@@ -81,6 +81,25 @@ internal data class FoodAddDraft(
     val quickProtein: String = "",
     /** FR-FOOD-008 on a recipe line: how many servings were eaten. */
     val servings: String = "",
+    /**
+     * FR-FOOD-003: the scan path was taken, and no food has come out of it yet.
+     *
+     * A flag and not a [FoodLogKind]: a scan does not produce a *kind* of line — it produces a
+     * catalogue food, and the line that follows is an ordinary `FOOD` one indistinguishable from
+     * a searched entry. What it does produce is a stage with no food in it yet, which is exactly
+     * one bit of information, and this is that bit.
+     */
+    val scanning: Boolean = false,
+    /**
+     * The barcode field, character for character (PRD_FOOD 18).
+     *
+     * **Both paths write here**, and that is the point rather than an implementation detail.
+     * PRD_FOOD 18 makes the typed number "une alternative complète à la caméra", so the camera
+     * fills this field instead of bypassing it: what was decoded is on screen, in the same box, in
+     * a form that can be corrected before it is looked up — and a screen reader announces the same
+     * value whichever of the two produced it.
+     */
+    val scanBarcode: String = "",
 ) {
 
     val kind: FoodLogKind get() = FoodLogKind.fromId(kindId)
@@ -145,6 +164,8 @@ internal data class FoodAddDraft(
         quickEnergy = "",
         quickProtein = "",
         servings = "",
+        scanning = false,
+        scanBarcode = "",
     )
 
     /**
@@ -162,7 +183,12 @@ internal data class FoodAddDraft(
             quickTitle.isNotBlank() ||
             quickEnergy.isNotBlank() ||
             quickProtein.isNotBlank() ||
-            servings.isNotBlank()
+            servings.isNotBlank() ||
+            // Thirteen digits off a jar is typing by any measure, and losing them to a `Close`
+            // pressed by accident would mean reading the label again. A code the *camera* put
+            // there counts the same: what makes it worth keeping is that it is on screen and
+            // correct, not how it got there.
+            scanBarcode.isNotBlank()
 
     companion object {
 

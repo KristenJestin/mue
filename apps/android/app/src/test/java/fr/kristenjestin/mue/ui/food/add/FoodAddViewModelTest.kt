@@ -518,6 +518,7 @@ class FoodAddViewModelTest {
         val viewModel: FoodAddViewModel,
         val logs: FakeFoodLogRepository,
         val foods: RecordingFoodCatalogueRepository,
+        val lookup: FakeProductLookup,
     )
 
     /**
@@ -528,6 +529,7 @@ class FoodAddViewModelTest {
         entries: List<FoodLogEntry> = emptyList(),
         catalogue: List<Food> = FoodAddPreviewData.catalogue(),
         savedState: SavedStateHandle = SavedStateHandle(),
+        lookup: FakeProductLookup = FakeProductLookup(),
         body: suspend TestScope.(Add) -> Unit,
     ) = runTest(mainDispatcher) {
         val logs = FakeFoodLogRepository(entries)
@@ -536,12 +538,14 @@ class FoodAddViewModelTest {
             viewModel = FoodAddViewModel(
                 logs = logs,
                 foods = foods,
+                lookup = lookup,
                 savedState = savedState,
                 clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC),
                 locale = { Locale.UK },
             ),
             logs = logs,
             foods = foods,
+            lookup = lookup,
         )
 
         val collector = launch { add.viewModel.uiState.collect { } }

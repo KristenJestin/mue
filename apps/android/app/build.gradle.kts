@@ -125,6 +125,43 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.androidx.work.runtime.ktx)
 
+    /*
+     * FR-FOOD-003's scanner: the camera, and the decoder that reads a barcode out of its frames.
+     *
+     * PRD_FOOD 9.2 fixes both halves of this choice. "Le décodage est **local** … aucune image ne
+     * quitte le téléphone" is why the bundled `com.google.mlkit:barcode-scanning` is used rather
+     * than `play-services-mlkit-barcode-scanning`: the unbundled variant fetches its model through
+     * Google Play services on first use, which is a network round trip about a photograph, on the
+     * one path this PRD promises never leaves the device. The bundled artefact ships the model in
+     * the APK, so a phone in flight mode decodes exactly as well as one on wifi.
+     *
+     * CameraX rather than `android.hardware.camera2`, for the reason every release note gives:
+     * the lifecycle binding, the rotation handling and the analysis back-pressure are the parts
+     * that are wrong on some device somewhere, and they are not parts worth re-deriving for one
+     * screen. `camera-lifecycle` is what stops the preview when the sheet closes.
+     *
+     * **`camera-compose` and not `camera-view`**, and the difference is two whole libraries.
+     * `camera-view` exists to give a `PreviewView` to a `View` hierarchy, and it declares
+     * `androidx.appcompat` and `androidx.camera:camera-video` to do it — an `AppCompatActivity`
+     * theme stack and a video recorder, in an app that has neither a `View` layout nor a
+     * `Recorder` anywhere in it. `camera-compose` declares Compose, `camera-core` and
+     * `camera-viewfinder`, and `CameraXViewfinder` is a composable that takes the `SurfaceRequest`
+     * `Preview` already emits.
+     *
+     * Nothing added here drags a `kotlinx-serialization` artefact in: the `force` block below
+     * still resolves 1.8.1 for all three, checked with
+     * `dependencies --configuration debugRuntimeClasspath` after the change, not assumed.
+     *
+     * What ML Kit *does* bring is named in `AndroidManifest.xml` beside the permission, because
+     * one of its transitive dependencies uploads usage telemetry unless it is switched off, and
+     * PRD_FOOD 22's "seul le numéro est transmis" is a claim about the whole application.
+     */
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.compose)
+    implementation(libs.mlkit.barcode.scanning)
+
     // Local unit tests
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
