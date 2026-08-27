@@ -138,6 +138,54 @@ interface SyncDao : SyncJournalDao {
     suspend fun requeueInflight(): Int
 
     /**
+     * Every row a repair pass might have something to say about, as the four columns it decides
+     * on — and no payload.
+     *
+     * `inflight` is excluded in SQL rather than in Kotlin so that a row on the wire is not even
+     * *read* by the pass, whatever `OutboxRepair.verdict` may later be changed to say about it.
+     * The projection is narrow for the same reason `pendingMutations` is not reused: this asks
+     * a question about identifiers, and hauling every stored payload through it to answer would
+     * make the cost of the pass the size of the outbox rather than its length.
+     */
+    @Query(
+        "SELECT mutation_id, state, attempt_count, last_error_code FROM sync_mutations " +
+            "WHERE state <> 'inflight' ORDER BY created_at ASC, rowid ASC"
+    )
+    suspend fun repairCandidates(): List<OutboxRepairCandidate>
+
+    /**
+     * Gives one stored row the identifier a current build would have minted for it, and puts it
+     * back in the queue.
+     *
+     * Four things it does *not* do, each on purpose:
+     *
+     * - It does not touch `created_at`. That column is the outbox's local sequence, and the two
+     *   mutations of one edit — the delete of the old date and the upsert of the new one — must
+     *   keep their order or the server applies a deletion to a row it has just created. A
+     *   `rowid` is unaffected by rewriting a primary key in SQLite, so the tie-break survives too.
+     * - It does not reset `attempt_count`. That is history, and the row really was refused.
+     * - It does not touch the payload, the aggregate or the base revision. This repairs an
+     *   identifier; anything else would be repairing the user's data, which FR-SYNC-007 forbids.
+     * - It does not widen its own `WHERE` beyond the id it was given. The caller has already
+     *   decided, per row, and a statement that re-decided would be a second place to keep the
+     *   rule.
+     *
+     * `last_error_code` and `last_error_message` **are** cleared: they describe a refusal of an
+     * identifier this row no longer carries, and leaving them would have `Data & sync` go on
+     * quoting "Every mutation needs a readable UUIDv7 `mutationId`" at a row that now has one.
+     *
+     * Rewriting a primary key is what this is, and it is sound here precisely because these rows
+     * were never accepted: no `sync_aggregate_state.last_mutation_id` can name one, since that
+     * column is only ever written from a server acknowledgement or a server change.
+     */
+    @Query(
+        "UPDATE sync_mutations SET mutation_id = :mutationId, state = 'pending', " +
+            "last_error_code = NULL, last_error_message = NULL " +
+            "WHERE mutation_id = :previousMutationId"
+    )
+    suspend fun remintMutationId(previousMutationId: String, mutationId: String)
+
+    /**
      * The revision the server assigned to an accepted mutation, written on acknowledgement.
      *
      * Without it the next edit of the same aggregate would quote the revision it had before the

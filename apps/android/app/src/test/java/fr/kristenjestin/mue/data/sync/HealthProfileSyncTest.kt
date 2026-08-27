@@ -46,6 +46,14 @@ class HealthProfileSyncTest {
 
     private val now = 1_770_000_100_000L
 
+    /**
+     * The profile's outbox row, named rather than spelled out — and a real `mutationIdSchema`
+     * value rather than the `"hp-1"` it used to be, because `OutboxRepair` re-mints the
+     * identifier of any stored row the contract refuses and would therefore rename it out from
+     * under these assertions. See `SyncFixtures.mutationId`.
+     */
+    private val hp1 = SyncFixtures.profileMutationId(1)
+
     private fun engine(store: SyncStore, api: ScriptedSyncApi, scope: TestScope) =
         SyncEngine(store = store, api = api, now = { now }, scope = scope)
 
@@ -59,10 +67,10 @@ class HealthProfileSyncTest {
     @Test
     fun theProfileRowTheOwnerCouldNotSendIsPushedAndLeavesTheOutbox() = runTest {
         val store = FakeSyncStore(
-            mutations = listOf(SyncFixtures.healthProfileUpsert("hp-1", createdAt = 1_000)),
+            mutations = listOf(SyncFixtures.healthProfileUpsert(hp1, createdAt = 1_000)),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("hp-1", revision = "1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(hp1, revision = "1")))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val outcome = engine(store, api, this).sync()
@@ -76,7 +84,7 @@ class HealthProfileSyncTest {
         val sent = assertIs<HealthProfileUpsertMutationDto>(
             api.pushRequests.single().mutations.single(),
         )
-        assertEquals("hp-1", sent.mutationId)
+        assertEquals(hp1, sent.mutationId)
         assertEquals(WIRE_HEALTH_PROFILE_AGGREGATE_ID, sent.aggregateId)
         assertEquals(171, sent.payload.heightCm)
         assertEquals("1998-11-18", sent.payload.birthDate)
@@ -87,7 +95,7 @@ class HealthProfileSyncTest {
             store.rowsInState(SyncMutationEntity.STATE_PENDING),
             "`1 change waiting` has to be able to reach zero",
         )
-        assertEquals(null, store.row("hp-1"))
+        assertEquals(null, store.row(hp1))
         assertEquals(
             1L,
             store.revisions[SyncAggregateStateEntity.TYPE_HEALTH_PROFILE to "me"],
@@ -201,7 +209,7 @@ class HealthProfileSyncTest {
         val repository = DataStoreUserProfileRepository(
             FakePreferencesDataStore(),
             profiles,
-            SyncOutbox(newMutationId = { "hp-1" }, now = { 1_000L }),
+            SyncOutbox(newMutationId = { hp1 }, now = { 1_000L }),
             Dispatchers.Unconfined,
         )
 
@@ -214,7 +222,7 @@ class HealthProfileSyncTest {
         )
 
         val pending = journal.pendingOfTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES, limit = 200)
-        assertEquals(listOf("hp-1"), pending.map { it.mutationId })
+        assertEquals(listOf(hp1), pending.map { it.mutationId })
         assertEquals(SyncAggregateStateEntity.TYPE_HEALTH_PROFILE, pending.single().aggregateType)
         assertEquals(HealthProfileEntity.ROW_ID, pending.single().aggregateId)
 

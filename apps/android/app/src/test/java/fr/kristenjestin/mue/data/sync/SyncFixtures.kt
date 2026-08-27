@@ -36,6 +36,34 @@ object SyncFixtures {
 
     const val SERVER_TIME: String = "2026-08-25T06:12:06.000Z"
 
+    /**
+     * A readable stand-in for an outbox identifier that is nonetheless one `mutationIdSchema`
+     * accepts: the version nibble `7`, the variant nibble `8`, and [nth] spelled out in the last
+     * group so a row is still recognisable at a glance in an assertion.
+     *
+     * The tests here used to say `"m-1"` and `"hp-1"`, which was harmless right up until the
+     * outbox grew [OutboxRepair] — a pass that re-mints the identifier of any stored row the
+     * contract refuses. A fixture that is not a `mutationIdSchema` value **is** such a row, so
+     * `FakeSyncStore` now repairs it exactly as the database does, and a test that pinned
+     * `"m-1"` would be a test asserting on a row that no longer exists under that name.
+     *
+     * Making them real is the better half of that. Every engine test now runs against rows a
+     * server would actually take, which is the one thing `MutationIds` was written because
+     * nothing did.
+     */
+    fun mutationId(nth: Int): String = "0198f0a1-0000-7000-8000-%012x".format(nth)
+
+    /** The same, in a second timestamp block, so a profile row is distinguishable from a weight. */
+    fun profileMutationId(nth: Int): String = "0198f0a2-0000-7000-8000-%012x".format(nth)
+
+    /**
+     * The identifier the owner's phone actually carried: a `UUID.randomUUID()`, version nibble
+     * `4`, minted by `SyncOutbox` before `MutationIds` existed. `packages/domain` refuses a push
+     * carrying it before it opens a transaction, so the row was rejected on every single run and
+     * `Data & sync` counted `1 change waiting to be sent` that nothing could make fall.
+     */
+    const val LEGACY_V4_MUTATION_ID: String = "4317e938-539e-4c48-abd5-27311fb39b74"
+
     fun measurementUpsert(
         mutationId: String,
         date: String = "2026-08-25",

@@ -36,6 +36,23 @@ class SyncEngineTest {
 
     private val now = 1_770_000_100_000L
 
+    /*
+     * The outbox rows these tests move around, named rather than spelled out.
+     *
+     * They are real `mutationIdSchema` values and not the `"m-1"` they used to be, because
+     * `OutboxRepair` made the difference matter: the store — the fake one here and the Room one
+     * in production — re-mints the identifier of any stored row the contract refuses, so a
+     * fixture that was not one would be silently renamed underneath the assertions. See
+     * `SyncFixtures.mutationId`.
+     */
+    private val m1 = SyncFixtures.mutationId(1)
+    private val m2 = SyncFixtures.mutationId(2)
+    private val m3 = SyncFixtures.mutationId(3)
+    private val mUpsert = SyncFixtures.mutationId(0x5e70)
+    private val mDelete = SyncFixtures.mutationId(0xde1e)
+    private val mBad = SyncFixtures.mutationId(0xbad)
+    private val h1 = SyncFixtures.mutationId(0xf00)
+
     // --- gap 1: `inflight` is no longer a one-way door -----------------------------------------
 
     /**
@@ -51,14 +68,14 @@ class SyncEngineTest {
     fun constructingTheEngineReturnsStrandedInflightRowsToThePendingQueue() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", state = SyncMutationEntity.STATE_INFLIGHT),
+                SyncFixtures.measurementUpsert(m1, state = SyncMutationEntity.STATE_INFLIGHT),
                 SyncFixtures.measurementUpsert(
-                    "m-2",
+                    m2,
                     date = "2026-08-26",
                     state = SyncMutationEntity.STATE_INFLIGHT,
                 ),
                 SyncFixtures.measurementUpsert(
-                    "m-3",
+                    m3,
                     date = "2026-08-27",
                     state = SyncMutationEntity.STATE_FAILED,
                 ),
@@ -69,7 +86,7 @@ class SyncEngineTest {
         advanceUntilIdle()
 
         assertEquals(
-            listOf("m-1", "m-2"),
+            listOf(m1, m2),
             store.rowsInState(SyncMutationEntity.STATE_PENDING).map { it.mutationId },
         )
         assertEquals(
@@ -79,7 +96,7 @@ class SyncEngineTest {
         // FR-SYNC-007: a mutation the server refused stays out of the queue. Recovery must not
         // undo that, or one bad row would be retried at every start for ever.
         assertEquals(
-            listOf("m-3"),
+            listOf(m3),
             store.rowsInState(SyncMutationEntity.STATE_FAILED).map { it.mutationId },
         )
     }
@@ -89,11 +106,11 @@ class SyncEngineTest {
     fun recoveryRunsBeforeAnythingElse() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", state = SyncMutationEntity.STATE_INFLIGHT),
+                SyncFixtures.measurementUpsert(m1, state = SyncMutationEntity.STATE_INFLIGHT),
             ),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val outcome = engine(store, api).sync()
@@ -102,7 +119,7 @@ class SyncEngineTest {
         val completed = assertIs<SyncOutcome.Completed>(outcome)
         assertEquals(1, completed.recovered)
         // And the recovered row really was sent: this is the loss FR-SYNC-001 forbids, closed.
-        assertEquals(listOf("m-1"), api.pushRequests.single().mutations.map { it.mutationId })
+        assertEquals(listOf(m1), api.pushRequests.single().mutations.map { it.mutationId })
     }
 
     /**
@@ -118,12 +135,12 @@ class SyncEngineTest {
     fun aRecoveryThatFailedAtEngineStartIsRetriedByTheNextSync() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", state = SyncMutationEntity.STATE_INFLIGHT),
+                SyncFixtures.measurementUpsert(m1, state = SyncMutationEntity.STATE_INFLIGHT),
             ),
         )
         store.requeueInflightFailures = 1
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val completed = assertIs<SyncOutcome.Completed>(engine(store, api).sync())
@@ -131,7 +148,7 @@ class SyncEngineTest {
         assertEquals(2, store.requeueInflightCalls, "the failed attempt is retried, not latched")
         assertEquals(1, completed.recovered)
         assertEquals(
-            listOf("m-1"),
+            listOf(m1),
             api.pushRequests.single().mutations.map { it.mutationId },
             "the stranded row still reaches the server on this run",
         )
@@ -158,15 +175,15 @@ class SyncEngineTest {
     fun anUpsertAndADeleteGoOutInOutboxOrderAsTheirOwnWireShapes() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementDelete("m-delete", createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-upsert", createdAt = 2_000),
+                SyncFixtures.measurementDelete(mDelete, createdAt = 1_000),
+                SyncFixtures.measurementUpsert(mUpsert, createdAt = 2_000),
             ),
         )
         val api = ScriptedSyncApi()
             .onPush(
                 SyncFixtures.pushResponse(
-                    SyncFixtures.applied("m-delete", revision = "11"),
-                    SyncFixtures.applied("m-upsert", revision = "5"),
+                    SyncFixtures.applied(mDelete, revision = "11"),
+                    SyncFixtures.applied(mUpsert, revision = "5"),
                 ),
             )
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
@@ -174,7 +191,7 @@ class SyncEngineTest {
         engine(store, api).sync()
 
         val sent = api.pushRequests.single().mutations
-        assertEquals(listOf("m-delete", "m-upsert"), sent.map { it.mutationId })
+        assertEquals(listOf(mDelete, mUpsert), sent.map { it.mutationId })
         val delete = assertIs<DeleteMutationDto>(sent[0])
         assertNull(delete.payload)
         val upsert = assertIs<MeasurementUpsertMutationDto>(sent[1])
@@ -194,7 +211,7 @@ class SyncEngineTest {
      */
     @Test
     fun aRetryCarriesTheSameMutationIdAndIsAnsweredAsADuplicate() = runTest {
-        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert("m-1")))
+        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert(m1)))
         val api = ScriptedSyncApi()
             .onPushFail(
                 SyncTransportException(
@@ -203,7 +220,7 @@ class SyncEngineTest {
                     retryable = true,
                 ),
             )
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.duplicate("m-1", revision = "4")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.duplicate(m1, revision = "4")))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
         val engine = engine(store, api)
 
@@ -223,7 +240,7 @@ class SyncEngineTest {
         )
         // A duplicate is the protocol working: the row leaves the outbox exactly as an applied
         // one does, and the revision the server replayed is recorded.
-        assertNull(store.row("m-1"))
+        assertNull(store.row(m1))
         assertEquals(4L, store.revisions.getValue("measurement" to "2026-08-25"))
     }
 
@@ -232,8 +249,8 @@ class SyncEngineTest {
     fun aFailedPushReturnsEveryRowToPending() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-2", date = "2026-08-26", createdAt = 2_000),
+                SyncFixtures.measurementUpsert(m1, createdAt = 1_000),
+                SyncFixtures.measurementUpsert(m2, date = "2026-08-26", createdAt = 2_000),
             ),
         )
         val api = ScriptedSyncApi().onPushFail(
@@ -249,7 +266,7 @@ class SyncEngineTest {
         val failed = assertIs<SyncOutcome.Failed>(outcome)
         assertTrue(failed.retryable)
         assertEquals(
-            listOf("m-1", "m-2"),
+            listOf(m1, m2),
             store.rowsInState(SyncMutationEntity.STATE_PENDING).map { it.mutationId },
         )
         assertEquals(0, store.rowsInState(SyncMutationEntity.STATE_INFLIGHT).size)
@@ -261,7 +278,7 @@ class SyncEngineTest {
     /** A crash in the middle of handling results must not strand the batch either. */
     @Test
     fun anUnexpectedFailureMidBatchStillReturnsTheRowsToPending() = runTest {
-        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert("m-1")))
+        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert(m1)))
         val api = object : SyncApi {
             override suspend fun push(
                 request: PushRequestDto,
@@ -277,7 +294,7 @@ class SyncEngineTest {
 
         assertIs<IllegalStateException>(thrown)
         assertEquals(
-            listOf("m-1"),
+            listOf(m1),
             store.rowsInState(SyncMutationEntity.STATE_PENDING).map { it.mutationId },
             "the `finally` is what makes this true for failures nobody predicted",
         )
@@ -291,17 +308,17 @@ class SyncEngineTest {
     fun oneRejectedMutationDoesNotBlockTheRest() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-2", date = "2026-08-26", createdAt = 2_000),
-                SyncFixtures.measurementUpsert("m-3", date = "2026-08-27", createdAt = 3_000),
+                SyncFixtures.measurementUpsert(m1, createdAt = 1_000),
+                SyncFixtures.measurementUpsert(m2, date = "2026-08-26", createdAt = 2_000),
+                SyncFixtures.measurementUpsert(m3, date = "2026-08-27", createdAt = 3_000),
             ),
         )
         val api = ScriptedSyncApi()
             .onPush(
                 SyncFixtures.pushResponse(
-                    SyncFixtures.applied("m-1"),
-                    SyncFixtures.rejected("m-2"),
-                    SyncFixtures.applied("m-3", revision = "2"),
+                    SyncFixtures.applied(m1),
+                    SyncFixtures.rejected(m2),
+                    SyncFixtures.applied(m3, revision = "2"),
                 ),
             )
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
@@ -313,12 +330,12 @@ class SyncEngineTest {
         assertEquals(1, completed.rejected)
         assertTrue(completed.hasIssues)
 
-        val kept = assertNotNull(store.row("m-2"))
+        val kept = assertNotNull(store.row(m2))
         assertEquals(SyncMutationEntity.STATE_FAILED, kept.state)
         assertEquals(SyncErrorCodes.SYNC_REVISION_CONFLICT, kept.lastErrorCode)
         assertNotNull(kept.payload, "no local data is deleted to repair an error")
-        assertNull(store.row("m-1"))
-        assertNull(store.row("m-3"))
+        assertNull(store.row(m1))
+        assertNull(store.row(m3))
     }
 
     /** A server that answers about fewer mutations than it was sent must not cost a change. */
@@ -326,20 +343,20 @@ class SyncEngineTest {
     fun aMutationTheServerDidNotAnswerAboutGoesBackToPending() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.measurementUpsert("m-1", createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-2", date = "2026-08-26", createdAt = 2_000),
+                SyncFixtures.measurementUpsert(m1, createdAt = 1_000),
+                SyncFixtures.measurementUpsert(m2, date = "2026-08-26", createdAt = 2_000),
             ),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         engine(store, api).sync()
 
-        assertNull(store.row("m-1"))
+        assertNull(store.row(m1))
         assertEquals(
             SyncMutationEntity.STATE_PENDING,
-            assertNotNull(store.row("m-2")).state,
+            assertNotNull(store.row(m2)).state,
         )
     }
 
@@ -356,22 +373,22 @@ class SyncEngineTest {
     fun anAggregateTheContractCannotCarryStaysPendingAndIsNotSent() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.deferredUpsert("h-1", createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-1", createdAt = 2_000),
+                SyncFixtures.deferredUpsert(h1, createdAt = 1_000),
+                SyncFixtures.measurementUpsert(m1, createdAt = 2_000),
             ),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val outcome = engine(store, api).sync()
 
         val completed = assertIs<SyncOutcome.Completed>(outcome)
         assertEquals(1, completed.deferred)
-        assertEquals(listOf("m-1"), api.pushRequests.single().mutations.map { it.mutationId })
+        assertEquals(listOf(m1), api.pushRequests.single().mutations.map { it.mutationId })
         assertEquals(
             SyncMutationEntity.STATE_PENDING,
-            assertNotNull(store.row("h-1")).state,
+            assertNotNull(store.row(h1)).state,
             "a change the contract cannot carry is kept, not refused",
         )
         assertTrue(!completed.hasIssues, "a deferred aggregate is not a `Sync issue`")
@@ -395,19 +412,22 @@ class SyncEngineTest {
     @Test
     fun aFullWindowOfUndeliverableRowsDoesNotStallTheMeasurementBehindThem() = runTest {
         val blocked = (1..WIRE_PUSH_MAX_MUTATIONS).map { index ->
-            SyncFixtures.deferredUpsert("h-$index", createdAt = index.toLong())
+            SyncFixtures.deferredUpsert(
+                SyncFixtures.mutationId(0xf00 + index),
+                createdAt = index.toLong(),
+            )
         }
         val store = FakeSyncStore(
-            mutations = blocked + SyncFixtures.measurementUpsert("m-1", createdAt = 100_000),
+            mutations = blocked + SyncFixtures.measurementUpsert(m1, createdAt = 100_000),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val completed = assertIs<SyncOutcome.Completed>(engine(store, api).sync())
 
         assertEquals(
-            listOf("m-1"),
+            listOf(m1),
             api.pushRequests.single().mutations.map { it.mutationId },
             "the measurement must not wait behind rows nothing can ever send",
         )
@@ -424,7 +444,7 @@ class SyncEngineTest {
     /** A batch of nothing but deferred rows still pulls: an agent's writes must still arrive. */
     @Test
     fun aBatchOfOnlyDeferredRowsStillPulls() = runTest {
-        val store = FakeSyncStore(mutations = listOf(SyncFixtures.deferredUpsert("h-1")))
+        val store = FakeSyncStore(mutations = listOf(SyncFixtures.deferredUpsert(h1)))
         val api = ScriptedSyncApi()
             .onPull(SyncFixtures.page(listOf(SyncFixtures.upsertChange("41")), SyncFixtures.CURSOR_A))
 
@@ -437,15 +457,15 @@ class SyncEngineTest {
     /** An unreadable stored payload is one bad row, kept and marked, never a failed sync. */
     @Test
     fun anUnreadableStoredPayloadIsRejectedRatherThanCrashingTheRun() = runTest {
-        val corrupt = SyncFixtures.measurementUpsert("m-bad").copy(payload = "{not json")
+        val corrupt = SyncFixtures.measurementUpsert(mBad).copy(payload = "{not json")
         val store = FakeSyncStore(
             mutations = listOf(
                 corrupt.copy(createdAt = 1_000),
-                SyncFixtures.measurementUpsert("m-1", createdAt = 2_000),
+                SyncFixtures.measurementUpsert(m1, createdAt = 2_000),
             ),
         )
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(emptyList(), SyncFixtures.CURSOR_A))
 
         val completed = assertIs<SyncOutcome.Completed>(engine(store, api).sync())
@@ -454,7 +474,7 @@ class SyncEngineTest {
         assertEquals(1, completed.applied)
         assertEquals(
             SyncMutationEntity.STATE_FAILED,
-            assertNotNull(store.row("m-bad")).state,
+            assertNotNull(store.row(mBad)).state,
         )
     }
 
@@ -463,9 +483,9 @@ class SyncEngineTest {
     /** FR-SYNC-002: the mutations go out first, then the changes come back. In that order. */
     @Test
     fun theBatchIsSentBeforeTheJournalIsRead() = runTest {
-        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert("m-1")))
+        val store = FakeSyncStore(mutations = listOf(SyncFixtures.measurementUpsert(m1)))
         val api = ScriptedSyncApi()
-            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied("m-1")))
+            .onPush(SyncFixtures.pushResponse(SyncFixtures.applied(m1)))
             .onPull(SyncFixtures.page(listOf(SyncFixtures.upsertChange("41")), SyncFixtures.CURSOR_A))
 
         engine(store, api).sync()
@@ -662,13 +682,13 @@ class SyncEngineTest {
     fun anUnpairedPhoneKeepsItsQueuedChanges() = runTest {
         val store = FakeSyncStore(
             serverUrl = null,
-            mutations = listOf(SyncFixtures.measurementUpsert("m-1")),
+            mutations = listOf(SyncFixtures.measurementUpsert(m1)),
         )
 
         engine(store, ScriptedSyncApi()).sync()
 
         assertEquals(
-            listOf("m-1"),
+            listOf(m1),
             store.rowsInState(SyncMutationEntity.STATE_PENDING).map { it.mutationId },
         )
     }

@@ -32,6 +32,21 @@ interface SyncStore {
     /** See `SyncDao.requeueInflight`. Called first, at engine start, before anything else. */
     suspend fun requeueInflight(): Int
 
+    /**
+     * See [OutboxRepair]. Called at engine start, immediately after [requeueInflight], for the
+     * same reason as [requeueInflight]: a queue can be left in a state that no future run of
+     * this application could leave on its own, and only something that runs before a send can
+     * unstick it.
+     *
+     * Second and not first, deliberately. [requeueInflight] moves the rows a killed process left
+     * `inflight` back to `pending`, and this pass never touches an `inflight` row — so running it
+     * afterwards is what lets a stranded row with a legacy identifier be repaired in the same
+     * engine start rather than in the next one.
+     *
+     * @return how many rows were given a new identifier, so a caller can log a real number.
+     */
+    suspend fun repairUnsendableMutationIds(): Int
+
     /** The paired server's origin, or null when this phone is paired with nothing. */
     suspend fun serverUrl(): String?
 
@@ -103,6 +118,33 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
     private val syncDao get() = database.syncDao()
 
     override suspend fun requeueInflight(): Int = syncDao.requeueInflight()
+
+    /**
+     * One transaction, and the identifiers come from [MutationIds] rather than from SQL.
+     *
+     * The transaction is not for atomicity of the *outcome* — the pass is idempotent, so a
+     * process death halfway through simply leaves the rest for the next start — but for the
+     * ordinary reason: dozens of single-statement writes outside one are dozens of fsyncs.
+     *
+     * The decision is `OutboxRepair.verdict`'s and only its, per row. Nothing is decided in the
+     * `WHERE` clause of [SyncDao.remintMutationId], so the rule lives in one place and is
+     * provable by a JVM test rather than by an emulator.
+     */
+    override suspend fun repairUnsendableMutationIds(): Int = database.withTransaction {
+        var repaired = 0
+        for (candidate in syncDao.repairCandidates()) {
+            val verdict = OutboxRepair.verdict(
+                state = candidate.state,
+                mutationId = candidate.mutationId,
+                attemptCount = candidate.attemptCount,
+                lastErrorCode = candidate.lastErrorCode,
+            )
+            if (verdict != OutboxRepair.Verdict.REMINT) continue
+            syncDao.remintMutationId(candidate.mutationId, MutationIds.random())
+            repaired++
+        }
+        repaired
+    }
 
     override suspend fun serverUrl(): String? = syncDao.syncState()?.serverUrl
 

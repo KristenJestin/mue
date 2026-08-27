@@ -58,6 +58,47 @@ class FakeSyncStore(
         return stranded.size
     }
 
+    /** The identifiers the repair pass mints, in order, so a test can pin the exact rows. */
+    var newMutationId: () -> String = MutationIds::random
+
+    var repairCalls: Int = 0
+        private set
+
+    /**
+     * `RoomSyncStore.repairUnsendableMutationIds`, with the same rule and the same statement
+     * order — the rule itself is `OutboxRepair.verdict`, called here rather than restated, so
+     * the fake cannot quietly be kinder than the database.
+     *
+     * The row is rewritten under a new key and the old one removed, because that is what
+     * `UPDATE ... SET mutation_id` does to a primary key: an engine that had captured the old id
+     * would find nothing under it, which is exactly what a test of the ordering should be able
+     * to see.
+     */
+    override suspend fun repairUnsendableMutationIds(): Int {
+        calls += "repairUnsendableMutationIds"
+        repairCalls++
+        var repaired = 0
+        for (row in rows.values.sortedWith(compareBy({ it.createdAt }, { it.mutationId }))) {
+            val verdict = OutboxRepair.verdict(
+                state = row.state,
+                mutationId = row.mutationId,
+                attemptCount = row.attemptCount,
+                lastErrorCode = row.lastErrorCode,
+            )
+            if (verdict != OutboxRepair.Verdict.REMINT) continue
+            rows.remove(row.mutationId)
+            val minted = newMutationId()
+            rows[minted] = row.copy(
+                mutationId = minted,
+                state = SyncMutationEntity.STATE_PENDING,
+                lastErrorCode = null,
+                lastErrorMessage = null,
+            )
+            repaired++
+        }
+        return repaired
+    }
+
     override suspend fun serverUrl(): String? = serverUrl.also { calls += "serverUrl" }
 
     override suspend fun deviceId(): String? = deviceId

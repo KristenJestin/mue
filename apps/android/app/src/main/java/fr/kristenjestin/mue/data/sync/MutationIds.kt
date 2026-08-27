@@ -61,6 +61,30 @@ object MutationIds {
     fun random(): String = at(System.currentTimeMillis(), secureRandom)
 
     /**
+     * Whether the server's front door would read [candidate] as a `mutationId` at all.
+     *
+     * This is the *acceptance* test, not the minting rule, and the difference is deliberate.
+     * [random] emits lower case because `java.util.UUID.toString` does; `mutationIdSchema` is
+     * `z.uuidv7()`, whose regex is
+     *
+     * ```
+     * ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$
+     * ```
+     *
+     * — hex in either case, and the variant nibble in either case too. So this accepts strictly
+     * more than [random] produces, and that is the safe direction: `OutboxRepair` re-mints the
+     * id of a row **because** returning false here proves the server never accepted it, so a
+     * predicate stricter than the server's would re-mint a row the server may have taken, and
+     * that is the FR-SYNC-006 replay guarantee broken. Erring the other way costs nothing: an
+     * id this accepts and the server refuses is simply refused again, per mutation, as before.
+     *
+     * Not `UUID.fromString(...).version() == 7`: `java.util.UUID` parses `1-2-3-4-5` and pads
+     * it, so it would call a string the wire rejects well formed.
+     */
+    fun isMutationId(candidate: String?): Boolean =
+        candidate != null && MUTATION_ID.matches(candidate)
+
+    /**
      * The identifier a row minted at [unixMillis] would carry, with [random] supplying the
      * 74 random bits. Both are parameters so the test can pin an exact string.
      */
@@ -76,6 +100,15 @@ object MutationIds {
 
         return UUID(mostSignificant, leastSignificant).toString()
     }
+
+    /**
+     * `z.uuidv7()`'s own regex, transcribed from `zod/v4/core/regexes.js`. It is written out
+     * rather than derived from anything, because the one thing it must never do is drift
+     * towards what this file happens to emit — see [isMutationId].
+     */
+    private val MUTATION_ID = Regex(
+        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+    )
 
     /** The low 48 bits: the milliseconds a v7 carries, which run out in the year 10889. */
     private const val TIMESTAMP_MASK = 0x0000_FFFF_FFFF_FFFFL

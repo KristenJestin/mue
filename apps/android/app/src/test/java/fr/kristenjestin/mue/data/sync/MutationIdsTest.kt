@@ -7,6 +7,7 @@ import java.util.Random
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -82,6 +83,43 @@ class MutationIdsTest {
         // A phone whose clock has not been set yet still has to journal its writes.
         val id = MutationIds.at(0L, Random(3))
         assertTrue(uuidV7.matches(id), "not a UUIDv7: $id")
+    }
+
+    @Test
+    fun `it recognises what it mints`() {
+        // The minting rule and the acceptance rule are separate code and must agree in this
+        // direction at least: nothing this file produces may be a row `OutboxRepair` re-mints.
+        repeat(200) { assertTrue(MutationIds.isMutationId(MutationIds.random())) }
+    }
+
+    @Test
+    fun `it accepts upper case, because the contract does`() {
+        // `z.uuidv7()` is `[0-9a-fA-F]` with the variant nibble `[89abAB]`, so a server takes a
+        // shouted identifier. `OutboxRepair` re-mints a row *because* this returns false — that
+        // is its proof the server never accepted it — so being stricter than the contract here
+        // would re-mint a row the server may already hold, and duplicate the change.
+        val minted = MutationIds.random()
+        assertTrue(MutationIds.isMutationId(minted.uppercase()), minted.uppercase())
+    }
+
+    @Test
+    fun `it refuses the identifier the outbox used to mint`() {
+        // The row on the owner's phone. Version nibble `4`, which is what `UUID.randomUUID()`
+        // gives, and what `packages/domain` refuses before it opens a transaction.
+        assertFalse(MutationIds.isMutationId("4317e938-539e-4c48-abd5-27311fb39b74"))
+        assertFalse(MutationIds.isMutationId(UUID.randomUUID().toString()))
+    }
+
+    @Test
+    fun `it refuses what java would happily parse`() {
+        // `UUID.fromString("1-2-3-4-5")` succeeds and pads, so a version check through
+        // `java.util.UUID` would call a string the wire rejects well formed. This is a regex
+        // against the contract's own, and it says no.
+        assertEquals(0L, UUID.fromString("0-0-0-0-0").mostSignificantBits)
+        assertFalse(MutationIds.isMutationId("0-0-0-0-0"))
+        assertFalse(MutationIds.isMutationId("00000000-0000-0000-0000-000000000000"))
+        assertFalse(MutationIds.isMutationId(""))
+        assertFalse(MutationIds.isMutationId(null))
     }
 
     @Test
