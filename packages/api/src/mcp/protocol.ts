@@ -35,7 +35,7 @@ export const MUE_MCP_SERVER_INFO = {
  */
 export const MUE_MCP_INSTRUCTIONS = [
   "Mue is a private, self-hosted health log: weight measurements, finished activity sessions,",
-  "custom exercises and a small health profile.",
+  "custom exercises, a small health profile, and a food journal with its own foods and recipes.",
   "",
   "Every list is cursor-paginated and imposes no time window, so the whole history can be walked.",
   "Results carry the aggregate revision, its provenance, and `lastAndroidSyncAt`: the last moment",
@@ -44,5 +44,13 @@ export const MUE_MCP_INSTRUCTIONS = [
   "",
   "Write tools create final records, not drafts. When a required field is missing the tool returns",
   "a structured error naming the field: ask the person for it and call the tool again. Never guess",
-  "a required value, and leave an optional one out rather than inventing it.",
+  "a required value, and leave an optional one out rather than inventing it. An unknown number is",
+  "an absent field, never a zero -- a zero is shown to the person as a fact they stated.",
+  "",
+  "Several fields are worked out for you rather than asked of you: the moment of the day a meal",
+  "belongs to follows from the time it was eaten, and whether a logged line came from a food or a",
+  "recipe follows from which one you named. Do not fill in a field the tool says it derives.",
+  "",
+  "Deleting is separate from writing and needs its own permission. When a delete tool is missing",
+  "from your list, the person has not granted it; say so rather than working around it.",
 ].join("\n");
