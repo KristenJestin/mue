@@ -12,8 +12,11 @@ import fr.kristenjestin.mue.data.pairing.PairingApi
 import fr.kristenjestin.mue.data.pairing.RoomPairingStore
 import fr.kristenjestin.mue.data.pairing.ServerPairing
 import fr.kristenjestin.mue.data.remote.sync.KtorSyncApi
+import fr.kristenjestin.mue.data.remote.sync.KtorSyncEventStream
 import fr.kristenjestin.mue.data.remote.sync.SyncApi
+import fr.kristenjestin.mue.data.remote.sync.SyncEventStream
 import fr.kristenjestin.mue.data.sync.HealthProfileSeeding
+import fr.kristenjestin.mue.data.sync.LiveSyncChannel
 import fr.kristenjestin.mue.data.sync.RoomSyncStore
 import fr.kristenjestin.mue.data.sync.SyncEngine
 import fr.kristenjestin.mue.data.sync.SyncOutbox
@@ -94,6 +97,37 @@ class SyncContainer(
 
     /** One engine per process, so `Sync now` and the periodic worker share its gate. */
     val engine: SyncEngine by lazy { SyncEngine(store = store, api = api, scope = engineScope) }
+
+    /**
+     * The live channel's transport, on the **same** [httpClient] as [api] and for the same reason
+     * the pairing shares it: one trust configuration, proved once.
+     *
+     * The URL and the bearer are read per connection rather than captured, so `Disconnect server`
+     * closes the channel at the next reconnection instead of at the next process.
+     */
+    val eventStream: SyncEventStream by lazy {
+        KtorSyncEventStream(
+            client = httpClient,
+            baseUrl = { syncDao.syncState()?.serverUrl },
+            token = { tokenStore.read() },
+        )
+    }
+
+    /**
+     * PRD 9.4's live trigger, held open by `MueApp` for the width of the foreground and by
+     * nothing else.
+     *
+     * It takes the same [engine] every other trigger takes. That is the whole reason it is built
+     * here rather than by whatever screen starts it: a second engine would mean a second gate, and
+     * two gates are no gate at all.
+     */
+    val liveSync: LiveSyncChannel by lazy {
+        LiveSyncChannel(
+            paired = { !syncDao.syncState()?.serverUrl.isNullOrBlank() },
+            stream = eventStream,
+            sync = { engine.sync() },
+        )
+    }
 
     /**
      * The Better Auth half of PRD 9.2, on the **same** [httpClient] as [api].

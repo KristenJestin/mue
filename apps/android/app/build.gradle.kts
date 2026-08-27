@@ -90,6 +90,10 @@ dependencies {
     // Arch components
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // `ProcessLifecycleOwner`: whether *the application* is in the foreground, rather than
+    // whether some activity is. The live channel of sync PRD 9.4 is scoped to it, and the 700 ms
+    // debounce it already carries is what keeps a rotation from closing and reopening a socket.
+    implementation(libs.androidx.lifecycle.process)
 
     // Compose
     implementation(libs.androidx.compose.ui)
