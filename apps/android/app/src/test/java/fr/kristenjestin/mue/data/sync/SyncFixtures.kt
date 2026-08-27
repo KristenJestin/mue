@@ -25,6 +25,7 @@ import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncErrorCodes
 import fr.kristenjestin.mue.data.remote.sync.SyncTransportException
 import fr.kristenjestin.mue.data.remote.sync.WIRE_AGGREGATE_MEASUREMENT
+import fr.kristenjestin.mue.domain.model.FoodAggregates
 
 /** Outbox rows, wire values and a scripted [SyncApi], so the engine tests read as scenarios. */
 object SyncFixtures {
@@ -106,8 +107,9 @@ object SyncFixtures {
     )
 
     /**
-     * An aggregate this build journals and still cannot send: PRD 10.1 lists activity sessions
-     * as synchronised and `AGGREGATE_TYPES` has no branch for them.
+     * An aggregate this build really does journal and really cannot send: PRD 10.1 synchronises
+     * the food journal, `SyncOutbox.foodLogUpsert` writes a row at every meal, and
+     * `AGGREGATE_TYPES` has no branch for it.
      *
      * It replaced the health profile in every "deferred" test here, which is the point of
      * naming it: those tests are about the *queue*, not about which aggregate happens to be
@@ -119,11 +121,11 @@ object SyncFixtures {
         createdAt: Long = 1_770_000_000_000L,
     ): SyncMutationEntity = SyncMutationEntity(
         mutationId = mutationId,
-        aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+        aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
         aggregateId = "b7c1e2f0-0000-7000-8000-000000000001",
         op = SyncMutationEntity.OP_UPSERT,
         baseRevision = null,
-        payload = """{"movement":"running","durationSeconds":2100}""",
+        payload = """{"consumedOn":"2026-08-25","grams":120}""",
         payloadSchemaVersion = PAYLOAD_SCHEMA_VERSION,
         createdAt = createdAt,
         state = SyncMutationEntity.STATE_PENDING,

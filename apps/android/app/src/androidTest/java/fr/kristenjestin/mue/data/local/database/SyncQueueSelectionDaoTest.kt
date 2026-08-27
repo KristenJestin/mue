@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import fr.kristenjestin.mue.data.remote.sync.SyncWire
 import fr.kristenjestin.mue.data.remote.sync.WIRE_PUSH_MAX_MUTATIONS
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
+import fr.kristenjestin.mue.domain.model.FoodAggregates
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -16,7 +17,7 @@ import org.junit.runner.RunWith
 /**
  * The queue a send selects from, in SQLite.
  *
- * Activity sessions are journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in
+ * The four food aggregates are journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in
  * `packages/contracts` has no branch for them, so those rows are `pending` and undeliverable for
  * as long as the contract lacks it — they never drain. A send that took the oldest
  * [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would therefore, once that many saves had
@@ -59,7 +60,7 @@ class SyncQueueSelectionDaoTest {
             syncDao.enqueueMutation(
                 row(
                     "h-$index",
-                    SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                    FoodAggregates.TYPE_FOOD_LOG_ENTRY,
                     "b7c1e2f0-0000-7000-8000-00000000000$index",
                     createdAt = index.toLong(),
                 ),
@@ -150,7 +151,7 @@ class SyncQueueSelectionDaoTest {
         syncDao.enqueueMutation(
             row(
                 "h-1",
-                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                FoodAggregates.TYPE_FOOD_LOG_ENTRY,
                 "b7c1e2f0-0000-7000-8000-000000000001",
                 createdAt = 2_000,
             ),

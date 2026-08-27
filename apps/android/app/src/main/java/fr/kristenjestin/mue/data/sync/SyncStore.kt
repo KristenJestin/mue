@@ -53,10 +53,10 @@ interface SyncStore {
     suspend fun pending(limit: Int): List<SyncMutationEntity>
 
     /**
-     * How many `pending` rows this build has no wire branch for — the activity, custom exercise
-     * and food aggregates of PRD 10.1 that `AGGREGATE_TYPES` does not name yet. They are
-     * journalled, kept, block nothing, and go out unchanged the day `packages/contracts` grows
-     * their branch, which is exactly how `healthProfile` left this set.
+     * How many `pending` rows this build has no wire branch for — the four food aggregates of
+     * PRD 10.1 that `AGGREGATE_TYPES` does not name yet. They are journalled, kept, block
+     * nothing, and go out unchanged the day `packages/contracts` grows their branch, which is
+     * exactly how `healthProfile` left this set.
      */
     suspend fun deferredCount(): Int
 

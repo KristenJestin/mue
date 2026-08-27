@@ -50,8 +50,8 @@ interface SyncDao : SyncJournalDao {
      * oldest first — the query a send actually uses.
      *
      * [pendingMutations] is the queue as the user's `Data & sync` screen thinks of it; this is
-     * the queue as the network sees it, and the difference is not cosmetic. The activity,
-     * custom exercise and food aggregates are journalled at every save (FR-SYNC-001) and
+     * the queue as the network sees it, and the difference is not cosmetic. The four food
+     * aggregates are journalled at every save (FR-SYNC-001) and
      * `AGGREGATE_TYPES` in `packages/contracts` has no branch for them, so those rows are
      * `pending` and undeliverable *for as long as the contract lacks the branch* — they never
      * drain. A send that took the oldest rows regardless of type would, once that many food

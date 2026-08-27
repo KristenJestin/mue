@@ -4,6 +4,7 @@ import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
+import fr.kristenjestin.mue.domain.model.FoodAggregates
 import kotlinx.serialization.SerializationException
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -158,17 +159,17 @@ class SyncWireTest {
     }
 
     /**
-     * Still deferred: PRD 10.1 lists activity sessions as synchronised and `AGGREGATE_TYPES`
-     * has no branch for them. Null means "keep it, do not send it" — the engine leaves the row
-     * `pending` rather than refusing a change the user made.
+     * Still deferred: PRD 10.1 synchronises the food journal, `SyncOutbox` writes a row at every
+     * meal, and `AGGREGATE_TYPES` has no branch for it. Null means "keep it, do not send it" —
+     * the engine leaves the row `pending` rather than refusing a change the user made.
      */
     @Test
     fun anAggregateTypeTheContractHasNoBranchForMapsToNothing() {
         assertNull(
             SyncWire.toEnvelope(
                 row(
-                    aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
-                    payload = """{"movement":"running"}""",
+                    aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+                    payload = """{"consumedOn":"2026-08-25","grams":120}""",
                 ),
                 origin,
             ),

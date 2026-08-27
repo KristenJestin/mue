@@ -24,13 +24,17 @@ import java.time.Instant
  *
  * [toEnvelope] returns null rather than throwing when the outbox holds an aggregate type that
  * `packages/contracts` has no wire shape for. That is not hypothetical: `AGGREGATE_TYPES` in
- * `primitives.ts` names two of PRD 10.1's aggregates, while
- * [SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION], [SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE]
- * and the four `FoodAggregates` types are journalled by `SyncOutbox` and have no branch yet.
- * Journalling those changes is what FR-SYNC-001 requires today; sending them is what a later
- * contract revision will allow. A null here means "keep it, do not send it, do not fail it" —
- * the row stays `pending`, loses nothing, and goes out unchanged the day the server
+ * `primitives.ts` names two of PRD 10.1's aggregates, while `SyncOutbox` already journals the
+ * four `FoodAggregates` types — `food`, `recipe`, `foodLogEntry` and `mealPlanEntry` — at every
+ * save. Journalling those changes is what FR-SYNC-001 requires today; sending them is what a
+ * later contract revision will allow. A null here means "keep it, do not send it, do not fail
+ * it" — the row stays `pending`, loses nothing, and goes out unchanged the day the server
  * understands it.
+ *
+ * [SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION] and
+ * [SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE] are a step behind those: PRD 10.1
+ * synchronises them, the local type names exist, and nothing journals one yet — so they are not
+ * even in the queue.
  *
  * `healthProfile` was in exactly that state and is not any more, which is worth recording
  * because of how it read from the outside: PRD 13.4 called the profile synchronised, the outbox
@@ -59,15 +63,14 @@ object SyncWire {
      *
      * Filtering the queue on this list is not an optimisation, it is what keeps FR-SYNC-007's
      * "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes" true of a
-     * queue that still contains rows nothing can send. `SyncOutbox` journals activity sessions,
-     * custom exercises and the four food aggregates of PRD_FOOD 21.2 at every save
-     * (FR-SYNC-001), and `AGGREGATE_TYPES` in `packages/contracts` has no branch for any of
-     * them, so those rows stay `pending` for as long as the contract lacks it — they never
-     * drain. A send that simply took the oldest `WIRE_PUSH_MAX_MUTATIONS` rows would therefore,
-     * once that many food entries had accumulated, return a window containing nothing sendable,
-     * and every measurement queued behind them would stop going out **permanently**, with no
-     * error anywhere. Selecting by type makes that impossible however many undeliverable rows
-     * pile up.
+     * queue that still contains rows nothing can send. `SyncOutbox` journals the four food
+     * aggregates of PRD_FOOD 21.2 at every save (FR-SYNC-001), and `AGGREGATE_TYPES` in
+     * `packages/contracts` has no branch for any of them, so those rows stay `pending` for as
+     * long as the contract lacks it — they never drain. A send that simply took the oldest
+     * `WIRE_PUSH_MAX_MUTATIONS` rows would therefore, once that many food entries had
+     * accumulated, return a window containing nothing sendable, and every measurement queued
+     * behind them would stop going out **permanently**, with no error anywhere. Selecting by
+     * type makes that impossible however many undeliverable rows pile up.
      *
      * [toEnvelope] still answers null for a row of a sendable type it cannot shape — a
      * `healthProfile` delete, which the outbox never mints and the server refuses — so the two

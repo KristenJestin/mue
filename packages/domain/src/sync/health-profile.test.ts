@@ -274,7 +274,7 @@ describe("section 12.3 — what the journal carries for a merged profile", () =>
     await submit(profileUpsert({ heightCm: 171, birthDate: null }, null));
     const first = await pull(null);
     if (first.status !== "ok") throw new Error("expected a page");
-    const createdAt = first.changes[0]?.meta.createdAt;
+    const createdAt = first.changes[0]?.meta.createdAt ?? "";
 
     await submit(profileUpsert({ heightCm: 172, birthDate: null }, "1"));
     const second = await pull(null);
@@ -354,20 +354,17 @@ describe("FR-SYNC-006 — the profile replays like every other aggregate", () =>
 
   /** One batch, both aggregates, one journal: adding a type changed no batching rule. */
   test("a profile and a measurement travel in one push and both apply", async () => {
-    const results = await submit(
-      profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null),
-      {
-        mutationId: Bun.randomUUIDv7(),
-        baseRevision: null,
-        origin: { ...PHONE },
-        clientOccurredAt: new Date().toISOString(),
-        aggregateType: "measurement",
-        aggregateId: "2026-08-25",
-        op: "upsert",
-        payloadSchemaVersion: 1,
-        payload: { date: "2026-08-25", weightCg: 7845 },
-      },
-    );
+    const results = await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null), {
+      mutationId: Bun.randomUUIDv7(),
+      baseRevision: null,
+      origin: { ...PHONE },
+      clientOccurredAt: new Date().toISOString(),
+      aggregateType: "measurement",
+      aggregateId: "2026-08-25",
+      op: "upsert",
+      payloadSchemaVersion: 1,
+      payload: { date: "2026-08-25", weightCg: 7845 },
+    });
 
     expect(accepted(results[0]).sequence).toBe("1");
     expect(accepted(results[1]).sequence).toBe("2");

@@ -346,8 +346,8 @@ class SyncEngineTest {
     /**
      * An aggregate that is journalled (FR-SYNC-001) and cannot yet be expressed on the wire,
      * because `AGGREGATE_TYPES` in `packages/contracts` does not name it while PRD 10.1
-     * already lists it as synchronised. Activity sessions are in that state; the health profile
-     * was, and is not any more.
+     * already lists it as synchronised. The four food aggregates are in that state; the health
+     * profile was, and is not any more.
      *
      * It must stay `pending` — not `failed`. A `failed` row would show the user `Sync issue`
      * for a limitation of the contract, and would never be retried once the contract grew.
@@ -380,7 +380,7 @@ class SyncEngineTest {
     /**
      * The blockage the type-filtered queue exists to prevent, at the scale that produces it.
      *
-     * Every activity save journals an `activitySession` row (FR-SYNC-001) and
+     * Every logged meal journals a `foodLogEntry` row (FR-SYNC-001) and
      * `packages/contracts` has no branch for that type, so those rows are `pending` and
      * undeliverable **for as long as the contract lacks the branch** — they never drain. A send
      * that took the oldest [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would, once that
