@@ -344,9 +344,10 @@ class SyncEngineTest {
     }
 
     /**
-     * Gap 2's other half: the health profile is journalled (FR-SYNC-001) and cannot yet be
-     * expressed on the wire, because `AGGREGATE_TYPES` in `packages/contracts` is
-     * `["measurement"]` while PRD 13.4 already makes the profile a synchronised aggregate.
+     * An aggregate that is journalled (FR-SYNC-001) and cannot yet be expressed on the wire,
+     * because `AGGREGATE_TYPES` in `packages/contracts` does not name it while PRD 10.1
+     * already lists it as synchronised. Activity sessions are in that state; the health profile
+     * was, and is not any more.
      *
      * It must stay `pending` — not `failed`. A `failed` row would show the user `Sync issue`
      * for a limitation of the contract, and would never be retried once the contract grew.
@@ -355,7 +356,7 @@ class SyncEngineTest {
     fun anAggregateTheContractCannotCarryStaysPendingAndIsNotSent() = runTest {
         val store = FakeSyncStore(
             mutations = listOf(
-                SyncFixtures.healthProfileUpsert("h-1", createdAt = 1_000),
+                SyncFixtures.deferredUpsert("h-1", createdAt = 1_000),
                 SyncFixtures.measurementUpsert("m-1", createdAt = 2_000),
             ),
         )
@@ -379,11 +380,11 @@ class SyncEngineTest {
     /**
      * The blockage the type-filtered queue exists to prevent, at the scale that produces it.
      *
-     * Every profile save journals a `healthProfile` row (gap 2, FR-SYNC-001) and
+     * Every activity save journals an `activitySession` row (FR-SYNC-001) and
      * `packages/contracts` has no branch for that type, so those rows are `pending` and
      * undeliverable **for as long as the contract lacks the branch** — they never drain. A send
      * that took the oldest [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would, once that
-     * many profile saves had accumulated, get back a window with nothing sendable in it, and the
+     * many saves had accumulated, get back a window with nothing sendable in it, and the
      * measurement queued behind them would stop going out permanently and silently. That is the
      * indefinite block FR-SYNC-007 forbids, arriving from the client's side rather than the
      * server's.
@@ -394,7 +395,7 @@ class SyncEngineTest {
     @Test
     fun aFullWindowOfUndeliverableRowsDoesNotStallTheMeasurementBehindThem() = runTest {
         val blocked = (1..WIRE_PUSH_MAX_MUTATIONS).map { index ->
-            SyncFixtures.healthProfileUpsert("h-$index", createdAt = index.toLong())
+            SyncFixtures.deferredUpsert("h-$index", createdAt = index.toLong())
         }
         val store = FakeSyncStore(
             mutations = blocked + SyncFixtures.measurementUpsert("m-1", createdAt = 100_000),
@@ -423,7 +424,7 @@ class SyncEngineTest {
     /** A batch of nothing but deferred rows still pulls: an agent's writes must still arrive. */
     @Test
     fun aBatchOfOnlyDeferredRowsStillPulls() = runTest {
-        val store = FakeSyncStore(mutations = listOf(SyncFixtures.healthProfileUpsert("h-1")))
+        val store = FakeSyncStore(mutations = listOf(SyncFixtures.deferredUpsert("h-1")))
         val api = ScriptedSyncApi()
             .onPull(SyncFixtures.page(listOf(SyncFixtures.upsertChange("41")), SyncFixtures.CURSOR_A))
 
@@ -514,7 +515,10 @@ class SyncEngineTest {
         engine(store, api).sync()
 
         assertNull(api.pullRequests.single().cursor)
-        assertEquals(mapOf("measurement" to listOf(1)), api.pullRequests.single().supportedSchemaVersions)
+        assertEquals(
+            mapOf("healthProfile" to listOf(1), "measurement" to listOf(1)),
+            api.pullRequests.single().supportedSchemaVersions,
+        )
     }
 
     @Test

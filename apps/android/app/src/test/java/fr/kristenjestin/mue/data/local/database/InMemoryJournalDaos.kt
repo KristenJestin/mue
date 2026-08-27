@@ -178,6 +178,10 @@ class InMemoryHealthProfileDao(private val journal: InMemoryJournal) : HealthPro
         if (row.value == null) row.value = entity
     }
 
+    override suspend fun clear() {
+        row.value = null
+    }
+
     override suspend fun enqueueMutation(mutation: SyncMutationEntity) = journal.enqueue(mutation)
 
     override suspend fun highestMutationStamp(): Long? = journal.highestStamp()

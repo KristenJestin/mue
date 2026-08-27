@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ZodType } from "zod";
 import { cursorSchema } from "./cursor";
 import { type MueError, mueErrorSchema } from "./errors";
+import { type HealthProfilePayloadV1, healthProfilePayloadV1Schema } from "./health-profile";
 import { type MeasurementPayloadV1, measurementPayloadV1Schema } from "./measurement";
 import { type AggregateMeta, aggregateMetaSchema } from "./meta";
 import { type MutationEnvelope, mutationEnvelopeSchema } from "./mutation";
@@ -56,6 +57,7 @@ const TOMBSTONE_MUTATION_ID = "0198f0a1-9e8d-7c6b-b5a4-938271605f4e";
  */
 const LARGE_SEQUENCE = "9007199254740993";
 const NEXT_SEQUENCE = "9007199254740994";
+const THIRD_SEQUENCE = "9007199254740995";
 
 const CURSOR = toBase64Url(JSON.stringify({ v: 1, seq: LARGE_SEQUENCE }));
 
@@ -69,6 +71,29 @@ const edgeMeasurement = {
   date: "2028-02-29",
   weightCg: 3_000,
 } satisfies MeasurementPayloadV1;
+
+const PROFILE_MUTATION_ID = "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071";
+
+/**
+ * The owner's own profile, as his phone journalled it and could not send: 171 cm, born on the
+ * 18th of November 1998. It is here rather than a rounder invention because the bug this
+ * aggregate exists to close was a *value* bug — a UUIDv4 where the schema said v7 — and a
+ * fixture built from made-up numbers would have looked exactly as green.
+ */
+const validHealthProfile = {
+  heightCm: 171,
+  birthDate: "1998-11-18",
+} satisfies HealthProfilePayloadV1;
+
+/**
+ * The cleared profile: both fields stated as null rather than omitted. It is the instance that
+ * proves "the user emptied this" is expressible, which is what section 13.4's field-by-field
+ * merge needs to tell apart from "this client did not mention it".
+ */
+const clearedHealthProfile = {
+  heightCm: null,
+  birthDate: null,
+} satisfies HealthProfilePayloadV1;
 
 const upsertMutation = {
   mutationId: MUTATION_ID,
@@ -94,6 +119,19 @@ const deleteMutation = {
   clientOccurredAt: "2026-08-25T06:12:05.004Z",
 } satisfies MutationEnvelope;
 
+/** A creation: `baseRevision` null is section 12.2's "si elle existe", and it is not zero. */
+const healthProfileMutation = {
+  mutationId: PROFILE_MUTATION_ID,
+  aggregateType: "healthProfile",
+  aggregateId: "me",
+  op: "upsert",
+  baseRevision: null,
+  payloadSchemaVersion: 1,
+  payload: validHealthProfile,
+  origin: DEVICE_ORIGIN,
+  clientOccurredAt: "2026-08-25T06:12:04.902Z",
+} satisfies MutationEnvelope;
+
 const liveMeta = {
   id: validMeasurement.date,
   revision: "4",
@@ -103,6 +141,17 @@ const liveMeta = {
   originType: "android",
   originId: DEVICE_ORIGIN.id,
   lastMutationId: MUTATION_ID,
+} satisfies AggregateMeta;
+
+const profileMeta = {
+  id: "me",
+  revision: "2",
+  createdAt: "2026-08-25T06:12:04.900Z",
+  updatedAt: "2026-08-25T06:12:04.950Z",
+  deletedAt: null,
+  originType: "android",
+  originId: DEVICE_ORIGIN.id,
+  lastMutationId: PROFILE_MUTATION_ID,
 } satisfies AggregateMeta;
 
 const tombstoneMeta = {
@@ -152,7 +201,7 @@ const upgradeRequiredError = {
 } satisfies MueError;
 
 const pushRequest = {
-  mutations: [upsertMutation, deleteMutation],
+  mutations: [upsertMutation, healthProfileMutation, deleteMutation],
 } satisfies PushRequest;
 
 /** All three outcomes in one body: a rejection never blocks the rest (FR-SYNC-007). */
@@ -177,7 +226,7 @@ const pushResponse = {
 const pullRequest = {
   cursor: CURSOR,
   limit: 100,
-  supportedSchemaVersions: { measurement: [1] },
+  supportedSchemaVersions: { healthProfile: [1], measurement: [1] },
 } satisfies PullRequest;
 
 const pullPage = {
@@ -201,8 +250,17 @@ const pullPage = {
       payload: null,
       meta: tombstoneMeta,
     },
+    {
+      sequence: THIRD_SEQUENCE,
+      aggregateType: "healthProfile",
+      aggregateId: "me",
+      op: "upsert",
+      payloadSchemaVersion: 1,
+      payload: validHealthProfile,
+      meta: profileMeta,
+    },
   ],
-  nextCursor: toBase64Url(JSON.stringify({ v: 1, seq: NEXT_SEQUENCE })),
+  nextCursor: toBase64Url(JSON.stringify({ v: 1, seq: THIRD_SEQUENCE })),
   hasMore: false,
   serverTime: "2026-08-25T06:12:07.000Z",
   lastAndroidSyncAt: "2026-08-25T06:12:06.900Z",
@@ -232,6 +290,30 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     description: "The minimum legal weight, recorded on a leap day.",
     value: edgeMeasurement,
     validator: measurementPayloadV1Schema,
+  },
+  {
+    file: "health-profile-v1-valid.json",
+    schema: "HealthProfilePayloadV1",
+    kind: "valid",
+    description: "The owner's own profile: 171 cm, born 1998-11-18.",
+    value: validHealthProfile,
+    validator: healthProfilePayloadV1Schema,
+  },
+  {
+    file: "health-profile-v1-edge.json",
+    schema: "HealthProfilePayloadV1",
+    kind: "edge",
+    description: "A cleared profile: both fields null and present, never absent.",
+    value: clearedHealthProfile,
+    validator: healthProfilePayloadV1Schema,
+  },
+  {
+    file: "mutation-upsert-health-profile-v1.json",
+    schema: "MutationEnvelope",
+    kind: "valid",
+    description: "The upsert the phone could not send, with its constant aggregate id.",
+    value: healthProfileMutation,
+    validator: mutationEnvelopeSchema,
   },
   {
     file: "mutation-upsert-measurement-v1.json",

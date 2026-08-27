@@ -36,11 +36,3 @@ export const measurementPayloadV1Schema = z
   });
 
 export type MeasurementPayloadV1 = z.infer<typeof measurementPayloadV1Schema>;
-
-/**
- * The payload versions this build can produce and apply, per aggregate type. A client
- * declares its own set on every pull; the server compares against what it holds.
- */
-export const CURRENT_PAYLOAD_SCHEMA_VERSIONS = {
-  measurement: [MEASUREMENT_PAYLOAD_VERSION_1],
-} as const satisfies Record<string, readonly number[]>;

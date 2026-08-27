@@ -61,9 +61,25 @@
         "type": "object"
       },
       "AggregateType": {
-        "description": "The synchronised aggregate kinds. V1 carries one.",
+        "description": "The synchronised aggregate kinds (PRD section 10.2).",
         "enum": [
+          "healthProfile",
           "measurement"
+        ],
+        "type": "string"
+      },
+      "BirthDate": {
+        "allOf": [
+          {
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          {
+            "pattern": "^(?:19|20)\\d{2}-"
+          }
+        ],
+        "description": "ISO-8601 calendar date of birth, year 1900-2099. The bound is absolute so a journalled payload never expires; the author's own rule (not in the future, not more than 120 years back) is the client's, and this server does not re-adjudicate it (PRD section 14.4).",
+        "examples": [
+          "1998-11-18"
         ],
         "type": "string"
       },
@@ -201,6 +217,132 @@
         },
         "required": [
           "error"
+        ],
+        "type": "object"
+      },
+      "HealthProfilePayloadV1": {
+        "description": "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. Both fields are nullable and both are always present: null is a stated empty value, never an omission.",
+        "properties": {
+          "birthDate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BirthDate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heightCm": {
+            "anyOf": [
+              {
+                "maximum": 230,
+                "minimum": 120,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "birthDate",
+          "heightCm"
+        ],
+        "type": "object"
+      },
+      "HealthProfileUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "const": "me",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "healthProfile",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealthProfilePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "HealthProfileUpsertMutation": {
+        "description": "Upsert of the single health profile, payload schema version 1. The aggregate identifier is the constant `me`.",
+        "properties": {
+          "aggregateId": {
+            "const": "me",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "healthProfile",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealthProfilePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
         ],
         "type": "object"
       },
@@ -453,7 +595,7 @@
         "description": "One mutation (PRD section 12.2). Replaying it never repeats its effect.",
         "oneOf": [
           {
-            "$ref": "#/components/schemas/MeasurementUpsertMutation"
+            "$ref": "#/components/schemas/UpsertMutation"
           },
           {
             "$ref": "#/components/schemas/DeleteMutation"
@@ -765,6 +907,9 @@
         "description": "Aggregate type to the payload schema versions the client can apply.",
         "examples": [
           {
+            "healthProfile": [
+              1
+            ],
             "measurement": [
               1
             ]
@@ -781,10 +926,31 @@
         "description": "One accepted change from the server journal (PRD section 12.3).",
         "oneOf": [
           {
-            "$ref": "#/components/schemas/MeasurementUpsertChange"
+            "$ref": "#/components/schemas/UpsertChange"
           },
           {
             "$ref": "#/components/schemas/DeleteChange"
+          }
+        ]
+      },
+      "UpsertChange": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MeasurementUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/HealthProfileUpsertChange"
+          }
+        ]
+      },
+      "UpsertMutation": {
+        "description": "An upsert, carrying the complete aggregate for its type (PRD section 12.2).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/MeasurementUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/HealthProfileUpsertMutation"
           }
         ]
       }

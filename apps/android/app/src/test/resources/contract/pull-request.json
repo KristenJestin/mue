@@ -2,6 +2,9 @@
   "cursor": "eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTkzIn0",
   "limit": 100,
   "supportedSchemaVersions": {
+    "healthProfile": [
+      1
+    ],
     "measurement": [
       1
     ]

@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.data.remote.sync
 
+import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
@@ -8,6 +9,7 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The seam between `sync_mutations` and the wire. */
 class SyncWireTest {
@@ -75,18 +77,98 @@ class SyncWireTest {
     }
 
     /**
-     * The health profile is journalled today and has no wire branch: `AGGREGATE_TYPES` in
-     * `packages/contracts` is `["measurement"]`. Null means "keep it, do not send it" — the
-     * engine leaves the row `pending` rather than refusing a change the user made.
+     * The health profile, with the values the owner's phone had been holding.
+     *
+     * This is the row that could never leave: it was journalled at every save, and
+     * `AGGREGATE_TYPES` in `packages/contracts` was `["measurement"]`, so [SyncWire.toEnvelope]
+     * answered null and `Data & sync` counted a change that could not fall. The assertion is on
+     * the real height and the real birth date rather than on the shape, because the contract
+     * constrains both values and a shape check would pass on either.
+     */
+    @Test
+    fun theHealthProfileBecomesItsOwnUpsertBranch() {
+        val envelope = assertIs<HealthProfileUpsertMutationDto>(
+            SyncWire.toEnvelope(
+                row(
+                    aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+                    aggregateId = "me",
+                    payload = """{"heightCm":171,"birthDate":"1998-11-18"}""",
+                    baseRevision = null,
+                ),
+                origin,
+            ),
+        )
+
+        assertEquals(WIRE_AGGREGATE_HEALTH_PROFILE, envelope.aggregateType)
+        assertEquals(WIRE_HEALTH_PROFILE_AGGREGATE_ID, envelope.aggregateId)
+        assertEquals(WIRE_OP_UPSERT, envelope.op)
+        assertNull(envelope.baseRevision)
+        assertEquals(171, envelope.payload.heightCm)
+        assertEquals("1998-11-18", envelope.payload.birthDate)
+        assertEquals(origin, envelope.origin)
+    }
+
+    /**
+     * The aggregate identifier is the contract's constant and not the outbox row's.
+     *
+     * PRD 13.4 gives an account one profile, so a row that somehow carried another identifier
+     * must not be able to open a rival aggregate on the server. The DTO's default is the only
+     * value that can appear.
+     */
+    @Test
+    fun aProfileRowCannotSmuggleARivalAggregateIdOntoTheWire() {
+        val envelope = assertIs<HealthProfileUpsertMutationDto>(
+            SyncWire.toEnvelope(
+                row(
+                    aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+                    aggregateId = "me-2",
+                    payload = """{"heightCm":171,"birthDate":null}""",
+                ),
+                origin,
+            ),
+        )
+
+        assertEquals(WIRE_HEALTH_PROFILE_AGGREGATE_ID, envelope.aggregateId)
+    }
+
+    /** A cleared field is `null` on the wire, and the key is written rather than dropped. */
+    @Test
+    fun aClearedProfileFieldTravelsAsAStatedNull() {
+        val envelope = assertIs<HealthProfileUpsertMutationDto>(
+            SyncWire.toEnvelope(
+                row(
+                    aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+                    aggregateId = "me",
+                    payload = """{"heightCm":null,"birthDate":"1998-11-18"}""",
+                ),
+                origin,
+            ),
+        )
+
+        val text = SyncJson.instance.encodeToString(
+            MutationEnvelopeSerializer,
+            envelope as MutationEnvelopeDto,
+        )
+        assertTrue(text.contains("\"heightCm\":null"), "a cleared height is stated: $text")
+        assertTrue(text.contains("\"op\":\"upsert\""), "op is written as a field now: $text")
+        assertTrue(
+            text.contains("\"aggregateType\":\"healthProfile\""),
+            "the second discriminator has to be on the wire: $text",
+        )
+    }
+
+    /**
+     * Still deferred: PRD 10.1 lists activity sessions as synchronised and `AGGREGATE_TYPES`
+     * has no branch for them. Null means "keep it, do not send it" — the engine leaves the row
+     * `pending` rather than refusing a change the user made.
      */
     @Test
     fun anAggregateTypeTheContractHasNoBranchForMapsToNothing() {
         assertNull(
             SyncWire.toEnvelope(
                 row(
-                    aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
-                    aggregateId = "me",
-                    payload = """{"heightCm":178,"birthDate":null}""",
+                    aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                    payload = """{"movement":"running"}""",
                 ),
                 origin,
             ),
@@ -95,6 +177,29 @@ class SyncWireTest {
             SyncWire.toEnvelope(
                 row(
                     aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                    op = SyncMutationEntity.OP_DELETE,
+                    payload = null,
+                ),
+                origin,
+            ),
+        )
+    }
+
+    /**
+     * A `healthProfile` delete has no wire branch even though the type is sendable, which is
+     * why the queue filter and [SyncWire.toEnvelope] are two guards and not one.
+     *
+     * PRD 13.4 gives the profile no deletion and `SyncOutbox` mints none, so this row can only
+     * come from a downgrade or a hand-written database. Null keeps it, which is what the engine
+     * does with anything it cannot shape.
+     */
+    @Test
+    fun aHealthProfileDeleteHasNoWireBranchAndIsHeldRatherThanSent() {
+        assertNull(
+            SyncWire.toEnvelope(
+                row(
+                    aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+                    aggregateId = "me",
                     op = SyncMutationEntity.OP_DELETE,
                     payload = null,
                 ),
@@ -164,6 +269,26 @@ class SyncWireTest {
             SyncAggregateStateEntity.TYPE_MEASUREMENT,
             SyncWire.localAggregateType(WIRE_AGGREGATE_MEASUREMENT),
         )
+        assertEquals(
+            SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+            SyncWire.localAggregateType(WIRE_AGGREGATE_HEALTH_PROFILE),
+        )
         assertNull(SyncWire.localAggregateType("recipe"))
+    }
+
+    /**
+     * A received profile always lands on [HealthProfileEntity.ROW_ID], whatever else is around.
+     * That is the client half of "un agrégat unique": there is no branch that inserts a second
+     * profile row, so a second device converges on the first one's row by construction.
+     */
+    @Test
+    fun aReceivedProfileAlwaysLandsOnTheOneLocalRow() {
+        val entity = SyncWire.healthProfileEntity(
+            HealthProfilePayloadV1Dto(heightCm = 171, birthDate = "1998-11-18"),
+        )
+
+        assertEquals(HealthProfileEntity.ROW_ID, entity.id)
+        assertEquals(171, entity.heightCm)
+        assertEquals("1998-11-18", entity.birthDate)
     }
 }

@@ -2,9 +2,20 @@ package fr.kristenjestin.mue.data.remote.sync
 
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The wire, hand written, mirroring `packages/contracts/src` field for field.
@@ -27,13 +38,49 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  *    in this package parses it, orders by it, compares it or reconstructs one.
  * 3. **A union is sealed.** `op` and `status` discriminate real Kotlin hierarchies, so a branch
  *    that carries no `nextCursor` genuinely has no `nextCursor` to read.
+ *
+ * ## Two discriminators, and what that costs Kotlin
+ *
+ * The mutation and change unions are discriminated **twice**: `op` says whether a payload is
+ * present, and on an upsert `aggregateType` says which schema that payload follows. Zod nests
+ * two `discriminatedUnion`s and is done. kotlinx.serialization cannot: a sealed hierarchy has
+ * exactly one `@JsonClassDiscriminator`, and two subclasses both named `@SerialName("upsert")`
+ * are refused outright — the measurement and the health profile would collide on the only key
+ * the framework has.
+ *
+ * So [MutationEnvelopeSerializer] and [SyncChangeSerializer] read the two keys by hand. The
+ * hierarchies stay sealed, which is what rule 3 is actually about, and the `when` inside each
+ * serializer is exhaustive over the sealed interface — so a branch added to the contract and
+ * forgotten here fails to compile, where a missing annotation would simply have been absent.
+ * `op` is therefore a **declared property** on every member rather than a key the framework
+ * injects, and it carries [EncodeDefault] because [SyncJson] does not encode defaults.
  */
 
-/** The aggregate types V1 can express on the wire. `AGGREGATE_TYPES` in `primitives.ts`. */
+/** The aggregate types the wire can express. `AGGREGATE_TYPES` in `primitives.ts`. */
 const val WIRE_AGGREGATE_MEASUREMENT: String = "measurement"
+const val WIRE_AGGREGATE_HEALTH_PROFILE: String = "healthProfile"
+
+/**
+ * `HEALTH_PROFILE_AGGREGATE_ID` in `health-profile.ts`, where the Zod envelope pins it as a
+ * literal rather than an opaque identifier.
+ *
+ * PRD 13.4 gives an account exactly one profile, so its identity is a constant and not
+ * something a device mints. Two phones that each invented a UUID for "their" profile would
+ * create two aggregates, both valid and both synchronised, and no merge rule could say which
+ * one *is* the profile. A constant makes the rival unrepresentable instead of unlikely — and it
+ * is the same `'me'` `HealthProfileEntity.ROW_ID` already keys the local table by.
+ */
+const val WIRE_HEALTH_PROFILE_AGGREGATE_ID: String = "me"
+
+/** The two values of `op`. Declared properties here, for the reason [MutationEnvelopeDto] gives. */
+const val WIRE_OP_UPSERT: String = "upsert"
+const val WIRE_OP_DELETE: String = "delete"
 
 /** `MEASUREMENT_PAYLOAD_VERSION_1` in `measurement.ts`. */
 const val WIRE_MEASUREMENT_PAYLOAD_VERSION: Int = 1
+
+/** `HEALTH_PROFILE_PAYLOAD_VERSION_1` in `health-profile.ts`. */
+const val WIRE_HEALTH_PROFILE_PAYLOAD_VERSION: Int = 1
 
 /** `PUSH_MAX_MUTATIONS` in `sync.ts`: one request carries at most this many mutations. */
 const val WIRE_PUSH_MAX_MUTATIONS: Int = 200
@@ -120,6 +167,27 @@ data class MeasurementPayloadV1Dto(
 )
 
 /**
+ * `HealthProfilePayloadV1` — the height and birth date of PRD 13.4, the account's one profile.
+ *
+ * Both properties are **nullable and carry no default**, which is not a detail. Zod says
+ * `.nullable()` and not `.optional()`, so `null` is a stated empty value and an absent key is
+ * not a value at all. That distinction is what PRD 13.4's field-by-field merge runs on: the
+ * server compares each field against the version its author was editing, so "the user cleared
+ * their height" has to be expressible and has to be distinguishable from "this client said
+ * nothing about heights". No default here means [SyncJson] always writes both keys, and it
+ * means a body that dropped one fails to parse rather than quietly reading as null.
+ *
+ * [heightCm] is a whole count of centimetres, the unit `UserProfile.heightCm` already holds and
+ * `UserProfile.HEIGHT_RANGE_CM` already bounds. [birthDate] is an ISO-8601 calendar date, as
+ * every date in Mue is, so lexicographic order is chronological order.
+ */
+@Serializable
+data class HealthProfilePayloadV1Dto(
+    val heightCm: Int?,
+    val birthDate: String?,
+)
+
+/**
  * `MutationEnvelope` — one unit of work in the outbox (PRD 12.2).
  *
  * Sealed on `op`, mirroring Zod's `discriminatedUnion("op", …)`: "an upsert has a payload and a
@@ -132,13 +200,21 @@ data class MeasurementPayloadV1Dto(
  * where the transaction that wrote the business row put it, so a retry of a lost response sends
  * the identifier the server already has and gets its stored result back.
  */
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@JsonClassDiscriminator("op")
+@Serializable(with = MutationEnvelopeSerializer::class)
 sealed interface MutationEnvelopeDto {
     val mutationId: String
     val aggregateType: String
     val aggregateId: String
+
+    /**
+     * `"upsert"` or `"delete"`, declared rather than injected.
+     *
+     * It was the class discriminator until the contract grew a second upsert branch. Two
+     * subclasses cannot share one `@SerialName`, so the discrimination moved into
+     * [MutationEnvelopeSerializer] and this became an ordinary property the concrete
+     * serializers write themselves.
+     */
+    val op: String
 
     /**
      * The revision the author believed it was editing, or null when it believed the aggregate
@@ -160,8 +236,8 @@ sealed interface MutationEnvelopeDto {
  * whenever it held its usual value, and the contract test would report it as a missing field.
  * The expected values are named as constants at the top of this file instead.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("upsert")
 data class MeasurementUpsertMutationDto(
     override val mutationId: String,
     override val aggregateType: String,
@@ -171,6 +247,38 @@ data class MeasurementUpsertMutationDto(
     val payload: MeasurementPayloadV1Dto,
     override val origin: OriginDto,
     override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+/**
+ * The upsert of the single health profile (PRD 13.4).
+ *
+ * [aggregateId] defaults to [WIRE_HEALTH_PROFILE_AGGREGATE_ID] and is written always, because
+ * the Zod envelope pins it as a literal: a mutation naming anything else does not parse on the
+ * server, so a second device cannot open a rival profile even by accident. The default lives
+ * here rather than at the call site so there is one place the constant is spelled.
+ *
+ * There is **no delete counterpart**, and the server refuses one. PRD 13.4 describes fields
+ * that become empty, never a profile that ceases to exist; a tombstone would claim the latter,
+ * and FR-SYNC-005 would then use it to refuse the user's own next edit as a resurrection.
+ * Clearing a height is this branch with `heightCm = null`.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class HealthProfileUpsertMutationDto(
+    override val mutationId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: HealthProfilePayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_HEALTH_PROFILE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateId: String = WIRE_HEALTH_PROFILE_AGGREGATE_ID,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
 ) : MutationEnvelopeDto
 
 /**
@@ -184,7 +292,6 @@ data class MeasurementUpsertMutationDto(
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("delete")
 data class DeleteMutationDto(
     override val mutationId: String,
     override val aggregateType: String,
@@ -195,6 +302,8 @@ data class DeleteMutationDto(
     override val clientOccurredAt: String,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val payload: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_DELETE,
 ) : MutationEnvelopeDto
 
 /**
@@ -204,19 +313,20 @@ data class DeleteMutationDto(
  * client's only pagination state is the opaque cursor. Reading it would be the first step
  * towards reconstructing one.
  */
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@JsonClassDiscriminator("op")
+@Serializable(with = SyncChangeSerializer::class)
 sealed interface SyncChangeDto {
     val sequence: String
     val aggregateType: String
     val aggregateId: String
     val payloadSchemaVersion: Int
     val meta: AggregateMetaDto
+
+    /** Declared rather than injected, for the reason [MutationEnvelopeDto.op] gives. */
+    val op: String
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("upsert")
 data class MeasurementUpsertChangeDto(
     override val sequence: String,
     override val aggregateType: String,
@@ -224,11 +334,34 @@ data class MeasurementUpsertChangeDto(
     override val payloadSchemaVersion: Int,
     val payload: MeasurementPayloadV1Dto,
     override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+/**
+ * The health profile as the server hands it back: **merged**, not echoed.
+ *
+ * PRD 13.4 lets the server keep a field this device never touched, so the payload here can
+ * differ from the one the device pushed a moment earlier — and applying it is how a phone whose
+ * stale birth date was merged away converges instead of believing its own version stood.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class HealthProfileUpsertChangeDto(
+    override val sequence: String,
+    override val payloadSchemaVersion: Int,
+    val payload: HealthProfilePayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_HEALTH_PROFILE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateId: String = WIRE_HEALTH_PROFILE_AGGREGATE_ID,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
 ) : SyncChangeDto
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("delete")
 data class DeleteChangeDto(
     override val sequence: String,
     override val aggregateType: String,
@@ -237,7 +370,170 @@ data class DeleteChangeDto(
     override val meta: AggregateMetaDto,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val payload: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_DELETE,
 ) : SyncChangeDto
+
+/**
+ * The two-level discrimination `packages/contracts` states and kotlinx.serialization has no
+ * annotation for.
+ *
+ * Zod writes `discriminatedUnion("op", [discriminatedUnion("aggregateType", […]), delete])`.
+ * The framework equivalent would need two `@JsonClassDiscriminator`s on one hierarchy, and it
+ * would need two subclasses to answer to `@SerialName("upsert")` — which it refuses. So the
+ * dispatch is written out, once per hierarchy, and it is written *exhaustively*: the `when` in
+ * [serialize] covers a sealed interface, so a branch added to [MutationEnvelopeDto] and
+ * forgotten here does not compile.
+ *
+ * Nothing here is reflective. `JsonContentPolymorphicSerializer` would have done the reading
+ * half in three lines and left the writing half to `value::class.serializerOrNull()`, a
+ * reflective lookup that R8 has to be told to keep; an explicit branch has no such dependency
+ * and names the concrete serializer where a reader can see it.
+ *
+ * A body that is not a JSON object, or that carries an `op` or an `aggregateType` this build
+ * does not know, raises [SerializationException] — which is what [ContractDrift] turns into a
+ * sentence naming the fixture and the discriminator, and what `SyncEngine` treats as one
+ * unreadable row rather than a failed synchronisation.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+object MutationEnvelopeSerializer : KSerializer<MutationEnvelopeDto> {
+
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("MutationEnvelope")
+
+    override fun serialize(encoder: Encoder, value: MutationEnvelopeDto) {
+        val output = encoder.asJsonEncoder("a mutation")
+        output.encodeJsonElement(
+            when (value) {
+                is MeasurementUpsertMutationDto ->
+                    output.json.encodeToJsonElement(MeasurementUpsertMutationDto.serializer(), value)
+
+                is HealthProfileUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        HealthProfileUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is DeleteMutationDto ->
+                    output.json.encodeToJsonElement(DeleteMutationDto.serializer(), value)
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): MutationEnvelopeDto {
+        val input = decoder.asJsonDecoder("a mutation")
+        val element = input.decodeJsonElement().asJsonObject("a mutation")
+        return when (val op = element.discriminator("op", "a mutation")) {
+            WIRE_OP_UPSERT -> when (
+                val type = element.discriminator("aggregateType", "an upsert")
+            ) {
+                WIRE_AGGREGATE_MEASUREMENT ->
+                    input.json.decodeFromJsonElement(
+                        MeasurementUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_HEALTH_PROFILE ->
+                    input.json.decodeFromJsonElement(
+                        HealthProfileUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                else -> throw SerializationException(
+                    "this build has no upsert branch for aggregateType \"$type\"",
+                )
+            }
+
+            WIRE_OP_DELETE ->
+                input.json.decodeFromJsonElement(DeleteMutationDto.serializer(), element)
+
+            else -> throw SerializationException("a mutation is an upsert or a delete, not \"$op\"")
+        }
+    }
+}
+
+/** The read side of the same two-level union, and the same argument. */
+@OptIn(ExperimentalSerializationApi::class)
+object SyncChangeSerializer : KSerializer<SyncChangeDto> {
+
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SyncChange")
+
+    override fun serialize(encoder: Encoder, value: SyncChangeDto) {
+        val output = encoder.asJsonEncoder("a change")
+        output.encodeJsonElement(
+            when (value) {
+                is MeasurementUpsertChangeDto ->
+                    output.json.encodeToJsonElement(MeasurementUpsertChangeDto.serializer(), value)
+
+                is HealthProfileUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        HealthProfileUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is DeleteChangeDto ->
+                    output.json.encodeToJsonElement(DeleteChangeDto.serializer(), value)
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): SyncChangeDto {
+        val input = decoder.asJsonDecoder("a change")
+        val element = input.decodeJsonElement().asJsonObject("a change")
+        return when (val op = element.discriminator("op", "a change")) {
+            WIRE_OP_UPSERT -> when (
+                val type = element.discriminator("aggregateType", "an upsert change")
+            ) {
+                WIRE_AGGREGATE_MEASUREMENT ->
+                    input.json.decodeFromJsonElement(
+                        MeasurementUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_HEALTH_PROFILE ->
+                    input.json.decodeFromJsonElement(
+                        HealthProfileUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                else -> throw SerializationException(
+                    "this build has no upsert branch for aggregateType \"$type\"",
+                )
+            }
+
+            WIRE_OP_DELETE ->
+                input.json.decodeFromJsonElement(DeleteChangeDto.serializer(), element)
+
+            else -> throw SerializationException("a change is an upsert or a delete, not \"$op\"")
+        }
+    }
+}
+
+private fun Encoder.asJsonEncoder(what: String): JsonEncoder =
+    this as? JsonEncoder
+        ?: throw SerializationException("$what can only be written as JSON")
+
+private fun Decoder.asJsonDecoder(what: String): JsonDecoder =
+    this as? JsonDecoder
+        ?: throw SerializationException("$what can only be read as JSON")
+
+private fun JsonElement.asJsonObject(what: String): JsonObject =
+    this as? JsonObject ?: throw SerializationException("$what is a JSON object")
+
+/**
+ * One discriminator value, or a failure naming the key that was missing.
+ *
+ * `jsonPrimitive` alone would throw `IllegalArgumentException`, which is not a
+ * [SerializationException] and would therefore escape every `catch` in this package — a body
+ * with `"op": 3` in it would crash a synchronisation instead of marking one row unreadable.
+ */
+private fun JsonObject.discriminator(key: String, what: String): String {
+    val value = this[key] ?: throw SerializationException("$what carries no \"$key\"")
+    val primitive = runCatching { value.jsonPrimitive }.getOrNull()
+    if (primitive == null || !primitive.isString) {
+        throw SerializationException("$what has a \"$key\" that is not a string")
+    }
+    return primitive.content
+}
 
 /** `PushRequest` — a batch of local mutations, in outbox order. */
 @Serializable

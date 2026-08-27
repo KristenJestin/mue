@@ -38,11 +38,32 @@
       "payload": null,
       "payloadSchemaVersion": 1,
       "sequence": "9007199254740994"
+    },
+    {
+      "aggregateId": "me",
+      "aggregateType": "healthProfile",
+      "meta": {
+        "createdAt": "2026-08-25T06:12:04.900Z",
+        "deletedAt": null,
+        "id": "me",
+        "lastMutationId": "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071",
+        "originId": "device-7f3c1a04",
+        "originType": "android",
+        "revision": "2",
+        "updatedAt": "2026-08-25T06:12:04.950Z"
+      },
+      "op": "upsert",
+      "payload": {
+        "birthDate": "1998-11-18",
+        "heightCm": 171
+      },
+      "payloadSchemaVersion": 1,
+      "sequence": "9007199254740995"
     }
   ],
   "hasMore": false,
   "lastAndroidSyncAt": "2026-08-25T06:12:06.900Z",
-  "nextCursor": "eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk0In0",
+  "nextCursor": "eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk1In0",
   "serverTime": "2026-08-25T06:12:07.000Z",
   "status": "ok"
 }

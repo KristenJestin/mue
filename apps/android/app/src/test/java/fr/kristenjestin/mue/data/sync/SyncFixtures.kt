@@ -4,6 +4,8 @@ import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.remote.sync.AggregateMetaDto
 import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
+import fr.kristenjestin.mue.data.remote.sync.HealthProfilePayloadV1Dto
+import fr.kristenjestin.mue.data.remote.sync.HealthProfileUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementPayloadV1Dto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MueErrorDto
@@ -75,17 +77,53 @@ object SyncFixtures {
         lastErrorMessage = null,
     )
 
-    /** The aggregate PRD 13.4 synchronises and `packages/contracts` has no wire branch for. */
+    /**
+     * The health profile of PRD 13.4 — a **sendable** row since `AGGREGATE_TYPES` grew its
+     * branch. The values are the owner's own, which is also what the committed contract fixture
+     * carries, so a payload that stops being expressible fails in both places at once.
+     */
     fun healthProfileUpsert(
         mutationId: String,
         createdAt: Long = 1_770_000_000_000L,
+        heightCm: Int? = 171,
+        birthDate: String? = "1998-11-18",
+        baseRevision: Long? = null,
     ): SyncMutationEntity = SyncMutationEntity(
         mutationId = mutationId,
         aggregateType = SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
         aggregateId = "me",
         op = SyncMutationEntity.OP_UPSERT,
+        baseRevision = baseRevision,
+        payload = """{"heightCm":${heightCm ?: "null"},"birthDate":${
+            birthDate?.let { "\"" + it + "\"" } ?: "null"
+        }}""",
+        payloadSchemaVersion = PAYLOAD_SCHEMA_VERSION,
+        createdAt = createdAt,
+        state = SyncMutationEntity.STATE_PENDING,
+        attemptCount = 0,
+        lastErrorCode = null,
+        lastErrorMessage = null,
+    )
+
+    /**
+     * An aggregate this build journals and still cannot send: PRD 10.1 lists activity sessions
+     * as synchronised and `AGGREGATE_TYPES` has no branch for them.
+     *
+     * It replaced the health profile in every "deferred" test here, which is the point of
+     * naming it: those tests are about the *queue*, not about which aggregate happens to be
+     * stuck in it, and an aggregate that graduated should move the tests along rather than
+     * delete them.
+     */
+    fun deferredUpsert(
+        mutationId: String,
+        createdAt: Long = 1_770_000_000_000L,
+    ): SyncMutationEntity = SyncMutationEntity(
+        mutationId = mutationId,
+        aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+        aggregateId = "b7c1e2f0-0000-7000-8000-000000000001",
+        op = SyncMutationEntity.OP_UPSERT,
         baseRevision = null,
-        payload = """{"heightCm":178,"birthDate":"1990-04-12"}""",
+        payload = """{"movement":"running","durationSeconds":2100}""",
         payloadSchemaVersion = PAYLOAD_SCHEMA_VERSION,
         createdAt = createdAt,
         state = SyncMutationEntity.STATE_PENDING,
@@ -124,6 +162,19 @@ object SyncFixtures {
         payloadSchemaVersion = payloadSchemaVersion,
         payload = MeasurementPayloadV1Dto(date = date, weightCg = weightCg),
         meta = meta(date, revision),
+    )
+
+    /** The profile as the server hands it back — merged, so it may not echo what was sent. */
+    fun healthProfileChange(
+        sequence: String,
+        heightCm: Int? = 171,
+        birthDate: String? = "1998-11-18",
+        revision: String = "1",
+    ): SyncChangeDto = HealthProfileUpsertChangeDto(
+        sequence = sequence,
+        payloadSchemaVersion = 1,
+        payload = HealthProfilePayloadV1Dto(heightCm = heightCm, birthDate = birthDate),
+        meta = meta("me", revision),
     )
 
     fun deleteChange(

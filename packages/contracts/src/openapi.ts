@@ -6,6 +6,7 @@ import { z } from "zod";
 import "./cursor";
 import "./errors";
 import "./health";
+import "./health-profile";
 import "./measurement";
 import "./meta";
 import "./mutation";

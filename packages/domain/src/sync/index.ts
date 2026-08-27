@@ -22,6 +22,7 @@ export {
   unauthenticated,
   type ErrorContext,
 } from "./errors";
+export { healthProfileHandler, mergeHealthProfile } from "./health-profile";
 export { measurementHandler } from "./measurement";
 export { readChanges, readLastAndroidSyncAt } from "./pull";
 export { submitMutation, submitMutations } from "./push";

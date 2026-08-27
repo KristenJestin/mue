@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { REPO_ROOT, buildFixtureFiles, buildFixtureManifest, fixtureDirectory } from "./fixtures";
+import { CURRENT_PAYLOAD_SCHEMA_VERSIONS } from "./versions";
 import { buildOpenApiDocument, canonicalJson } from "./openapi";
 
 const OPENAPI_PATH = join(REPO_ROOT, "packages", "contracts", "openapi.json");
@@ -44,13 +45,34 @@ describe("android contract fixtures", () => {
     }
   });
 
-  test("the manifest names one valid and one edge instance per payload version", () => {
+  /**
+   * Every payload the contract can carry, not just the first one. An aggregate added without
+   * its own pair of instances would ship a wire shape the Android drift detector never reads,
+   * which is the state `healthProfile` was in for as long as it had no branch at all.
+   */
+  test("the manifest names one valid and one edge instance per payload schema", () => {
     const manifest = buildFixtureManifest() as {
       fixtures: { file: string; schema: string; kind: string }[];
     };
-    const measurement = manifest.fixtures.filter((f) => f.schema === "MeasurementPayloadV1");
-    expect(measurement.map((f) => f.kind).sort()).toEqual(["edge", "valid"]);
+    for (const schema of ["MeasurementPayloadV1", "HealthProfilePayloadV1"]) {
+      const instances = manifest.fixtures.filter((f) => f.schema === schema);
+      expect(instances.map((f) => f.kind).sort()).toEqual(["edge", "valid"]);
+    }
     expect(manifest.fixtures.filter((f) => f.kind === "error").length).toBeGreaterThanOrEqual(4);
+  });
+
+  /**
+   * The payload schemas of `CURRENT_PAYLOAD_SCHEMA_VERSIONS` and the instances on disk are the
+   * same set. This is the assertion that would have failed on the day `healthProfile` was
+   * added to `AGGREGATE_TYPES` with no fixture behind it.
+   */
+  test("every aggregate type the server declares has instances on disk", () => {
+    const manifest = buildFixtureManifest() as { fixtures: { schema: string }[] };
+    const schemas = new Set(manifest.fixtures.map((f) => f.schema));
+    for (const aggregateType of Object.keys(CURRENT_PAYLOAD_SCHEMA_VERSIONS)) {
+      const component = `${aggregateType.charAt(0).toUpperCase()}${aggregateType.slice(1)}PayloadV1`;
+      expect([aggregateType, schemas.has(component)]).toEqual([aggregateType, true]);
+    }
   });
 });
 

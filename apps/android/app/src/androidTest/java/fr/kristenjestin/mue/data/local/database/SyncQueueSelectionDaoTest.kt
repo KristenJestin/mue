@@ -16,14 +16,18 @@ import org.junit.runner.RunWith
 /**
  * The queue a send selects from, in SQLite.
  *
- * `health_profile` is journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in
- * `packages/contracts` is `["measurement"]`, so those rows are `pending` and undeliverable for as
- * long as the contract lacks the branch — they never drain. A send that took the oldest
- * [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would therefore, once that many profile
- * saves had accumulated, get back a window with nothing sendable in it, and every measurement
- * queued behind them would stop going out permanently and with no error anywhere. FR-SYNC-007
- * forbids exactly that block, so the type is part of the `WHERE` rather than a filter applied
- * after the window has already been filled.
+ * Activity sessions are journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in
+ * `packages/contracts` has no branch for them, so those rows are `pending` and undeliverable for
+ * as long as the contract lacks it — they never drain. A send that took the oldest
+ * [WIRE_PUSH_MAX_MUTATIONS] rows whatever their type would therefore, once that many saves had
+ * accumulated, get back a window with nothing sendable in it, and every measurement queued behind
+ * them would stop going out permanently and with no error anywhere. FR-SYNC-007 forbids exactly
+ * that block, so the type is part of the `WHERE` rather than a filter applied after the window
+ * has already been filled.
+ *
+ * `healthProfile` was the aggregate this file used to name here, and it is now on the other
+ * side of the `WHERE`: [theProfileIsSelectedByASendNowThatTheContractCarriesIt] is what says
+ * so, and it is the SQL half of the pending count that could never reach zero.
  *
  * `SyncEngineTest.aFullWindowOfUndeliverableRowsDoesNotStallTheMeasurementBehindThem` asserts the
  * engine's half on the JVM; this asserts that the SQL it rests on selects and orders the same way.
@@ -55,8 +59,8 @@ class SyncQueueSelectionDaoTest {
             syncDao.enqueueMutation(
                 row(
                     "h-$index",
-                    SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
-                    HealthProfileEntity.ROW_ID,
+                    SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                    "b7c1e2f0-0000-7000-8000-00000000000$index",
                     createdAt = index.toLong(),
                 ),
             )
@@ -80,6 +84,40 @@ class SyncQueueSelectionDaoTest {
         assertEquals(
             WIRE_PUSH_MAX_MUTATIONS + 1,
             syncDao.pendingMutations(WIRE_PUSH_MAX_MUTATIONS + 10).size,
+        )
+    }
+
+    /**
+     * The row the owner's phone was holding, on the sendable side of the `WHERE`.
+     *
+     * His `sync_mutations` had exactly this: `aggregate_type "healthProfile"`, `aggregate_id
+     * "me"`, `state "pending"`, `attempt_count 0`. The zero was the tell — it was never
+     * attempted, because this query did not select it. It does now, and in the queue's order,
+     * which matters: the server assigns revisions in the order it accepts mutations.
+     */
+    @Test
+    fun theProfileIsSelectedByASendNowThatTheContractCarriesIt() = runTest {
+        syncDao.enqueueMutation(
+            row(
+                "hp-1",
+                SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+                HealthProfileEntity.ROW_ID,
+                createdAt = 1_000,
+            ),
+        )
+        syncDao.enqueueMutation(
+            row("m-1", SyncAggregateStateEntity.TYPE_MEASUREMENT, "2026-08-25", createdAt = 2_000),
+        )
+
+        assertEquals(
+            listOf("hp-1", "m-1"),
+            syncDao.pendingMutationsOfTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES, 10)
+                .map { it.mutationId },
+        )
+        assertEquals(
+            "nothing is held back, so `Data & sync` can reach zero",
+            0,
+            syncDao.countPendingOfOtherTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES),
         )
     }
 
@@ -112,8 +150,8 @@ class SyncQueueSelectionDaoTest {
         syncDao.enqueueMutation(
             row(
                 "h-1",
-                SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
-                HealthProfileEntity.ROW_ID,
+                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                "b7c1e2f0-0000-7000-8000-000000000001",
                 createdAt = 2_000,
             ),
         )

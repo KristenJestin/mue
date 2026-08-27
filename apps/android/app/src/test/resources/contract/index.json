@@ -13,6 +13,24 @@
       "schema": "MeasurementPayloadV1"
     },
     {
+      "description": "The owner's own profile: 171 cm, born 1998-11-18.",
+      "file": "health-profile-v1-valid.json",
+      "kind": "valid",
+      "schema": "HealthProfilePayloadV1"
+    },
+    {
+      "description": "A cleared profile: both fields null and present, never absent.",
+      "file": "health-profile-v1-edge.json",
+      "kind": "edge",
+      "schema": "HealthProfilePayloadV1"
+    },
+    {
+      "description": "The upsert the phone could not send, with its constant aggregate id.",
+      "file": "mutation-upsert-health-profile-v1.json",
+      "kind": "valid",
+      "schema": "MutationEnvelope"
+    },
+    {
       "description": "An upsert, carrying the full aggregate.",
       "file": "mutation-upsert-measurement-v1.json",
       "kind": "valid",

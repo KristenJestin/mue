@@ -206,17 +206,22 @@ class OutboxOrderingTest {
     }
 
     /**
-     * And the send still only takes what it can send: the profile row holds its place in the
-     * queue, and is not in the list a push selects from (FR-SYNC-007).
+     * And a push now selects the profile too, in the order the shared queue put it in.
+     *
+     * This test asserted the opposite until `AGGREGATE_TYPES` grew the branch: the profile was
+     * journalled, kept its place, and was skipped by every send for ever — which is what made
+     * `Data & sync` count a change that could not fall. The order matters as much as the
+     * selection: a profile saved before a weight has to reach the server before it, because the
+     * server assigns revisions in the order it accepts mutations.
      */
     @Test
-    fun theSendableQueueSkipsTheAggregateTheContractCannotCarry() = runTest {
+    fun theSendableQueueNowCarriesTheProfileInItsQueuedOrder() = runTest {
         val repository = repository()
         val profileOutbox = SyncOutbox(newMutationId = { "profile-0" }, now = { 1_000L })
 
         profiles.upsertWithMutation(
-            HealthProfileEntity(heightCm = 178),
-            profileOutbox.healthProfileUpsert(heightCm = 178, birthDate = null),
+            HealthProfileEntity(heightCm = 171, birthDate = "1998-11-18"),
+            profileOutbox.healthProfileUpsert(heightCm = 171, birthDate = LocalDate.of(1998, 11, 18)),
         )
         repository.save(measurement("2026-08-21", 7_400))
 
@@ -226,10 +231,10 @@ class OutboxOrderingTest {
             "the profile is journalled and keeps its place in the queue",
         )
         assertEquals(
-            listOf("mutation-0"),
+            listOf("profile-0", "mutation-0"),
             journal.pendingOfTypes(SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES, limit = 200)
                 .map { it.mutationId },
-            "and it is not what a push selects",
+            "and a push selects it, in that same order",
         )
         assertEquals(
             SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,

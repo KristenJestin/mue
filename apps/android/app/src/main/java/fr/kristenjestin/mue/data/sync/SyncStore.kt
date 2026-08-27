@@ -7,6 +7,7 @@ import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
 import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
+import fr.kristenjestin.mue.data.remote.sync.HealthProfileUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncWire
@@ -52,9 +53,10 @@ interface SyncStore {
     suspend fun pending(limit: Int): List<SyncMutationEntity>
 
     /**
-     * How many `pending` rows this build has no wire branch for — the health profile of PRD 13.4
-     * today. They are journalled, kept, block nothing, and go out unchanged the day
-     * `packages/contracts` grows their branch.
+     * How many `pending` rows this build has no wire branch for — the activity, custom exercise
+     * and food aggregates of PRD 10.1 that `AGGREGATE_TYPES` does not name yet. They are
+     * journalled, kept, block nothing, and go out unchanged the day `packages/contracts` grows
+     * their branch, which is exactly how `healthProfile` left this set.
      */
     suspend fun deferredCount(): Int
 
@@ -179,16 +181,43 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
         val localType = requireNotNull(SyncWire.localAggregateType(change.aggregateType)) {
             "no local store for aggregate type ${change.aggregateType}"
         }
-        val measurementDao = database.measurementDao()
         when (change) {
-            is MeasurementUpsertChangeDto -> measurementDao.upsert(
+            is MeasurementUpsertChangeDto -> database.measurementDao().upsert(
                 MeasurementEntity(
                     date = change.payload.date,
                     weightCg = change.payload.weightCg,
                 )
             )
 
-            is DeleteChangeDto -> measurementDao.deleteByDate(change.aggregateId)
+            /*
+             * The whole aggregate, replacing the row keyed by `HealthProfileEntity.ROW_ID` —
+             * which `SyncWire.healthProfileEntity` supplies rather than `change.aggregateId`.
+             * That is the client half of PRD 13.4's "un agrégat unique": a second device's
+             * change updates the one row, and there is no code path by which a rival could be
+             * inserted beside it.
+             *
+             * The payload applied here is the server's *merged* one, not what this phone last
+             * pushed, so a height this device changed and a birth date another device set
+             * arrive together and the two converge on the same profile.
+             */
+            is HealthProfileUpsertChangeDto ->
+                database.healthProfileDao().upsert(SyncWire.healthProfileEntity(change.payload))
+
+            // The delete branch is shared by every aggregate on the wire, so it dispatches on
+            // the local type. It used to be able to assume `measurement`; a tombstone for the
+            // profile would then have deleted the measurement dated `me`, which is a row that
+            // cannot exist — a silent no-op hiding a change that was never applied.
+            is DeleteChangeDto -> when (localType) {
+                SyncAggregateStateEntity.TYPE_MEASUREMENT ->
+                    database.measurementDao().deleteByDate(change.aggregateId)
+
+                // Unreachable: `packages/domain` refuses a health profile delete, so no server
+                // journals one. See `HealthProfileDao.clear` for why it is applied rather than
+                // refused if one ever arrives.
+                SyncAggregateStateEntity.TYPE_HEALTH_PROFILE -> database.healthProfileDao().clear()
+
+                else -> error("no local delete for aggregate type $localType")
+            }
         }
         syncDao.putAggregateState(
             SyncAggregateStateEntity(

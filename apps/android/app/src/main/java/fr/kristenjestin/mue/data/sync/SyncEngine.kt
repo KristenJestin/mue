@@ -49,12 +49,14 @@ import kotlinx.serialization.SerializationException
  *    request.
  * 5. **The cursor advances only after a page is applied**, in the same transaction, and never
  *    past a change this build cannot apply (PRD 12.4).
- * 6. **A send selects only what it can send.** `health_profile` is journalled at every save and
- *    `packages/contracts` has no branch for it, so those rows are `pending` and undeliverable
- *    until the contract grows one. [SyncStore.pending] filters them out *before* the window is
- *    taken, so however many of them accumulate they can never fill it and stall the measurements
- *    behind them — FR-SYNC-007's "une mutation invalide ne bloque pas indéfiniment toutes les
- *    mutations suivantes", applied to a mutation the client rather than the server cannot take.
+ * 6. **A send selects only what it can send.** The activity, custom exercise and food
+ *    aggregates are journalled at every save and `packages/contracts` has no branch for them,
+ *    so those rows are `pending` and undeliverable until the contract grows one.
+ *    [SyncStore.pending] filters them out *before* the window is taken, so however many of them
+ *    accumulate they can never fill it and stall the measurements behind them — FR-SYNC-007's
+ *    "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes", applied
+ *    to a mutation the client rather than the server cannot take. `healthProfile` was in that
+ *    set until `AGGREGATE_TYPES` named it; it drains now, like a weight.
  *
  * ## The cursor
  *
@@ -353,8 +355,9 @@ sealed interface SyncOutcome {
         /** FR-SYNC-007. Kept, marked, and surfaced as `Sync issue`. */
         val rejected: Int,
         /**
-         * Journalled rows the contract has no wire branch for yet — the health profile of PRD
-         * 13.4. Still `pending`, never selected by a send, and blocking nothing behind them.
+         * Journalled rows the contract has no wire branch for yet — the activity, custom
+         * exercise and food aggregates of PRD 10.1. Still `pending`, never selected by a send,
+         * and blocking nothing behind them.
          */
         val deferred: Int,
         /** Outbox rows whose stored payload could not be read back. Kept and marked. */

@@ -18,6 +18,23 @@
       "payloadSchemaVersion": 1
     },
     {
+      "aggregateId": "me",
+      "aggregateType": "healthProfile",
+      "baseRevision": null,
+      "clientOccurredAt": "2026-08-25T06:12:04.902Z",
+      "mutationId": "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071",
+      "op": "upsert",
+      "origin": {
+        "id": "device-7f3c1a04",
+        "type": "android"
+      },
+      "payload": {
+        "birthDate": "1998-11-18",
+        "heightCm": 171
+      },
+      "payloadSchemaVersion": 1
+    },
+    {
       "aggregateId": "2026-08-24",
       "aggregateType": "measurement",
       "baseRevision": "9",

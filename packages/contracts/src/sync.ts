@@ -95,7 +95,7 @@ export const supportedSchemaVersionsSchema = z
   .meta({
     id: "SupportedSchemaVersions",
     description: "Aggregate type to the payload schema versions the client can apply.",
-    examples: [{ measurement: [1] }],
+    examples: [{ healthProfile: [1], measurement: [1] }],
   });
 
 export type SupportedSchemaVersions = z.infer<typeof supportedSchemaVersionsSchema>;

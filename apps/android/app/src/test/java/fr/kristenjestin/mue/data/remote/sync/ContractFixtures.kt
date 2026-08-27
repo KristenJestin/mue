@@ -13,7 +13,7 @@ import java.io.File
 import kotlin.test.assertNotNull
 
 /**
- * The sixteen files under `src/test/resources/contract`, and the Kotlin consumer they were
+ * The nineteen files under `src/test/resources/contract`, and the Kotlin consumer they were
  * committed for.
  *
  * `packages/contracts/src/fixtures.ts` emits them: every instance is `.parse`d by its own Zod
@@ -38,6 +38,7 @@ object ContractFixtures {
      */
     val CONSUMERS: Map<String, KSerializer<*>> = mapOf(
         "AggregateMeta" to serializer<AggregateMetaDto>(),
+        "HealthProfilePayloadV1" to serializer<HealthProfilePayloadV1Dto>(),
         "MeasurementPayloadV1" to serializer<MeasurementPayloadV1Dto>(),
         "MueError" to serializer<MueErrorDto>(),
         "MutationEnvelope" to serializer<MutationEnvelopeDto>(),

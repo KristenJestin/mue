@@ -1,7 +1,9 @@
 package fr.kristenjestin.mue.data.remote.sync
 
+import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
+import fr.kristenjestin.mue.data.sync.HealthProfilePayload
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
 import kotlinx.serialization.SerializationException
 import java.time.DateTimeException
@@ -22,11 +24,19 @@ import java.time.Instant
  *
  * [toEnvelope] returns null rather than throwing when the outbox holds an aggregate type that
  * `packages/contracts` has no wire shape for. That is not hypothetical: `AGGREGATE_TYPES` in
- * `primitives.ts` is `["measurement"]`, while PRD 13.4 makes the health profile a synchronised
- * aggregate and [SyncAggregateStateEntity.TYPE_HEALTH_PROFILE] already exists. Journalling those
- * changes is what FR-SYNC-001 requires today; sending them is what a later contract revision
- * will allow. A null here means "keep it, do not send it, do not fail it" — the row stays
- * `pending`, loses nothing, and goes out unchanged the day the server understands it.
+ * `primitives.ts` names two of PRD 10.1's aggregates, while
+ * [SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION], [SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE]
+ * and the four `FoodAggregates` types are journalled by `SyncOutbox` and have no branch yet.
+ * Journalling those changes is what FR-SYNC-001 requires today; sending them is what a later
+ * contract revision will allow. A null here means "keep it, do not send it, do not fail it" —
+ * the row stays `pending`, loses nothing, and goes out unchanged the day the server
+ * understands it.
+ *
+ * `healthProfile` was in exactly that state and is not any more, which is worth recording
+ * because of how it read from the outside: PRD 13.4 called the profile synchronised, the outbox
+ * journalled every save, and `Data & sync` showed `1 change waiting` that could never fall —
+ * a counter that never moves is indistinguishable from a fault. The fix was not on this side of
+ * the wire. It was `AGGREGATE_TYPES`.
  */
 object SyncWire {
 
@@ -39,6 +49,7 @@ object SyncWire {
      * drift apart in a refactor.
      */
     val SUPPORTED_SCHEMA_VERSIONS: Map<String, List<Int>> = mapOf(
+        WIRE_AGGREGATE_HEALTH_PROFILE to listOf(PAYLOAD_SCHEMA_VERSION),
         WIRE_AGGREGATE_MEASUREMENT to listOf(PAYLOAD_SCHEMA_VERSION),
     )
 
@@ -48,20 +59,25 @@ object SyncWire {
      *
      * Filtering the queue on this list is not an optimisation, it is what keeps FR-SYNC-007's
      * "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes" true of a
-     * queue that now contains rows nothing can send. The health profile is journalled at every
-     * save (FR-SYNC-001) and `AGGREGATE_TYPES` in `packages/contracts` is `["measurement"]`, so
-     * those rows stay `pending` for as long as the contract lacks the branch — they never drain.
-     * A send that simply took the oldest `WIRE_PUSH_MAX_MUTATIONS` rows would therefore, once
-     * that many profile saves had accumulated, return a window containing nothing sendable, and
-     * every measurement queued behind them would stop going out **permanently**, with no error
-     * anywhere. Selecting by type makes that impossible however many undeliverable rows pile up.
+     * queue that still contains rows nothing can send. `SyncOutbox` journals activity sessions,
+     * custom exercises and the four food aggregates of PRD_FOOD 21.2 at every save
+     * (FR-SYNC-001), and `AGGREGATE_TYPES` in `packages/contracts` has no branch for any of
+     * them, so those rows stay `pending` for as long as the contract lacks it — they never
+     * drain. A send that simply took the oldest `WIRE_PUSH_MAX_MUTATIONS` rows would therefore,
+     * once that many food entries had accumulated, return a window containing nothing sendable,
+     * and every measurement queued behind them would stop going out **permanently**, with no
+     * error anywhere. Selecting by type makes that impossible however many undeliverable rows
+     * pile up.
      *
-     * [toEnvelope] still answers null for a row of a sendable type it cannot shape — an
-     * unrecognised `op`, say — so the two guards are not redundant: this one bounds what the
-     * queue can hide, that one bounds what the wire can be handed.
+     * [toEnvelope] still answers null for a row of a sendable type it cannot shape — a
+     * `healthProfile` delete, which the outbox never mints and the server refuses — so the two
+     * guards are not redundant: this one bounds what the queue can hide, that one bounds what
+     * the wire can be handed.
      */
-    val SENDABLE_LOCAL_AGGREGATE_TYPES: List<String> =
-        listOf(SyncAggregateStateEntity.TYPE_MEASUREMENT)
+    val SENDABLE_LOCAL_AGGREGATE_TYPES: List<String> = listOf(
+        SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
+        SyncAggregateStateEntity.TYPE_MEASUREMENT,
+    )
 
     /**
      * One outbox row as the server reads it, or null when this build has no wire shape for it.
@@ -105,6 +121,33 @@ object SyncWire {
                     payloadSchemaVersion = mutation.payloadSchemaVersion,
                     payload = SyncJson.instance.decodeFromString(
                         MeasurementPayloadV1Dto.serializer(),
+                        mutation.payload
+                            ?: throw SerializationException(
+                                "an upsert of ${mutation.aggregateId} carries no payload",
+                            ),
+                    ),
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                /*
+                 * The stored payload is re-read through the *wire* DTO rather than reused from
+                 * `SyncOutbox.HealthProfilePayload`, exactly as the measurement above is. The
+                 * two shapes agree today and are owned by different files; decoding is what
+                 * makes a disagreement a caught `SerializationException` on one row instead of
+                 * a body the server rejects for the whole batch.
+                 *
+                 * `aggregateId` is not copied from the row. PRD 13.4 gives the account one
+                 * profile and the contract pins its identifier as a literal, so the DTO's own
+                 * default is the only value that can appear — an outbox row that somehow held
+                 * another one cannot smuggle it onto the wire.
+                 */
+                SyncAggregateStateEntity.TYPE_HEALTH_PROFILE -> HealthProfileUpsertMutationDto(
+                    mutationId = mutation.mutationId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    payload = SyncJson.instance.decodeFromString(
+                        HealthProfilePayloadV1Dto.serializer(),
                         mutation.payload
                             ?: throw SerializationException(
                                 "an upsert of ${mutation.aggregateId} carries no payload",
@@ -162,8 +205,39 @@ object SyncWire {
      */
     fun localAggregateType(wireType: String): String? = when (wireType) {
         WIRE_AGGREGATE_MEASUREMENT -> SyncAggregateStateEntity.TYPE_MEASUREMENT
+        WIRE_AGGREGATE_HEALTH_PROFILE -> SyncAggregateStateEntity.TYPE_HEALTH_PROFILE
         else -> null
     }
+
+    /**
+     * The payload of a health profile upsert, as the outbox stores it.
+     *
+     * It exists so `SyncOutbox`'s [HealthProfilePayload] and the wire's
+     * [HealthProfilePayloadV1Dto] have one crossing point instead of two, and so a test can
+     * feed a real height and a real birth date through it rather than assert a shape.
+     */
+    fun healthProfilePayload(
+        payload: HealthProfilePayload,
+    ): HealthProfilePayloadV1Dto = HealthProfilePayloadV1Dto(
+        heightCm = payload.heightCm,
+        birthDate = payload.birthDate,
+    )
+
+    /**
+     * The local row a received health profile becomes.
+     *
+     * [HealthProfileEntity.ROW_ID] is written rather than `change.aggregateId`, and that is the
+     * client half of "un agrégat unique" (PRD 13.4): the entity's primary key is a constant, so
+     * a change from a second device updates the one row instead of inserting beside it. There is
+     * no branch in which two profile rows can exist locally.
+     */
+    fun healthProfileEntity(
+        payload: HealthProfilePayloadV1Dto,
+    ): HealthProfileEntity = HealthProfileEntity(
+        id = HealthProfileEntity.ROW_ID,
+        heightCm = payload.heightCm,
+        birthDate = payload.birthDate,
+    )
 
     /** The identity Android stamps its own mutations with (PRD 12.1). */
     fun androidOrigin(deviceId: String): OriginDto =
