@@ -24,14 +24,15 @@ import io.ktor.client.HttpClient
  * Everything the Food module needs, registered in one place.
  *
  * [AppContainer] gains a **single** property for the whole module, exactly as the Activity Timer
- * and server synchronisation did before it, so the six screens still to be built — `Day`,
- * `Trends`, the catalogue, the recipe editor, the scanner and the planner — can be wired against
- * this surface without the shipped container having to move again for each of them.
+ * and server synchronisation did before it, and that is what has kept it still: the day, the
+ * catalogue, the recipe editor and now the scanner have all been wired against this surface
+ * without the shipped container moving once. `Trends` and the planner are the two left.
  *
  * Lazy, like everything in [AppContainer]: the four repositories open the database, and a cold
- * start that never reaches the Food tab must not pay for it. [outbox] is taken from the sync
- * container rather than built again — one mint point for `mutation_id` across every aggregate is
- * what makes the outbox drainable in one pass.
+ * start that never reaches the Food tab must not pay for it. The scanner's HTTP client is laziest
+ * of the lot — a phone that never scans never creates a connection pool. [outbox] is taken from
+ * the sync container rather than built again: one mint point for `mutation_id` across every
+ * aggregate is what makes the outbox drainable in one pass.
  */
 class FoodContainer(
     private val applicationContext: Context,
