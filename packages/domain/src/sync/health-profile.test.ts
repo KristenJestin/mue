@@ -1,7 +1,7 @@
 import type { MueError, MutationResult, PullResponse } from "@mue/contracts";
 import { type DatabaseHandle, createTestDatabase, migrate, schema, seedUser } from "@mue/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { readChanges } from "./pull";
 import { submitMutations } from "./push";
 import type { SyncContext } from "./types";
@@ -100,7 +100,10 @@ async function auditedVersions(): Promise<unknown[]> {
   const rows = await handle.db
     .select({ revision: syncJournal.revision, payload: syncJournal.payload })
     .from(syncJournal)
-    .where(eq(syncJournal.aggregateType, "healthProfile"))
+    // Scoped to this test's own account, which is not a detail: the development cluster is
+    // shared, and this assertion read every account's profile journal until a live run against
+    // a real phone put a second one in the table and turned three passing tests red.
+    .where(and(eq(syncJournal.userId, USER), eq(syncJournal.aggregateType, "healthProfile")))
     .orderBy(syncJournal.sequence);
   return rows.map((row) => row.payload);
 }
