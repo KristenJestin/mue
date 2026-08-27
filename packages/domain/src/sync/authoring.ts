@@ -1,8 +1,11 @@
 import {
   ACTIVITY_SESSION_PAYLOAD_VERSION_1,
   type ActivitySessionPayloadV1,
+  type AggregateType,
   MEASUREMENT_PAYLOAD_VERSION_1,
+  type MueError,
   type MutationEnvelope,
+  type MutationOp,
   type MutationResult,
   type Origin,
   type OriginType,
@@ -331,4 +334,95 @@ async function readMutationAggregateId(
       and(eq(schema.mutationLog.mutationId, mutationId), eq(schema.mutationLog.userId, userId)),
     );
   return rows[0]?.aggregateId;
+}
+
+/**
+ * One mutation authored from the server side, for any aggregate.
+ *
+ * `createActivitySession` above is this function with an activity's payload and an
+ * activity's read-back. Twenty-six MCP tools do not need twenty-six copies of it: the envelope
+ * they build differs only in `aggregateType`, `aggregateId` and `payload`, and everything that
+ * follows — validation, the advisory lock, the revision, the journal entry, the sequence, the
+ * idempotency record — is `submitMutation`'s and is the same for all of them. So a tool's write
+ * path is *this* function, and PRD section 20.2's "one implementation of a rule" survives the
+ * catalogue growing by an order of magnitude.
+ *
+ * It is deliberately un-opinionated about the payload. Every aggregate's shape is already stated
+ * once, in `mutationEnvelopeSchema`, and `validateMutation` applies it before any handler runs;
+ * a second opinion here would be a second place for the two to disagree.
+ */
+export interface AuthoredMutation {
+  readonly userId: string;
+  /** FR-SYNC-006 and section 14.6: replaying this id repeats no effect. */
+  readonly mutationId: string;
+  readonly origin: Origin;
+  readonly aggregateType: AggregateType;
+  readonly aggregateId: string;
+  readonly op: MutationOp;
+  readonly payloadSchemaVersion: number;
+  /** The complete aggregate for an upsert; null for a delete (section 12.2). */
+  readonly payload: unknown;
+  /** The revision the author believed it was editing, when it knows one (section 14.6). */
+  readonly baseRevision?: string | null;
+  /** The author's own clock, for display and audit only (section 12.3). */
+  readonly occurredAt?: Date;
+}
+
+export interface AuthoredMutationOutcome {
+  /** `duplicate` is a replay: the effect happened once, and this is the stored result. */
+  readonly status: "applied" | "duplicate" | "rejected";
+  /**
+   * The aggregate the mutation actually touched.
+   *
+   * On a replay this is read back from `mutation_log` rather than echoed from the submission,
+   * for the reason `createActivitySession` gives: a creation tool mints a fresh identifier on
+   * every invocation, so a retry describes an aggregate that was never written. The identifier
+   * of the row the *first* call created is the only useful answer.
+   */
+  readonly aggregateId: string;
+  readonly revision: string | null;
+  readonly sequence: string | null;
+  readonly error: MueError | null;
+}
+
+export async function authorMutation(
+  handle: DatabaseHandle,
+  input: AuthoredMutation,
+): Promise<AuthoredMutationOutcome> {
+  const result = await submitMutation(
+    handle,
+    { userId: input.userId },
+    {
+      ...envelope(input.origin, input.mutationId, input.occurredAt, input.baseRevision),
+      aggregateType: input.aggregateType,
+      aggregateId: input.aggregateId,
+      op: input.op,
+      payloadSchemaVersion: input.payloadSchemaVersion,
+      payload: input.payload,
+    },
+  );
+
+  if (result.status === "rejected") {
+    return {
+      status: "rejected",
+      aggregateId: input.aggregateId,
+      revision: null,
+      sequence: null,
+      error: result.error,
+    };
+  }
+
+  const aggregateId =
+    result.status === "applied"
+      ? input.aggregateId
+      : ((await readMutationAggregateId(handle, input.userId, input.mutationId)) ??
+        input.aggregateId);
+
+  return {
+    status: result.status,
+    aggregateId,
+    revision: result.revision,
+    sequence: result.sequence,
+    error: null,
+  };
 }

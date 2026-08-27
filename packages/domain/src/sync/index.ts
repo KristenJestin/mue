@@ -4,6 +4,7 @@
 
 export { activitySessionHandler } from "./activity-session";
 export {
+  authorMutation,
   buildActivitySessionUpsert,
   buildMeasurementDelete,
   buildMeasurementUpsert,
@@ -14,6 +15,8 @@ export {
   upsertMeasurement,
   type ActivitySessionView,
   type AuthoredMeasurement,
+  type AuthoredMutation,
+  type AuthoredMutationOutcome,
   type CreateActivitySessionCommand,
   type CreateActivitySessionResult,
   type MeasurementRevision,

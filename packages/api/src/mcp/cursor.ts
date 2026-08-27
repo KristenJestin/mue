@@ -43,3 +43,26 @@ export function decodeListCursor(cursor: string): string {
     throw new InvalidCursorError("the cursor is not one this server issued");
   }
 }
+
+/**
+ * A two-part keyset, written as one opaque string.
+ *
+ * A list whose order is `(day desc, id)` or `(name, id)` needs both halves in its cursor:
+ * a cursor on the first alone drops every other row of the group a page happened to end
+ * inside, and one on the second alone cannot resume an ordering it does not follow.
+ *
+ * The separator is the last space, which is unambiguous for the pairs that exist: the
+ * second half is always a UUID and a UUID contains no space, while the first half may
+ * (`bench press`). Choosing the *last* space rather than the first is what makes a name
+ * with a space in it survive the round trip.
+ */
+export function encodePairKey(first: string, second: string): string {
+  return `${first} ${second}`;
+}
+
+export function decodePairKey(key: string): { first: string; second: string } {
+  const separator = key.lastIndexOf(" ");
+  return separator === -1
+    ? { first: key, second: "" }
+    : { first: key.slice(0, separator), second: key.slice(separator + 1) };
+}

@@ -79,9 +79,14 @@ describe("the tool catalogue", () => {
     // reintroduce it without failing here.
     const forbidden =
       /sql|query|table|schema|column|where|order_?by|path|file|dir|command|exec|url/i;
+    // The *parameter* name is what is checked, not the tool's own name prefixed to it. The
+    // rule is about what a caller can pass; `mue.update_health_profile` contains "file"
+    // inside "profile" and passes nothing anywhere. The tool name is still reported, so a
+    // failure says which tool to look in.
     for (const tool of MUE_TOOLS) {
       for (const name of Object.keys(tool.inputSchema)) {
-        expect(`${tool.name}.${name}`).not.toMatch(forbidden);
+        const input = `${tool.name}.${name}`;
+        expect({ input, safe: !forbidden.test(name) }).toEqual({ input, safe: true });
       }
     }
   });

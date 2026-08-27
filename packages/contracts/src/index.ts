@@ -10,6 +10,7 @@ export * from "./food-log";
 export * from "./health";
 export * from "./health-profile";
 export * from "./meal-plan";
+export * from "./meal-slot-clock";
 export * from "./measurement";
 export * from "./meta";
 export * from "./mutation";

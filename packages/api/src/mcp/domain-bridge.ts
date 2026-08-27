@@ -1,6 +1,11 @@
 import type { DatabaseHandle } from "@mue/db";
-import { createActivitySession } from "@mue/domain";
-import type { CreateActivityCommand, CreateActivityResult } from "./services";
+import { authorMutation, createActivitySession } from "@mue/domain";
+import type {
+  AgentMutationCommand,
+  AgentMutationResult,
+  CreateActivityCommand,
+  CreateActivityResult,
+} from "./services";
 
 /**
  * The one seam between the MCP tools and the business rules.
@@ -38,4 +43,40 @@ export function isUsingProvisionalActivityWrite(): boolean {
 
 export function createActivitySessionService(): CreateActivitySessionService {
   return createActivitySession;
+}
+
+/**
+ * The same seam, for the twenty-six tools that came after the vertical slice.
+ *
+ * `create_activity` got a function of its own because it was first and because the domain
+ * export it waited for was written for it. Every write tool since -- a weight, a tombstone, a
+ * profile, a recipe, a journal line -- differs from it only in the envelope it fills in, so they
+ * share one: `@mue/domain`'s `authorMutation`, which is `createActivitySession` with the payload
+ * left to the caller and the same `submitMutation` underneath.
+ *
+ * That underneath is the whole point, and it is what makes FR-SYNC-004 true for all of them at
+ * once. An agent's write takes a revision from the same counter, is appended to `sync_journal`
+ * with the same sequence, is recorded in `mutation_log` under the same idempotency rule, and is
+ * handed to the phone by the same pull. There is no second write path for a tool to drift onto,
+ * because there is no second function to drift into.
+ */
+export type AgentMutationService = (
+  database: DatabaseHandle,
+  command: AgentMutationCommand,
+) => Promise<AgentMutationResult>;
+
+export function createAgentMutationService(): AgentMutationService {
+  return async (database, command) =>
+    authorMutation(database, {
+      userId: command.userId,
+      mutationId: command.mutationId,
+      origin: { type: "agent", id: command.originId },
+      aggregateType: command.aggregateType,
+      aggregateId: command.aggregateId,
+      op: command.op,
+      payloadSchemaVersion: command.payloadSchemaVersion,
+      payload: command.payload,
+      baseRevision: command.baseRevision,
+      occurredAt: new Date(command.clientOccurredAt),
+    });
 }

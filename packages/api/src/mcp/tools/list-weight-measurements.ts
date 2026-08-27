@@ -7,6 +7,7 @@ import {
   listCursorSchema,
 } from "../cursor";
 import { envelopeSchema, invalidPayload, toolFailure, toolSuccess } from "../errors";
+import { weightMeasurementViewSchema } from "./shared";
 import type { MueTool, ToolContext } from "./types";
 
 export const LIST_WEIGHT_MEASUREMENTS_DEFAULT_LIMIT = 50;
@@ -46,24 +47,12 @@ const inputSchema = {
     ),
 };
 
-const measurementSchema = z.object({
-  date: localDateSchema.describe("The day the weight belongs to. One measurement per day."),
-  weightCg: z
-    .int()
-    .describe("Weight in hundredths of a kilogram, the exact integer the phone stores."),
-  weightKg: z.number().describe("`weightCg` divided by 100, for display only."),
-  revision: z
-    .string()
-    .describe("Server revision of this measurement, as a decimal string. Rises on every change."),
-  createdAt: instantSchema,
-  updatedAt: instantSchema,
-  deletedAt: instantSchema.nullable().describe("Set when the measurement was deleted."),
-  originType: z
-    .enum(["android", "agent", "server"])
-    .describe("Provenance: what kind of author last changed this measurement."),
-  originId: z.string().nullable().describe("Provenance: which device, agent or process."),
-  lastMutationId: z.string().describe("The operation that produced the current revision."),
-});
+/**
+ * Moved to `./shared.ts` when the catalogue grew: `mue.get_weight_measurement` and
+ * `mue.upsert_weight_measurement` describe the same record, and three transcriptions of one
+ * shape are two chances for a field to be documented differently in the same catalogue.
+ */
+const measurementSchema = weightMeasurementViewSchema;
 
 const dataSchema = z.object({
   measurements: z.array(measurementSchema),
