@@ -85,7 +85,7 @@ internal fun FoodDayRoute(
 }
 
 /**
- * The journal of one day: the date, then the four moments (PRD_FOOD 10.1).
+ * The journal of one day: the date, then the six moments (PRD_FOOD 10.1).
  *
  * There is no header band, no daily summary and no permanent settings button — PRD_FOOD 7 is
  * explicit about all three, and PRD_FOOD 22 makes the absence an acceptance criterion. There is
@@ -131,7 +131,7 @@ internal fun FoodDayScreen(
             // PRD_FOOD 22 and 12: what a day still to come is, said once, above its moments.
             if (!state.canLog) item(key = "future") { FutureDayNote() }
 
-            // Four moments, always four, in PRD_FOOD 10.1's order and never keyed by position.
+            // Six moments, always six, in PRD_FOOD 10.1's order and never keyed by position.
             items(items = state.slots, key = { it.slot.id }) { slot ->
                 FoodDaySlotSection(
                     state = slot,

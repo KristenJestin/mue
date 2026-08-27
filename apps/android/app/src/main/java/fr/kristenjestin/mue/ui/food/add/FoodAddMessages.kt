@@ -252,13 +252,31 @@ internal object FoodAddMessages {
 
     // region when and where (PRD_FOOD 10.3, FR-FOOD-007)
 
-    const val SLOT_SECTION: String = "Which moment?"
+    const val SLOT_SECTION: String = "When?"
 
     /**
-     * PRD_FOOD 10.3 has no window for [MealSlot.SNACK] — it is "tout le reste", the complement of
-     * the three named ones — so its card says that rather than inventing an interval for it.
+     * The label on the one quiet line the moment gets, and what opening it says.
+     *
+     * The sheet no longer **asks** for a moment. The owner's words are the whole design — *"le
+     * système détecte le type en fonction de l'heure mais je dois pouvoir l'override si je le
+     * souhaite, mais par défaut c'est caché et auto"* — so the hour is the only thing entered and
+     * the moment is what the hour already decided. A grid of tiles beside the clock was asking for
+     * the same fact twice, and with six moments it was asking for it across three rows.
+     *
+     * It is still **findable and still overridable**, because PRD_FOOD 10.3 forbids the windows
+     * from constraining anything: a midday meal eaten at 11:30 or at 15:00 is the ordinary case,
+     * not the edge one, and taking the choice away would forbid it.
      */
-    const val ANY_OTHER_TIME: String = "Any other time"
+    const val SLOT_LABEL: String = "Moment"
+    const val CHANGE_SLOT: String = "Change"
+    const val SLOT_SHEET_TITLE: String = "Which moment?"
+    const val CLOSE_SLOT_SHEET: String = "Close the moment picker"
+
+    /** What the quiet line reads when nothing has overruled the clock: `Lunch · 12:00 – 14:30`. */
+    fun slotWithHours(label: String, hours: String): String = "$label · $hours"
+
+    /** PRD_FOOD 18: the line alone says `Lunch`; a reader needs to hear what tapping it does. */
+    fun changeSlotDescription(label: String): String = "Moment: $label. Change it."
 
     const val TIME_LABEL: String = "Time"
     const val CHANGE_TIME: String = "Change"

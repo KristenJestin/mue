@@ -46,7 +46,7 @@ class FoodAddScreenshotTest {
 
         capture("food-add-cooked-top")
 
-        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).performScrollTo()
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD).performScrollTo()
         compose.waitForIdle()
         capture("food-add-cooked-bottom")
     }
@@ -58,9 +58,35 @@ class FoodAddScreenshotTest {
 
         capture("food-add-cooked-scale2-top")
 
-        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).performScrollTo()
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD).performScrollTo()
         compose.waitForIdle()
         capture("food-add-cooked-scale2-bottom")
+    }
+
+    /**
+     * The override panel, which is the only place the six moments are drawn (FR-FOOD-007).
+     *
+     * What to look for: six rows, each with its own window under its name, and no name cut.
+     * `Morning snack` and `Evening snack` are the two that would go first, which is why they get a
+     * full-width row each rather than a share of a grid.
+     *
+     * **One picture and not two.** A panel is a `Dialog`, and a dialog is a window of its own whose
+     * Compose root republishes `LocalDensity` from that window — so the `fontScale` this suite
+     * overrides for every other screen does not reach inside one, and a "scale 2" capture taken
+     * that way would be the scale-1 picture under another name. The doubled scale is photographed
+     * by setting the **device's** own text size instead:
+     *
+     * ```
+     * adb -s emulator-5554 shell settings put system font_scale 2.0
+     * ```
+     *
+     * and running this test again. Anything that asserts a panel's layout at a font scale has the
+     * same trap waiting for it.
+     */
+    @Test
+    fun theMomentOverride() {
+        showSheet(previewCookedState().copy(isSlotPickerVisible = true), fontScale = 1f)
+        captureNode(FoodTestTags.SLOT_SHEET, "food-add-moments")
     }
 
     /** PRD_FOOD 13.1 in one picture: an energy that is known beside four values that are not. */
@@ -137,8 +163,22 @@ class FoodAddScreenshotTest {
         }
     }
 
+    /**
+     * A panel gets its own window, so `onRoot` finds two and refuses to choose.
+     *
+     * The node handled by [tag] is unambiguous either way, which is why the override is
+     * photographed by its own handle rather than by whichever root the runner happened to sort
+     * first.
+     */
+    private fun captureNode(tag: String, name: String) {
+        write(name, compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap())
+    }
+
     private fun capture(name: String) {
-        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        write(name, compose.onRoot().captureToImage().asAndroidBitmap())
+    }
+
+    private fun write(name: String, bitmap: Bitmap) {
         val directory = File(
             InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
             "screenshots",

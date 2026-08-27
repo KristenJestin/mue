@@ -188,7 +188,7 @@ internal fun previewDayState(
 /**
  * A day nobody has written anything on (PRD_FOOD 10.4 and 17).
  *
- * Four moments, four add buttons, and **no total anywhere** — not a `0`, and not a `—` either.
+ * Six moments, six add buttons, and **no total anywhere** — not a `0`, and not a `—` either.
  */
 internal fun emptyDayState(
     date: LocalDate = FoodDayPreviewData.TODAY,
@@ -201,7 +201,7 @@ internal fun emptyDayState(
  * The half of the module that had no door until the two rules were told apart: the journal's
  * ceiling stops today, planning reaches sixty days past it, and the date navigation asked only
  * the first. What this state draws is the answer to both at once — a day that says plainly it
- * cannot be logged, four moments that say what they *can* hold, and the proposal already sitting
+ * cannot be logged, six moments that say what they *can* hold, and the proposal already sitting
  * on the dinner with `Swap` and `Dismiss` but no `I ate this`.
  */
 internal fun futureDayState(

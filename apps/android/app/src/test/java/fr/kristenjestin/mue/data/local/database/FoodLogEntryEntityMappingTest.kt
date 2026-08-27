@@ -231,3 +231,44 @@ class FoodLogEntryUnknownIsNotZeroTest {
         assertTrue(read.countsTowardsEnergyAverage)
     }
 }
+
+/**
+ * The `CASE` that orders a day by moment, checked against the enum it is transcribing.
+ *
+ * `SLOT_ORDER` is a **string**, so it is the one place a new moment can be forgotten without
+ * anything failing to compile: an id the `CASE` does not name falls into its `ELSE` bucket and
+ * sorts to the end of the day, quietly, in a query no unit test reads. That is exactly the "right
+ * shape, wrong content" defect — the SQL is valid, the rows come back, and the evening snack sits
+ * above breakfast.
+ *
+ * So the transcription is read back rather than trusted: every moment must appear, in
+ * `MealSlot.ORDERED`'s own order, with the rank its position gives it.
+ */
+class SlotOrderSqlTest {
+
+    private fun ranksIn(sql: String): List<Pair<String, Int>> =
+        Regex("WHEN '([a-z_]+)' THEN ([0-9]+)")
+            .findAll(sql)
+            .map { it.groupValues[1] to it.groupValues[2].toInt() }
+            .toList()
+
+    private val expected: List<Pair<String, Int>> =
+        MealSlot.ORDERED.mapIndexed { index, slot -> slot.id to index }
+
+    @Test
+    fun `the journal orders every moment, in the order of the day`() {
+        assertEquals(expected, ranksIn(FoodLogEntryEntity.SLOT_ORDER))
+    }
+
+    @Test
+    fun `the planner orders the moments exactly as the journal does`() {
+        assertEquals(expected, ranksIn(MealPlanEntryEntity.SLOT_ORDER))
+        assertEquals(FoodLogEntryEntity.SLOT_ORDER, MealPlanEntryEntity.SLOT_ORDER)
+    }
+
+    @Test
+    fun `the fallback bucket sorts after every named moment`() {
+        val fallback = Regex("ELSE ([0-9]+) END").find(FoodLogEntryEntity.SLOT_ORDER)
+        assertEquals(MealSlot.entries.size, fallback?.groupValues?.get(1)?.toInt())
+    }
+}

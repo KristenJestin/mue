@@ -74,7 +74,8 @@ class FoodDayScreenshotTest {
      * The empty day, which is what the tab opens on before anything has been logged.
      *
      * Its pair is [theDayWhoseProteinIsUnknown], and the two are the picture of PRD_FOOD 13.2.
-     * `food-day-empty.png` must show four headings with **no figure beside any of them**;
+     * `food-day-empty.png` must show three whole meal blocks, three folded snack rows between
+     * them, and **no figure beside any of them**;
      * `food-day-unknown-protein.png` must show a snack reading `≈ 420 kcal` and `— protein`.
      * If those two images ever look alike, the module has lost the difference between "nobody
      * wrote this down" and "this is zero", and no assertion in the suite will say so.
@@ -84,6 +85,21 @@ class FoodDayScreenshotTest {
         setDay(state = emptyDayState())
 
         capture("food-day-empty")
+    }
+
+    /**
+     * The same untouched day at twice the font scale, which is where six moments would tell.
+     *
+     * What to look for: the three meals still read as blocks, the three snacks between them are
+     * still one row each, and no moment's name is cut. The folded row is the whole of what six
+     * moments cost an empty day — if it grows a heading of its own at this scale, the fold has
+     * stopped paying for itself.
+     */
+    @Test
+    fun theEmptyDayAtTwiceTheFontScale() {
+        setDay(fontScale = 2f, state = emptyDayState())
+
+        capture("food-day-empty-scale2")
     }
 
     /** The other half of PRD_FOOD 13.2: one line, an energy known and a protein that is not. */

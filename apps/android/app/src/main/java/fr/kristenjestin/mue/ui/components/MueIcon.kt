@@ -187,6 +187,8 @@ object MueIcons {
         FoodIcons.SUNRISE -> R.drawable.ic_sunrise
         FoodIcons.SUN -> R.drawable.ic_sun
         FoodIcons.MOON -> R.drawable.ic_moon
+        FoodIcons.COFFEE -> R.drawable.ic_coffee
+        FoodIcons.MOON_STAR -> R.drawable.ic_moon_star
         FoodIcons.BARCODE -> R.drawable.ic_barcode
         FoodIcons.EGG -> R.drawable.ic_egg
         FoodIcons.CHEF_HAT -> R.drawable.ic_chef_hat
@@ -228,6 +230,8 @@ object MueIcons {
         FoodIcons.SUNRISE,
         FoodIcons.SUN,
         FoodIcons.MOON,
+        FoodIcons.COFFEE,
+        FoodIcons.MOON_STAR,
         FoodIcons.BARCODE,
         FoodIcons.EGG,
         FoodIcons.CHEF_HAT,

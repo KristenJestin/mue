@@ -139,10 +139,10 @@ class FoodDayUiStateTest {
 
     // endregion
 
-    // region the four moments (PRD_FOOD 10.1)
+    // region the six moments (PRD_FOOD 10.1)
 
     @Test
-    fun `the four moments are always there, in order, filled or not`() {
+    fun `the six moments are always there, in order, filled or not`() {
         val state = FoodDayUiState.of(date = TODAY, today = TODAY)
 
         assertEquals(MealSlot.ORDERED, state.slots.map { it.slot })
@@ -448,6 +448,100 @@ class FoodDayUiStateTest {
         val breakfast = FoodDayUiState.of(TODAY, TODAY).slot(MealSlot.BREAKFAST)
 
         assertEquals("Breakfast, ${FoodDayMessages.NOTHING_LOGGED}", breakfast.description)
+    }
+
+
+    // region what six moments cost the day (PRD_FOOD 10.1)
+
+    /**
+     * Six moments, three of them snacks, on a day nobody has written anything on.
+     *
+     * PRD_FOOD 10.1 keeps every moment on screen whether it holds anything or not, so none of the
+     * six is ever dropped — that is what makes adding to breakfast always the same gesture in the
+     * same place. What changes is how much room an empty one takes: the three meals keep their
+     * block, and the three snacks fold to a single row each.
+     */
+    @Test
+    fun `an untouched day folds its three snacks and keeps its three meals whole`() {
+        val state = FoodDayUiState.of(date = TODAY, today = TODAY)
+
+        assertEquals(MealSlot.ORDERED, state.slots.map { it.slot })
+        assertEquals(
+            listOf(MealSlot.MORNING_SNACK, MealSlot.SNACK, MealSlot.EVENING_SNACK),
+            state.slots.filter { it.isCollapsed }.map { it.slot },
+        )
+        assertEquals(
+            listOf(MealSlot.BREAKFAST, MealSlot.LUNCH, MealSlot.DINNER),
+            state.slots.filterNot { it.isCollapsed }.map { it.slot },
+        )
+    }
+
+    /** An empty meal is still a whole block: the day's three anchors do not fold. */
+    @Test
+    fun `a meal never folds, however empty it is`() {
+        val state = FoodDayUiState.of(date = TODAY, today = TODAY)
+
+        MealSlot.ORDERED.filter { it.isMeal }.forEach { slot ->
+            assertFalse(state.slot(slot).isCollapsed, "$slot folded")
+            assertTrue(state.slot(slot).isEmpty)
+        }
+    }
+
+    /** A snack with a line in it is a moment with something to show, so it unfolds. */
+    @Test
+    fun `a snack unfolds the moment it holds a line`() {
+        val state = FoodDayUiState.of(
+            date = TODAY,
+            today = TODAY,
+            entries = listOf(FoodDayPreviewData.tiramisu()),
+        )
+
+        assertFalse(state.slot(MealSlot.SNACK).isCollapsed)
+        // Its neighbours are untouched: folding is decided per moment, not per day.
+        assertTrue(state.slot(MealSlot.MORNING_SNACK).isCollapsed)
+        assertTrue(state.slot(MealSlot.EVENING_SNACK).isCollapsed)
+    }
+
+    /**
+     * A proposal is something to show even though it holds no line and enters no total.
+     *
+     * PRD_FOOD 12 draws the dashed card at the head of its moment with three actions on it, and a
+     * folded row has nowhere to put them.
+     */
+    @Test
+    fun `a snack carrying an unconfirmed proposal is not folded away`() {
+        val plan = MealPlanEntry(
+            plannedOn = TODAY,
+            slot = MealSlot.EVENING_SNACK,
+            recipeId = FoodDayPreviewData.PLANNED_RECIPE_ID,
+            plannedServings = FoodDayPreviewData.plannedDinner().plannedServings,
+        )
+        val state = FoodDayUiState.of(
+            date = TODAY,
+            today = TODAY,
+            plans = listOf(plan),
+            recipeNames = FoodDayPreviewData.recipeNames,
+        )
+
+        assertFalse(state.slot(MealSlot.EVENING_SNACK).isCollapsed)
+        assertTrue(state.slot(MealSlot.MORNING_SNACK).isCollapsed)
+    }
+
+    /**
+     * A day still to come folds exactly as today does, and the folded row is still not a control.
+     *
+     * PRD_FOOD 22 refuses a journal line there, so the row keeps its place and stops offering —
+     * the same rule the full block's add row follows, and for the same reason: a row that
+     * disappears is a moment that moved.
+     */
+    @Test
+    fun `a day ahead folds its empty snacks and offers none of them`() {
+        val tomorrow = TODAY.plusDays(1)
+        val state = FoodDayUiState.of(date = tomorrow, today = TODAY)
+
+        val morning = state.slot(MealSlot.MORNING_SNACK)
+        assertTrue(morning.isCollapsed)
+        assertFalse(morning.canAdd)
     }
 
     // endregion

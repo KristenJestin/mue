@@ -276,12 +276,20 @@ class FoodAddUiStateTest {
 
     // region the moment and the day (PRD_FOOD 10.1 and 18)
 
+    /**
+     * The moment is **not asked for**, and this is the shape of that.
+     *
+     * The six of them are still built — the override panel draws exactly this list — but the form
+     * itself shows only [FoodAddUiState.slotFieldValue], which is what the hour already decided.
+     */
     @Test
-    fun `the four moments are always offered, with one of them chosen`() {
+    fun `the six moments are offered in the override, with one of them chosen`() {
         val state = previewCookedState()
 
         assertEquals(MealSlot.ORDERED, state.slots.map { it.slot })
         assertEquals(listOf(MealSlot.DINNER), state.slots.filter { it.selected }.map { it.slot })
+        // Closed until somebody asks for it: the moment is automatic and out of the way.
+        assertFalse(state.isSlotPickerVisible)
     }
 
     /*
@@ -290,50 +298,70 @@ class FoodAddUiStateTest {
      *   "« which moment » on comprend pas, je peux sélectionner breakfast, mais avoir un time à
      *    18h, je comprends pas ?"
      *
-     * Two controls side by side with nothing between them. The pairing is not forbidden and must
-     * not become so — PRD_FOOD 10.3 says the windows "ne créent aucune contrainte" and a late
-     * breakfast is a real meal — so what changes is that the relation is now on screen: each
-     * moment carries its own hours, and a moment and an hour that disagree say so.
+     * and then, once the hours were printed on the tiles:
+     *
+     *   "je définis mon heure de bouffer, le système a déjà en mémoire les plages… ça affiche bien
+     *    lunch dans l'interface mais pas à la création"
+     *
+     * Two controls for one fact. The pairing is not forbidden and must not become so — PRD_FOOD
+     * 10.3 says the windows "ne créent aucune contrainte" and a late breakfast is a real meal — so
+     * the moment stops being asked for and becomes a value: derived from the hour, shown already
+     * correct, and overridable in a panel one tap away.
      */
 
-    /** PRD_FOOD 10.3's table, on the thing being chosen. */
+    /** FR-FOOD-007: what the hour decided, rendered, with the window that explains it. */
+    @Test
+    fun `the moment on the form is the one the hour chose, with its hours beside it`() {
+        val state = stateAt(MealSlot.LUNCH, LocalTime.of(13, 0))
+
+        assertEquals("Lunch · 12:00 – 14:30", state.slotFieldValue)
+        assertTrue(state.slotFieldDescription.contains(MealSlot.LUNCH.label))
+    }
+
+    /** PRD_FOOD 10.3's table, on the thing being chosen inside the panel. */
     @Test
     fun `every moment shows the hours it usually covers`() {
         val slots = stateAt(MealSlot.DINNER, LocalTime.of(20, 0)).slots.associateBy { it.slot }
 
         assertEquals("05:00 – 10:00", slots.getValue(MealSlot.BREAKFAST).hoursLabel)
-        assertEquals("11:30 – 14:30", slots.getValue(MealSlot.LUNCH).hoursLabel)
-        assertEquals("18:00 – 22:00", slots.getValue(MealSlot.DINNER).hoursLabel)
+        assertEquals("10:00 – 12:00", slots.getValue(MealSlot.MORNING_SNACK).hoursLabel)
+        assertEquals("12:00 – 14:30", slots.getValue(MealSlot.LUNCH).hoursLabel)
+        assertEquals("14:30 – 18:30", slots.getValue(MealSlot.SNACK).hoursLabel)
+        assertEquals("18:30 – 22:00", slots.getValue(MealSlot.DINNER).hoursLabel)
+        // The one that crosses midnight, printed as it is rather than as two intervals.
+        assertEquals("22:00 – 05:00", slots.getValue(MealSlot.EVENING_SNACK).hoursLabel)
     }
 
     /**
-     * PRD_FOOD 10.3 gives the snack no window of its own: it is "tout le reste".
+     * Every moment claims a window now, including the snacks.
      *
-     * An interval would be an invention, and a wrong one — the complement of three intervals is
-     * not an interval.
+     * PRD_FOOD 10.3 used to give the snack none — it was "tout le reste", the complement of three
+     * intervals and not an interval itself — so its card read `Any other time`. Six moments
+     * partition the clock, so there is no complement left to name and no moment without hours.
      */
     @Test
-    fun `the snack claims no window, because it has none`() {
-        val snack = stateAt(MealSlot.DINNER, LocalTime.of(20, 0))
-            .slots
-            .first { it.slot == MealSlot.SNACK }
+    fun `no moment is left without hours of its own`() {
+        val slots = stateAt(MealSlot.DINNER, LocalTime.of(20, 0)).slots
 
-        assertEquals(FoodAddMessages.ANY_OTHER_TIME, snack.hoursLabel)
+        assertEquals(MealSlot.entries.size, slots.size)
+        slots.forEach { option ->
+            assertTrue(option.hoursLabel.contains("–"), "${option.slot} has no window: «${option.hoursLabel}»")
+        }
     }
 
-    /** Breakfast at six in the evening: allowed, saved as chosen, and no longer unexplained. */
+    /** Breakfast at eight in the evening: allowed, saved as chosen, and no longer unexplained. */
     @Test
     fun `an hour outside the chosen moment is stated rather than refused`() {
-        val state = stateAt(MealSlot.BREAKFAST, LocalTime.of(18, 0))
+        val state = stateAt(MealSlot.BREAKFAST, LocalTime.of(20, 0))
 
         val note = assertNotNull(state.slotTimeNote, "the mismatch was left unexplained")
-        assertTrue(note.contains("18:00"), "the hour is not named: «$note»")
+        assertTrue(note.contains("20:00"), "the hour is not named: «$note»")
         // The moment the clock would have chosen, and the one that was actually chosen.
         assertTrue(note.contains(MealSlot.DINNER.label), "the clock's moment is not named: «$note»")
         assertTrue(note.contains(MealSlot.BREAKFAST.label), "the choice is not named: «$note»")
         // The pairing survives the explanation: nothing was moved and nothing was refused.
         assertEquals(MealSlot.BREAKFAST, state.slot)
-        assertEquals(LocalTime.of(18, 0), state.time)
+        assertEquals(LocalTime.of(20, 0), state.time)
     }
 
     /** A moment and an hour that agree have nothing to explain, so nothing is said. */
@@ -342,19 +370,27 @@ class FoodAddUiStateTest {
         assertNull(stateAt(MealSlot.BREAKFAST, LocalTime.of(8, 0)).slotTimeNote)
         assertNull(stateAt(MealSlot.LUNCH, LocalTime.of(14, 0)).slotTimeNote)
         assertNull(stateAt(MealSlot.DINNER, LocalTime.of(21, 59)).slotTimeNote)
+        // The window that crosses midnight agrees with both of its halves.
+        assertNull(stateAt(MealSlot.EVENING_SNACK, LocalTime.of(23, 30)).slotTimeNote)
+        assertNull(stateAt(MealSlot.EVENING_SNACK, LocalTime.of(1, 0)).slotTimeNote)
     }
 
     /**
-     * The snack is the complement, so it agrees with exactly the hours the other three leave out.
+     * The midday meal the override exists for: *"y a un monde où je vais manger à 11h30 ou 15h
+     * mon repas de midi"*.
      *
-     * Ten o'clock sharp is a snack here for the same reason PRD_FOOD 22 makes it one in the
-     * journal — the windows are closed at their start and open at their end — and one o'clock is
-     * lunchtime, so a snack at one is the mismatch worth stating.
+     * Both hours fall outside lunch's window, both are kept exactly as chosen, and both say why
+     * the moment on screen is not the one the clock would have picked.
      */
     @Test
-    fun `the snack agrees with every hour the named moments leave out`() {
-        assertNull(stateAt(MealSlot.SNACK, LocalTime.of(10, 0)).slotTimeNote)
-        assertNotNull(stateAt(MealSlot.SNACK, LocalTime.of(13, 0)).slotTimeNote)
+    fun `a lunch eaten at half eleven or at three is kept, and explained`() {
+        val early = stateAt(MealSlot.LUNCH, LocalTime.of(11, 30))
+        assertEquals(MealSlot.LUNCH, early.slot)
+        assertTrue(assertNotNull(early.slotTimeNote).contains(MealSlot.MORNING_SNACK.label))
+
+        val late = stateAt(MealSlot.LUNCH, LocalTime.of(15, 0))
+        assertEquals(MealSlot.LUNCH, late.slot)
+        assertTrue(assertNotNull(late.slotTimeNote).contains(MealSlot.SNACK.label))
     }
 
     /** PRD_FOOD 18: the save action says where the line is going, not just that it saves. */

@@ -543,3 +543,91 @@ describe("all six together", () => {
     ]);
   });
 });
+
+/**
+ * The two moments the six-moment split adds, pushed all the way to PostgreSQL and pulled back.
+ *
+ * A new enum member is exactly the change `ContractDrift` cannot see: `slot` is a `text` column
+ * before and after, the payload is the same shape before and after, and every schema still parses.
+ * The only thing that moves is which *values* survive the trip, and there are three independent
+ * gates on the way — `mealSlotSchema`, `mealPlanAggregateIdSchema`'s pattern, and the refinement
+ * that makes the identifier agree with the payload. A moment that clears two of them and not the
+ * third is a push marked `failed` with `sync.invalid_payload` before any handler runs, which is
+ * how the `/` separator lost a week of meal plans.
+ *
+ * So this walks a real `morning_snack` proposal and a real `evening_snack` line through the whole
+ * path, and reads the stored row rather than the response.
+ */
+describe("the moments the six-moment split adds", () => {
+  test("a proposal on the morning snack reaches its own row and comes back", async () => {
+    const payload = {
+      ...fixture("meal-plan-entry-v1-valid.json"),
+      plannedOn: "2026-09-01",
+      slot: "morning_snack",
+    };
+    await expectRoundTrip("mealPlanEntry", "2026-09-01:morning_snack", payload);
+
+    const rows = await handle.db
+      .select()
+      .from(mealPlanEntries)
+      .where(eq(mealPlanEntries.userId, USER));
+    expect(rows[0]?.slot).toBe("morning_snack");
+  });
+
+  /**
+   * The business key is `(user_id, planned_on, slot)`, so two snacks on one day are two rows.
+   * Under four moments they were one, and the second silently replaced the first.
+   */
+  test("two snacks on the same day are two proposals, not one overwriting the other", async () => {
+    const base = fixture("meal-plan-entry-v1-valid.json");
+    for (const slot of ["morning_snack", "snack", "evening_snack"]) {
+      const result = await pushOne(
+        upsert("mealPlanEntry", `2026-09-01:${slot}`, {
+          ...base,
+          plannedOn: "2026-09-01",
+          slot,
+        }),
+      );
+      expect([slot, result.status]).toEqual([slot, "applied"]);
+    }
+
+    const rows = await handle.db
+      .select()
+      .from(mealPlanEntries)
+      .where(eq(mealPlanEntries.userId, USER));
+    expect(rows.map((row) => row.slot).sort()).toEqual(["evening_snack", "morning_snack", "snack"]);
+  });
+
+  test("a line eaten after midnight is an evening snack, and stores as one", async () => {
+    const base = fixture("food-log-entry-v1-edge.json");
+    const id = base["id"] as string;
+    const payload = {
+      ...base,
+      consumedOn: "2026-09-01",
+      // The hour that used to have no moment of its own: one in the morning is the far end of
+      // the only window that crosses midnight.
+      consumedAt: "01:00",
+      slot: "evening_snack",
+    };
+    await expectRoundTrip("foodLogEntry", id, payload);
+
+    const rows = await handle.db
+      .select()
+      .from(foodLogEntries)
+      .where(eq(foodLogEntries.userId, USER));
+    expect(rows[0]?.slot).toBe("evening_snack");
+    expect(rows[0]?.consumedAt).toBe("01:00");
+  });
+
+  test("a moment the contract has never heard of is still refused at the envelope", async () => {
+    const result = await pushOne(
+      upsert("mealPlanEntry", "2026-09-01:brunch", {
+        ...fixture("meal-plan-entry-v1-valid.json"),
+        plannedOn: "2026-09-01",
+        slot: "brunch",
+      }),
+    );
+    expect(result.status).toBe("rejected");
+    expect(result.status === "rejected" && result.error.code).toBe("sync.invalid_payload");
+  });
+});

@@ -518,10 +518,13 @@ internal class FoodAddViewModel(
     // region when and where (PRD_FOOD 10.3, FR-FOOD-007)
 
     /**
-     * The moment, chosen rather than derived.
+     * The moment, overruled by hand rather than derived from the hour (FR-FOOD-007).
      *
-     * A time nobody has touched follows it: PRD_FOOD 10.3 puts a retroactive line in the middle
-     * of its moment, so moving yesterday's line from breakfast to dinner moves `08:00` to
+     * The panel this comes from is the only way to reach it, and it closes on the choice: the
+     * override is one tap on the moment wanted, not a field to fill before saving.
+     *
+     * A time nobody has touched follows it: PRD_FOOD 10.3 puts a retroactive line at an hour
+     * inside its moment, so moving yesterday's line from breakfast to dinner moves `08:00` to
      * `20:00`. A time that *was* typed stays exactly where it was put.
      */
     fun onSlotSelected(slot: MealSlot) {
@@ -541,6 +544,15 @@ internal class FoodAddViewModel(
                 )
             }
         }
+        onDismissSlotPicker()
+    }
+
+    fun onShowSlotPicker() {
+        transient.update { it.copy(isSlotPickerVisible = true) }
+    }
+
+    fun onDismissSlotPicker() {
+        transient.update { it.copy(isSlotPickerVisible = false) }
     }
 
     fun onShowTimePicker() {
@@ -686,6 +698,7 @@ internal class FoodAddViewModel(
         justSaved = flags.justSaved,
         justDeleted = flags.justDeleted,
         isTimePickerVisible = flags.isTimePickerVisible,
+        isSlotPickerVisible = flags.isSlotPickerVisible,
         isLoading = flags.isLoading,
         scan = flags.scan,
         scanAttempted = flags.scanAttempted,
@@ -753,6 +766,7 @@ internal class FoodAddViewModel(
         val justSaved: Boolean = false,
         val justDeleted: Boolean = false,
         val isTimePickerVisible: Boolean = false,
+        val isSlotPickerVisible: Boolean = false,
         val isLoading: Boolean = false,
         /** FR-FOOD-003: where the scan path is. Never saved; see [FoodScanState]. */
         val scan: FoodScanState = FoodScanState.Idle,

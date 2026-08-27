@@ -8,6 +8,7 @@ import {
   mealSlotForLocalTime,
   mealSlotsWithoutDefaultTime,
   mealSlotsWithoutWindow,
+  windowCrossesMidnight,
 } from "./meal-slot-clock";
 
 /**
@@ -37,20 +38,60 @@ describe("every moment can be placed on the clock", () => {
   });
 });
 
-describe("the windows partition nothing they should not", () => {
-  test("no two named windows overlap", () => {
-    const sorted = [...MEAL_SLOT_WINDOWS].sort((a, b) => a.fromMinutes - b.fromMinutes);
-    for (let index = 1; index < sorted.length; index += 1) {
-      expect(sorted[index]!.fromMinutes).toBeGreaterThanOrEqual(sorted[index - 1]!.untilMinutes);
+describe("the windows tile the day rather than dotting it", () => {
+  test("each window begins exactly where the one before it ended", () => {
+    for (let index = 1; index < MEAL_SLOT_WINDOWS.length; index += 1) {
+      expect(MEAL_SLOT_WINDOWS[index]!.fromMinutes).toBe(
+        MEAL_SLOT_WINDOWS[index - 1]!.untilMinutes,
+      );
     }
   });
 
-  test("each window is non-empty and inside one day", () => {
+  test("exactly one window crosses midnight, and it closes the ring", () => {
+    const wrapping = MEAL_SLOT_WINDOWS.filter(windowCrossesMidnight);
+    expect(wrapping.map((window) => window.slot)).toEqual(["evening_snack"]);
+    // The last window ends where the first begins, which is what makes the day a loop
+    // with no seam rather than six intervals with gaps between them.
+    expect(MEAL_SLOT_WINDOWS.at(-1)!.untilMinutes).toBe(MEAL_SLOT_WINDOWS[0]!.fromMinutes);
+  });
+
+  test("each window is non-empty and its bounds are minutes of one day", () => {
     for (const window of MEAL_SLOT_WINDOWS) {
       expect(window.fromMinutes).toBeGreaterThanOrEqual(0);
-      expect(window.untilMinutes).toBeGreaterThan(window.fromMinutes);
+      expect(window.fromMinutes).toBeLessThan(24 * 60);
+      expect(window.untilMinutes).toBeGreaterThan(0);
       expect(window.untilMinutes).toBeLessThanOrEqual(24 * 60);
+      // Only the wrapping one may end before it starts; the other five may not.
+      if (!windowCrossesMidnight(window)) {
+        expect(window.untilMinutes).toBeGreaterThan(window.fromMinutes);
+      }
     }
+  });
+
+  /**
+   * The 1 440-minute walk, on the server's own copy of the rule.
+   *
+   * The counts are the property, not the totality: two windows that overlap by a minute and two
+   * that leave a minute out both still answer at every hour anybody would think to test, and
+   * both show up here as a count that is one out.
+   */
+  test("every one of the 1440 minutes falls in exactly one moment", () => {
+    const counts = new Map<string, number>();
+    for (let minutes = 0; minutes < 24 * 60; minutes += 1) {
+      const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+      const slot = mealSlotForLocalTime(time) as string;
+      counts.set(slot, (counts.get(slot) ?? 0) + 1);
+    }
+
+    expect(Object.fromEntries(counts)).toEqual({
+      breakfast: 5 * 60,
+      morning_snack: 2 * 60,
+      lunch: 150,
+      snack: 4 * 60,
+      dinner: 210,
+      evening_snack: 7 * 60,
+    });
+    expect([...counts.values()].reduce((total, count) => total + count, 0)).toBe(24 * 60);
   });
 });
 
@@ -66,18 +107,26 @@ describe("deducing the moment from the time", () => {
   });
 
   test("PRD_FOOD 22, in its own words: an apple at ten is a snack, a dessert at two is lunch", () => {
-    expect(mealSlotForLocalTime("10:00")).toBe("snack");
+    // Still a snack, and now the one that follows breakfast rather than the catch-all.
+    expect(mealSlotForLocalTime("10:00")).toBe("morning_snack");
     expect(mealSlotForLocalTime("14:00")).toBe("lunch");
   });
 
   test("a window is closed at its start and open at its end", () => {
     expect(mealSlotForLocalTime("05:00")).toBe("breakfast");
     expect(mealSlotForLocalTime("09:59")).toBe("breakfast");
-    expect(mealSlotForLocalTime("11:29")).toBe("snack");
-    expect(mealSlotForLocalTime("11:30")).toBe("lunch");
-    expect(mealSlotForLocalTime("18:00")).toBe("dinner");
-    expect(mealSlotForLocalTime("22:00")).toBe("snack");
-    expect(mealSlotForLocalTime("03:00")).toBe("snack");
+    expect(mealSlotForLocalTime("11:59")).toBe("morning_snack");
+    expect(mealSlotForLocalTime("12:00")).toBe("lunch");
+    expect(mealSlotForLocalTime("14:30")).toBe("snack");
+    expect(mealSlotForLocalTime("18:30")).toBe("dinner");
+    expect(mealSlotForLocalTime("22:00")).toBe("evening_snack");
+  });
+
+  test("the small hours belong to the window that crossed midnight to reach them", () => {
+    expect(mealSlotForLocalTime("00:00")).toBe("evening_snack");
+    expect(mealSlotForLocalTime("03:00")).toBe("evening_snack");
+    expect(mealSlotForLocalTime("04:59")).toBe("evening_snack");
+    expect(mealSlotForLocalTime("05:00")).toBe("breakfast");
   });
 
   test("refuses a string that is not a time rather than placing it", () => {

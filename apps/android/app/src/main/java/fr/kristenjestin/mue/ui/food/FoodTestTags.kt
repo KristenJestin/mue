@@ -40,7 +40,7 @@ internal object FoodTestTags {
     /** PRD_FOOD 22 and 12: what a day still to come says about itself. */
     const val FUTURE_DAY: String = "food:futureDay"
 
-    /** One of the four moments, always present whether it holds anything or not. */
+    /** One of the six moments, always present whether it holds anything or not. */
     fun slot(slot: MealSlot): String = "food:slot:${slot.id}"
 
     /** A moment's own total, which PRD_FOOD 10.1 only shows once it holds a line. */
@@ -122,7 +122,17 @@ internal object FoodTestTags {
     const val QUANTITY_FIELD: String = "food:quantityField"
     const val UNIT_PICKER: String = "food:unitPicker"
     const val SERVINGS_STEPPER: String = "food:servingsStepper"
+    /**
+     * The moment, which is **derived and not asked for** (FR-FOOD-007).
+     *
+     * [SLOT_FIELD] is the one quiet line the sheet draws for it: what the hour decided, and the
+     * way to overrule it. [SLOT_PICKER] is the list of moments inside the panel that line opens,
+     * which is where the choosing now happens — it used to be a grid of tiles on the form itself,
+     * asking for a fact the hour beside it had already given.
+     */
+    const val SLOT_FIELD: String = "food:slotField"
     const val SLOT_PICKER: String = "food:slotPicker"
+    const val SLOT_SHEET: String = "food:slotSheet"
     const val TIME_FIELD: String = "food:timeField"
 
     /** PRD_FOOD 10.3: what the sheet says when the hour and the moment disagree. */

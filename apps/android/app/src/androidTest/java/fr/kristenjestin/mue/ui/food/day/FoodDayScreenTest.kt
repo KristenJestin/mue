@@ -60,10 +60,10 @@ class FoodDayScreenTest {
     private var dismissed: MealPlanKey? = null
     private var stepped: Int = 0
 
-    // region the four moments (PRD_FOOD 10.1 and 17)
+    // region the six moments (PRD_FOOD 10.1 and 17)
 
     @Test
-    fun theFourMomentsAreAlwaysThere() {
+    fun theSixMomentsAreAlwaysThere() {
         setDay(FoodDayUiState.of(TODAY, TODAY))
 
         MealSlot.ORDERED.forEach { slot ->
@@ -252,7 +252,7 @@ class FoodDayScreenTest {
     /**
      * What a day ahead actually shows (PRD_FOOD 12 and 22).
      *
-     * It says once what it is, and each of its four moments stops offering to log. The add row
+     * It says once what it is, and each of its six moments stops offering to log. The add row
      * keeps its place — PRD_FOOD 10.1 wants it "toujours présent" — and stops being a control,
      * which is the difference between refusing before the tap and refusing after `Save entry`.
      */
@@ -502,7 +502,7 @@ class FoodDayScreenTest {
         compose.waitForIdle()
     }
 
-    /** How many of the four moments are currently drawing a total of their own. */
+    /** How many of the six moments are currently drawing a total of their own. */
     private fun momentsShowingATotal(): List<MealSlot> = MealSlot.ORDERED.filter { slot ->
         compose.onAllNodesWithTag(FoodTestTags.slotTotal(slot), useUnmergedTree = true)
             .fetchSemanticsNodes()

@@ -16,7 +16,7 @@ import java.time.LocalDate
 import java.util.Locale
 
 /**
- * What the `Day` screen draws (PRD_FOOD 10.1): a date, and four moments under it.
+ * What the `Day` screen draws (PRD_FOOD 10.1): a date, and six moments under it.
  *
  * Every figure in here is already computed and already rendered. The totals come from
  * [DailyNutritionSummary], the grouping from [MealSlotRules], the strings from [FoodLabels] —
@@ -40,7 +40,7 @@ data class FoodDayUiState(
     val dateLabel: String,
     /** The same day spelled in full, for a screen reader (PRD_FOOD 18). */
     val dateDescription: String,
-    /** PRD_FOOD 10.1: the four moments, in order, filled or not. */
+    /** PRD_FOOD 10.1: the six moments, in order, filled or not. */
     val slots: List<FoodDaySlotUiState>,
     /**
      * The day's strict sum (PRD_FOOD 13.1), unknown as soon as one line's metric is.
@@ -176,7 +176,7 @@ data class FoodDayUiState(
 }
 
 /**
- * One of PRD_FOOD 10.1's four moments: its proposal, its lines, its own total, its add button.
+ * One of PRD_FOOD 10.1's six moments: its proposal, its lines, its own total, its add button.
  *
  * [totalLabel] is null exactly while the moment holds no line. PRD_FOOD 10.1 shows a moment's
  * total "lorsqu'il contient au moins une ligne" and PRD_FOOD 10.4 forbids inventing one, so an
@@ -210,6 +210,20 @@ data class FoodDaySlotUiState(
      * `Save entry` would say no.
      */
     val canAdd: Boolean,
+    /**
+     * Whether the moment draws as a single quiet line instead of a whole block.
+     *
+     * True of an **empty snack** and of nothing else. PRD_FOOD 10.1 keeps every moment on screen
+     * whether it holds anything or not — that is what makes adding to breakfast always the same
+     * gesture in the same place — so a snack nobody has eaten in is never removed. It is folded:
+     * its heading and its add row become one row carrying both.
+     *
+     * The three meals are never folded, empty or not. A day with nothing in it is a day where
+     * breakfast, lunch and dinner are the three things worth offering, and the snacks are the
+     * three that have nothing to say yet. A proposal counts as something to say, which is why
+     * [plan] is part of the test and not just [entries].
+     */
+    val isCollapsed: Boolean,
 ) {
 
     val isEmpty: Boolean get() = entries.isEmpty()
@@ -251,6 +265,7 @@ data class FoodDaySlotUiState(
                     else -> FoodDayMessages.ADD_MORE
                 },
                 canAdd = canLog,
+                isCollapsed = !slot.isMeal && rows.isEmpty() && plan == null,
             )
         }
     }

@@ -266,11 +266,18 @@ class FoodAddScreenTest {
 
     // region the moment and the hour (PRD_FOOD 10.3)
 
+    /**
+     * The override: the six moments, in the panel, and one tap choosing one.
+     *
+     * The panel is where the choosing happens now. On the form itself there is nothing to choose —
+     * see `theFormShowsTheMomentTheHourChoseAndAsksForNothing`, which is the other half of this
+     * pair and asserts that the picker is not there at all until it is asked for.
+     */
     @Test
-    fun theFourMomentsAreOfferedAndTappingOneChoosesIt() {
-        show(previewCookedState())
+    fun theSixMomentsAreOfferedInThePanelAndTappingOneChoosesIt() {
+        show(previewCookedState().copy(isSlotPickerVisible = true))
 
-        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertIsDisplayed()
         MealSlot.ORDERED.forEach { slot ->
             assertDrawn(FoodTestTags.SLOT_PICKER, slot.label)
         }
@@ -302,34 +309,69 @@ class FoodAddScreenTest {
 
     /*
      * "« which moment » on comprend pas, je peux sélectionner breakfast, mais avoir un time à 18h,
-     * je comprends pas ?"
+     * je comprends pas ?" — and then, once the hours were printed on the tiles: "je définis mon
+     * heure de bouffer, le système a déjà en mémoire les plages… ça affiche bien lunch dans
+     * l'interface mais pas à la création".
      *
-     * The pairing is not forbidden — PRD_FOOD 10.3 says the windows "ne créent aucune contrainte"
-     * and a late breakfast is real — so what these two check is that the relation is *visible*:
-     * the hours are on the moments themselves, and a disagreement is stated in words.
+     * The moment is no longer asked for. The hour decides it, the form shows what it decided, and
+     * the six moments live in a panel that is closed until somebody wants to overrule the clock —
+     * which stays allowed, because PRD_FOOD 10.3 says the windows "ne créent aucune contrainte"
+     * and a lunch eaten at three is a real meal.
      */
 
+    /** FR-FOOD-007: the moment is a value on the form, not a control to fill in. */
     @Test
-    fun everyMomentDrawsTheHoursItCovers() {
+    fun theFormShowsTheMomentTheHourChoseAndAsksForNothing() {
+        show(momentState(MealSlot.LUNCH, LocalTime.of(13, 0)))
+
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD)
+            .performScrollTo()
+            .assertIsDisplayed()
+        assertDrawn(FoodTestTags.SLOT_FIELD, "Lunch · 12:00 – 14:30")
+
+        // No grid of moments anywhere on the form: the picker only exists inside the panel.
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertDoesNotExist()
+    }
+
+    /** PRD_FOOD 18: the row is a target and says what it is, not just which moment it names. */
+    @Test
+    fun theMomentRowIsAReachableControlThatSaysWhatItDoes() {
+        show(momentState(MealSlot.LUNCH, LocalTime.of(13, 0)))
+
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD).performScrollTo()
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD)
+            .assertContentDescriptionContains(MealSlot.LUNCH.label, substring = true)
+        assertTallEnough(FoodAddMessages.changeSlotDescription(MealSlot.LUNCH.label))
+    }
+
+    /** The override is one panel away, and every moment in it carries its own window. */
+    @Test
+    fun theOverrideOffersEveryMomentWithTheHoursItCovers() {
         show(momentState(MealSlot.DINNER, LocalTime.of(20, 0)))
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertDoesNotExist()
+
+        showState(momentState(MealSlot.DINNER, LocalTime.of(20, 0)).copy(isSlotPickerVisible = true))
 
         assertDrawn(FoodTestTags.SLOT_PICKER, "05:00 – 10:00")
-        assertDrawn(FoodTestTags.SLOT_PICKER, "11:30 – 14:30")
-        assertDrawn(FoodTestTags.SLOT_PICKER, "18:00 – 22:00")
-        assertDrawn(FoodTestTags.SLOT_PICKER, FoodAddMessages.ANY_OTHER_TIME)
+        assertDrawn(FoodTestTags.SLOT_PICKER, "10:00 – 12:00")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "12:00 – 14:30")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "14:30 – 18:30")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "18:30 – 22:00")
+        // The one that crosses midnight, drawn as the one interval it is.
+        assertDrawn(FoodTestTags.SLOT_PICKER, "22:00 – 05:00")
     }
 
     @Test
     fun aMomentAndAnHourThatDisagreeSaySoOnScreen() {
-        show(momentState(MealSlot.BREAKFAST, LocalTime.of(18, 0)))
+        show(momentState(MealSlot.BREAKFAST, LocalTime.of(20, 0)))
 
-        // The sheet scrolls, and the note lives under the time field near its foot.
+        // The sheet scrolls, and the note lives under the moment row near its foot.
         compose.onNodeWithTag(FoodTestTags.SLOT_TIME_NOTE)
             .performScrollTo()
             .assertIsDisplayed()
             .assert(
                 hasText(
-                    FoodAddMessages.timeOutsideSlot("18:00", MealSlot.DINNER, MealSlot.BREAKFAST),
+                    FoodAddMessages.timeOutsideSlot("20:00", MealSlot.DINNER, MealSlot.BREAKFAST),
                 ),
             )
     }

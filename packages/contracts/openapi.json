@@ -1307,7 +1307,7 @@
         "examples": [
           "2026-09-01:dinner"
         ],
-        "pattern": "^\\d{4}-\\d{2}-\\d{2}:(?:breakfast|lunch|snack|dinner)$",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}:(?:breakfast|morning_snack|lunch|snack|dinner|evening_snack)$",
         "type": "string"
       },
       "MealPlanEntryPayloadV1": {
@@ -1438,7 +1438,9 @@
         "enum": [
           "breakfast",
           "dinner",
+          "evening_snack",
           "lunch",
+          "morning_snack",
           "snack"
         ],
         "type": "string"

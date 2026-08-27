@@ -34,8 +34,27 @@ import { localDateSchema } from "./primitives";
 
 export const MEAL_PLAN_ENTRY_PAYLOAD_VERSION_1 = 1;
 
-/** `MealSlot`, sorted so a reader can find one; the enum's order carries no meaning. */
-export const MEAL_SLOTS = ["breakfast", "lunch", "snack", "dinner"] as const;
+/**
+ * `MealSlot`, in the order of the day, which is `MealSlot.ORDERED`'s own.
+ *
+ * Six moments and not four: each of the three meals is followed by its own snack, so that no hour
+ * of the clock is left without a moment and a bite at eleven at night is not filed as a dinner.
+ * The ids are the strings Android persists in `food_log_entry.slot` and `meal_plan_entry.slot`
+ * and are what an identifier is spelled with, so nothing here may ever be renamed.
+ *
+ * An **older client** that receives `morning_snack` or `evening_snack` runs it through
+ * `MealSlot.fromId`, which falls back to `SNACK`. That is a silent demotion rather than a crash:
+ * the line arrives whole — its hour, its quantity, its nutrients, its own heading everywhere but
+ * the one label — and it is the reason a new moment does not need a payload schema version.
+ */
+export const MEAL_SLOTS = [
+  "breakfast",
+  "morning_snack",
+  "lunch",
+  "snack",
+  "dinner",
+  "evening_snack",
+] as const;
 
 /** `MealPlanKey.SEPARATOR`. In `aggregateIdSchema`'s alphabet, which `/` is not. */
 export const MEAL_PLAN_ID_SEPARATOR = ":";

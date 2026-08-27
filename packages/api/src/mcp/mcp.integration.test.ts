@@ -1492,7 +1492,8 @@ describe("the whole section 14 catalogue", () => {
   // --- the food journal, and the moment of the day ---------------------------------------------
 
   test("create_food_log deduces the moment from the time, and never at random", async () => {
-    // PRD_FOOD 22, in its own words: "une pomme à dix heures tombe en collation".
+    // PRD_FOOD 22, in its own words: "une pomme à dix heures tombe en collation" — and with six
+    // moments the collation it falls in is the one that follows breakfast, not the catch-all.
     const morning = (await callOk(client, "mue.create_food_log", {
       consumedOn: "2026-06-10",
       consumedAt: "10:00",
@@ -1500,7 +1501,7 @@ describe("the whole section 14 catalogue", () => {
       energyKcal: 72,
     })) as { entry: { id: string; slot: string; estimation: string }; slotWasDeduced: boolean };
 
-    expect(morning.entry.slot).toBe("snack");
+    expect(morning.entry.slot).toBe("morning_snack");
     expect(morning.slotWasDeduced).toBe(true);
 
     const evening = (await callOk(client, "mue.create_food_log", {
@@ -1520,7 +1521,7 @@ describe("the whole section 14 catalogue", () => {
         ),
       );
     const row = rows[0]!;
-    expect(row.slot).toBe("snack");
+    expect(row.slot).toBe("morning_snack");
     expect(row.consumedAt).toBe("10:00");
     expect(row.energyMilliKcal).toBe(72_000);
     // Nothing else was said, so nothing else was written.

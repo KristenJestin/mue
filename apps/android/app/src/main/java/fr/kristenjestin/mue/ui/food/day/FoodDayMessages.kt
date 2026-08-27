@@ -29,7 +29,8 @@ object FoodDayMessages {
     // region the moments (PRD_FOOD 10.1 and 17)
 
     /**
-     * PRD_FOOD 17: "aucune ligne aujourd'hui → quatre moments vides et leur bouton d'ajout".
+     * PRD_FOOD 17: "aucune ligne aujourd'hui → quatre moments vides et leur bouton d'ajout", now
+     * six of them, three of which are folded to a row while they stay empty.
      *
      * The empty state of a moment *is* its add button, and it is an invitation rather than a
      * report: nothing here says a moment is missing something, because a breakfast that did not

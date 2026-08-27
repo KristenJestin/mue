@@ -50,8 +50,6 @@ import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
-import fr.kristenjestin.mue.ui.components.MueChoiceCard
-import fr.kristenjestin.mue.ui.components.MueChoiceRow
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePickerField
@@ -69,6 +67,7 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.food.FoodIcons
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.day.announcedAs
 import fr.kristenjestin.mue.ui.food.scan.BarcodeScannerPreview
 import fr.kristenjestin.mue.ui.food.scan.FoodCameraPermission
 import fr.kristenjestin.mue.ui.food.scan.rememberFoodCameraPermission
@@ -77,8 +76,8 @@ import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** Two moments a row, so a moment's name has room to wrap rather than to be cut. */
-private const val SLOTS_PER_ROW = 2
+/** The moment glyph on the quiet line that names it; decoration beside its own word. */
+private val SlotFieldIconSize: Dp = 14.dp
 
 private val CloseIconSize: Dp = 18.dp
 
@@ -195,6 +194,8 @@ internal fun FoodAddRoute(
             onQuickProteinChange = viewModel::onQuickProteinChange,
             onServingsChange = viewModel::onServingsChange,
             onSlotSelected = viewModel::onSlotSelected,
+            onOpenSlotPicker = viewModel::onShowSlotPicker,
+            onDismissSlotPicker = viewModel::onDismissSlotPicker,
             onOpenTimePicker = viewModel::onShowTimePicker,
             onDismissTimePicker = viewModel::onDismissTimePicker,
             onTimePicked = viewModel::onTimePicked,
@@ -259,7 +260,10 @@ internal class FoodAddActions(
     val onQuickEnergyChange: (String) -> Unit = {},
     val onQuickProteinChange: (String) -> Unit = {},
     val onServingsChange: (String) -> Unit = {},
+    /** FR-FOOD-007: the override, taken from the panel and never from the form itself. */
     val onSlotSelected: (MealSlot) -> Unit = {},
+    val onOpenSlotPicker: () -> Unit = {},
+    val onDismissSlotPicker: () -> Unit = {},
     val onOpenTimePicker: () -> Unit = {},
     val onDismissTimePicker: () -> Unit = {},
     val onTimePicked: (LocalTime) -> Unit = {},
@@ -349,6 +353,13 @@ internal fun FoodAddScreen(
             }
         }
     }
+
+    FoodAddSlotSheet(
+        visible = state.isSlotPickerVisible,
+        slots = state.slots,
+        onDismiss = actions.onDismissSlotPicker,
+        onSelect = actions.onSlotSelected,
+    )
 
     FoodAddTimeSheet(
         visible = state.isTimePickerVisible,
@@ -1179,47 +1190,25 @@ private fun Figures(state: FoodAddUiState) {
 
 // region when and where (PRD_FOOD 10.3)
 
-/** The moment and the hour, preselected by FR-FOOD-007 and changed in one gesture. */
+/**
+ * The hour, and under it the moment the hour decided (PRD_FOOD 10.3, FR-FOOD-007).
+ *
+ * **The moment is not asked for.** It used to be a grid of tiles beside the clock, which is the
+ * same fact entered twice — the owner's report is exactly that: *"je définis mon heure de bouffer,
+ * le système a déjà en mémoire les plages"*. With six moments the grid would have grown to three
+ * rows of tiles for a value the field above them already determines.
+ *
+ * So the hour is the only thing entered here, and the moment is one quiet line under it saying
+ * what that hour means: `Lunch · 12:00 – 14:30`. Tapping it opens the override, because PRD_FOOD
+ * 10.3 forbids the windows from constraining anything and the case that needs the override is
+ * ordinary rather than exotic — *"y a un monde où je vais manger à 11h30 ou 15h mon repas de
+ * midi"*. Once someone has overruled the clock, [FoodAddUiState.slotTimeNote] appears underneath
+ * and says so; while the two agree there is nothing to explain and nothing is said.
+ */
 @Composable
 private fun MomentSection(state: FoodAddUiState, actions: FoodAddActions) {
     FoodSectionCard(title = FoodAddMessages.SLOT_SECTION) {
         Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-            Column(
-                modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.SLOT_PICKER),
-                verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-            ) {
-                state.slots.chunked(SLOTS_PER_ROW).forEach { row ->
-                    MueChoiceRow {
-                        row.forEach { option ->
-                            MueChoiceCard(
-                                label = option.label,
-                                selected = option.selected,
-                                onClick = { actions.onSlotSelected(option.slot) },
-                                /*
-                                 * PRD_FOOD 10.3's window, on the thing being chosen.
-                                 *
-                                 * `MueChoiceCard` never caps a description, so at the largest font
-                                 * size `05:00 – 10:00` wraps and the tile grows rather than the
-                                 * hours being cut — half a window is a wrong window.
-                                 */
-                                description = option.hoursLabel,
-                                icon = {
-                                    MueIcon(
-                                        iconName = option.iconName,
-                                        tint = if (option.selected) {
-                                            MueTheme.colors.onAccentSoft
-                                        } else {
-                                            MueTheme.colors.textTertiary
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            }
-
             MuePickerField(
                 label = FoodAddMessages.TIME_LABEL,
                 value = state.timeLabel,
@@ -1230,13 +1219,59 @@ private fun MomentSection(state: FoodAddUiState, actions: FoodAddActions) {
             )
 
             /*
-             * PRD_FOOD 10.3: the two controls no longer sit side by side saying nothing to each
-             * other. When the hour and the moment disagree the screen says so, in the accent
-             * rather than the error colour — nothing is wrong, a late breakfast is a real meal,
-             * and the sentence ends by confirming the choice rather than asking for it back.
+             * The derived moment, and the way out of it.
              *
-             * Uncapped: this is the only place the pairing is explained, and half an explanation
-             * is worse than none.
+             * Deliberately **not** a `MuePickerField`: a field reads as something to fill in, and
+             * this is a consequence rather than an input. It is a quiet row, at the touch target
+             * PRD_FOOD 18 requires, whose whole surface opens the panel — discreet enough not to
+             * compete with the hour above it, and present enough to be found without being hunted
+             * for.
+             */
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = MueMinTouchTarget)
+                    .clip(MueTheme.shapes.field)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = FoodAddMessages.SLOT_SHEET_TITLE,
+                        onClick = actions.onOpenSlotPicker,
+                    )
+                    .padding(horizontal = MueTheme.spacing.sm, vertical = MueTheme.spacing.sm)
+                    .testTag(FoodTestTags.SLOT_FIELD)
+                    // The words alone are `Lunch · 12:00 – 14:30`, which does not say it is a
+                    // control, nor what it is the moment *of*.
+                    .announcedAs(state.slotFieldDescription),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MueIcon(
+                    iconName = FoodIcons.forSlot(state.slot),
+                    tint = MueTheme.colors.textTertiary,
+                    size = SlotFieldIconSize,
+                )
+                MueText(
+                    text = state.slotFieldValue,
+                    style = MueTheme.typography.micro,
+                    color = MueTheme.colors.textTertiary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = MueTheme.spacing.sm),
+                )
+                MueText(
+                    text = FoodAddMessages.CHANGE_SLOT,
+                    style = MueTheme.typography.micro,
+                    color = MueTheme.colors.accent,
+                    maxLines = 1,
+                )
+            }
+
+            /*
+             * PRD_FOOD 10.3: what to say once somebody has overruled the clock.
+             *
+             * In the accent rather than the error colour — nothing is wrong, a late breakfast is a
+             * real meal, and the sentence ends by confirming the choice rather than asking for it
+             * back. Uncapped: this is the only place the pairing is explained, and half an
+             * explanation is worse than none.
              */
             state.slotTimeNote?.let { note ->
                 MueText(

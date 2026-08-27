@@ -132,8 +132,9 @@ class FoodAddViewModelTest {
             add.viewModel.start(null, null, null)
 
             add.viewModel.onTimePicked(LocalTime.of(10, 0))
-            // PRD_FOOD 22: "une pomme à dix heures est proposée en collation".
-            assertEquals(MealSlot.SNACK, state(add).slot)
+            // PRD_FOOD 22: "une pomme à dix heures est proposée en collation" — and with six
+            // moments the collation in question has a name of its own.
+            assertEquals(MealSlot.MORNING_SNACK, state(add).slot)
 
             add.viewModel.onSlotSelected(MealSlot.LUNCH)
             add.viewModel.onTimePicked(LocalTime.of(21, 0))
@@ -152,6 +153,47 @@ class FoodAddViewModelTest {
         add.viewModel.onTimePicked(LocalTime.of(21, 15))
         add.viewModel.onSlotSelected(MealSlot.SNACK)
         assertEquals(LocalTime.of(21, 15), state(add).time)
+    }
+
+    /**
+     * The override, end to end: closed by default, opened on request, closed by the choice.
+     *
+     * *"par défaut c'est caché et auto"* is the first assertion, and the last one is what stops
+     * the override from becoming a form field again — the panel does not stay open waiting for a
+     * confirmation, so changing the moment is one tap on the moment wanted and nothing else.
+     */
+    @Test
+    fun `the moment picker is closed until it is asked for, and closes on the choice`() =
+        addTest { add ->
+            add.viewModel.start(null, null, null)
+            assertFalse(state(add).isSlotPickerVisible)
+
+            add.viewModel.onShowSlotPicker()
+            assertTrue(state(add).isSlotPickerVisible)
+
+            add.viewModel.onSlotSelected(MealSlot.BREAKFAST)
+            assertFalse(state(add).isSlotPickerVisible)
+            assertEquals(MealSlot.BREAKFAST, state(add).slot)
+        }
+
+    /**
+     * The case the override exists for: *"y a un monde où je vais manger à 11h30 ou 15h mon repas
+     * de midi"*.
+     *
+     * The clock puts three in the afternoon in the snack, the person says lunch, and both survive
+     * — the hour is not moved to fit the moment, and the moment is not moved back by the clock.
+     */
+    @Test
+    fun `a midday meal eaten at three stays a lunch at three`() = addTest { add ->
+        add.viewModel.start(TODAY, null, null)
+
+        add.viewModel.onTimePicked(LocalTime.of(15, 0))
+        assertEquals(MealSlot.SNACK, state(add).slot)
+
+        add.viewModel.onSlotSelected(MealSlot.LUNCH)
+        assertEquals(MealSlot.LUNCH, state(add).slot)
+        assertEquals(LocalTime.of(15, 0), state(add).time)
+        assertNotNull(state(add).slotTimeNote)
     }
 
     // endregion

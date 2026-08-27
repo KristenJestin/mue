@@ -11,7 +11,13 @@ import {
 } from "./activity";
 import { foodPayloadV1Schema } from "./food";
 import { foodLogEntryPayloadV1Schema } from "./food-log";
-import { servingsThousandthsSchema } from "./meal-plan";
+import {
+  MEAL_SLOTS,
+  mealPlanAggregateId,
+  mealPlanAggregateIdSchema,
+  mealSlotSchema,
+  servingsThousandthsSchema,
+} from "./meal-plan";
 import { mutationEnvelopeSchema } from "./mutation";
 import { aggregateIdSchema } from "./primitives";
 import { recipePayloadV1Schema } from "./recipe";
@@ -413,6 +419,97 @@ describe("a recipe", () => {
         isFavourite: false,
         ingredients: [],
       }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * The two moments the six-moment split adds, pushed through the whole path with real values.
+ *
+ * `ContractDrift` compares shapes, and a new enum member is invisible to it: `slot` is a string
+ * before and after, `aggregateId` is a string before and after, and every schema still parses.
+ * What changes is which *values* are admitted, and there are two independent places that decide
+ * it — `mealSlotSchema`, and the identifier pattern of `mealPlanAggregateIdSchema`, which spells
+ * the moments out a second time. A moment accepted by one and refused by the other is a push
+ * marked `failed` with `sync.invalid_payload` at the envelope, before any handler sees it: the
+ * exact failure the `/` separator caused, for the exact same reason.
+ *
+ * So this walks a real `morning_snack` and a real `evening_snack` from the envelope down to the
+ * payload, on both aggregates that carry a moment.
+ */
+describe("the six moments on the wire", () => {
+  test("every moment Android can persist is a moment the contract admits", () => {
+    expect([...MEAL_SLOTS]).toEqual([
+      "breakfast",
+      "morning_snack",
+      "lunch",
+      "snack",
+      "dinner",
+      "evening_snack",
+    ]);
+    for (const slot of MEAL_SLOTS) {
+      expect(mealSlotSchema.parse(slot)).toBe(slot);
+    }
+  });
+
+  test("a proposal on a new moment reaches its payload under its own identifier", () => {
+    for (const slot of MEAL_SLOTS) {
+      const id = mealPlanAggregateId("2026-09-01", slot);
+      expect(mealPlanAggregateIdSchema.parse(id)).toBe(id);
+
+      const parsed = mutationEnvelopeSchema.parse(
+        mealPlanUpsert({
+          aggregateId: id,
+          payload: {
+            plannedOn: "2026-09-01",
+            slot,
+            recipeId: "b5e8f271-0c3a-4d69-8e12-9f4a7b0c5d38",
+            plannedServingsThousandths: 1_500,
+          },
+        }),
+      );
+      expect(parsed.aggregateId).toBe(id);
+      // Narrowed on both discriminants, so `payload` is the meal-plan branch and the moment is
+      // read off the parsed value rather than off an index into a union.
+      const stored =
+        parsed.op === "upsert" && parsed.aggregateType === "mealPlanEntry"
+          ? parsed.payload.slot
+          : undefined;
+      expect(stored).toBe(slot);
+    }
+  });
+
+  test("a journal line carries a new moment, and its proposal link still has to agree", () => {
+    const eveningLine = {
+      id: "9f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+      consumedOn: "2026-09-01",
+      consumedAt: "23:30",
+      slot: "evening_snack",
+      kind: "quick",
+      title: "Carre de chocolat",
+      estimation: "approximate",
+      weighedCooked: false,
+    };
+    expect(foodLogEntryPayloadV1Schema.parse(eveningLine).slot).toBe("evening_snack");
+
+    // `snack` is a suffix of `evening_snack` as a word, but not after the colon, so the
+    // refinement still tells the two moments apart rather than matching on the tail.
+    expect(
+      foodLogEntryPayloadV1Schema.safeParse({ ...eveningLine, fromPlan: "2026-09-01:snack" })
+        .success,
+    ).toBe(false);
+    expect(
+      foodLogEntryPayloadV1Schema.parse({ ...eveningLine, fromPlan: "2026-09-01:evening_snack" })
+        .fromPlan,
+    ).toBe("2026-09-01:evening_snack");
+  });
+
+  test("a moment nobody has heard of is still refused, on both the id and the payload", () => {
+    expect(mealSlotSchema.safeParse("brunch").success).toBe(false);
+    expect(mealPlanAggregateIdSchema.safeParse("2026-09-01:brunch").success).toBe(false);
+    expect(
+      mutationEnvelopeSchema.safeParse(mealPlanUpsert({ aggregateId: "2026-09-01:brunch" }))
+        .success,
     ).toBe(false);
   });
 });

@@ -56,7 +56,7 @@ sealed interface FoodRoute {
         val label: String
     }
 
-    /** PRD_FOOD 10.1: opens on today, four moments, no header band and no daily summary. */
+    /** PRD_FOOD 10.1: opens on today, six moments, no header band and no daily summary. */
     data object Day : View {
         override val key: String = "day"
         override val label: String = "Day"
@@ -178,18 +178,29 @@ sealed interface FoodRoute {
         /**
          * The views the switcher actually offers: [VIEWS] less the ones still drawing nothing.
          *
-         * `Trends` is the one it leaves out, and leaving it out is the honest answer rather than
-         * an omission. Its route still draws `FoodPlaceholder`, which is a deliberately wordless
-         * empty `Box` — the right thing to show while a whole tab is unbuilt, and the wrong thing
-         * to reach through a control that offers it as the peer of three finished screens. A
-         * reader who taps `Trends` and lands on a blank canvas has found a defect, not an honest
-         * confession; the confession would need copy PRD_FOOD 17 does not write, over a screen
-         * that does not exist yet.
+         * **`Trends` is the one it leaves out, and it stays out.** The prototype draws four
+         * segments and PRD_FOOD 19 makes the prototype authoritative on layout, so this is the one
+         * place the track deliberately departs from it — because the fourth segment would lead
+         * somewhere. `FoodRoute.Trends` still answers `FoodPlaceholder`, a deliberately wordless
+         * empty `Box`: the right thing to show while a whole view is unbuilt, and the wrong thing
+         * to offer as the peer of three finished screens. A reader who taps it and lands on a blank
+         * canvas has found a defect, not an honest confession.
          *
-         * It costs nothing to put back: PRD_FOOD 10.5's screen lands, and its route stops
-         * answering `FoodPlaceholder`, and this list becomes [VIEWS]. The order is [VIEWS]' own,
-         * so the switcher and the animation that follows a view change never disagree about which
-         * way sideways is.
+         * The alternative considered was giving it an honest empty state and putting it in the
+         * track. It was rejected because PRD_FOOD 10.5 names five things `Trends` shows — seven
+         * bars, the mean of the filled days, the count of filled days, the line count, a tappable
+         * history — and an empty state is a statement about a screen that exists. Writing "no data
+         * yet" over a view that has none of those five would be a *fourth* screen invented to
+         * excuse the absence of the third, with copy PRD_FOOD 17 does not write.
+         *
+         * A three-segment track is also the better control at the largest font size: three shares
+         * of 360 dp is a third more room per name than four, which is what decides whether the
+         * words survive at all — see `FoodViewSwitcher`.
+         *
+         * It costs nothing to put back: PRD_FOOD 10.5's screen lands, its route stops answering
+         * `FoodPlaceholder`, and this list becomes [VIEWS]. The order is [VIEWS]' own, so the
+         * switcher and the animation that follows a view change never disagree about which way
+         * sideways is.
          */
         val SWITCHABLE: List<View> = VIEWS.filterNot { it == Trends }
 

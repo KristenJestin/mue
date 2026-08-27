@@ -132,13 +132,13 @@ internal data class FoodAddRecipeUiState(
     val description: String,
 )
 
-/** One of PRD_FOOD 10.1's four moments as an option (FR-FOOD-007). */
+/** One of PRD_FOOD 10.1's six moments, as an option **inside the override panel** (FR-FOOD-007). */
 @Immutable
 internal data class FoodAddSlotUiState(
     val slot: MealSlot,
     val label: String,
     /**
-     * PRD_FOOD 10.3's window under the name — `05:00 – 10:00` — or `Any other time` for the snack.
+     * PRD_FOOD 10.3's window under the name — `05:00 – 10:00`. Every moment has one.
      *
      * The moment and the hour were two controls with nothing between them, and a moment is not a
      * word anyone can define by looking at it. Its hours are the definition, they are already in
@@ -349,6 +349,16 @@ internal data class FoodAddUiState(
     val dateDescription: String,
     val slot: MealSlot,
     val slots: List<FoodAddSlotUiState>,
+    /**
+     * FR-FOOD-007, already rendered: `Lunch · 12:00 – 14:30`.
+     *
+     * The moment is **derived and displayed, never asked for**. It is one quiet line under the
+     * hour rather than a grid of tiles beside it, because the hour has already said which moment
+     * this is and a control that asks again is a second entry of one fact.
+     */
+    val slotFieldValue: String,
+    /** PRD_FOOD 18: the same line for the ear, including what tapping it does. */
+    val slotFieldDescription: String,
     val time: LocalTime,
     val timeLabel: String,
     /**
@@ -385,6 +395,8 @@ internal data class FoodAddUiState(
     val justSaved: Boolean,
     val justDeleted: Boolean,
     val isTimePickerVisible: Boolean,
+    /** Whether the override panel is open. Closed is the ordinary state, and the default. */
+    val isSlotPickerVisible: Boolean,
     val isLoading: Boolean,
 ) {
 
@@ -437,6 +449,7 @@ internal data class FoodAddUiState(
             justSaved: Boolean = false,
             justDeleted: Boolean = false,
             isTimePickerVisible: Boolean = false,
+            isSlotPickerVisible: Boolean = false,
             isLoading: Boolean = false,
             /** FR-FOOD-003. [FoodScanState.Idle] on every stage that is not the scan. */
             scan: FoodScanState = FoodScanState.Idle,
@@ -466,6 +479,11 @@ internal data class FoodAddUiState(
                 dateLabel = FoodDayFormat.dayLabel(date, today, locale),
                 dateDescription = FoodDayFormat.dayDescription(date, today, locale),
                 slot = draft.slot,
+                slotFieldValue = FoodAddMessages.slotWithHours(
+                    label = draft.slot.label,
+                    hours = hoursOf(draft.slot, locale),
+                ),
+                slotFieldDescription = FoodAddMessages.changeSlotDescription(draft.slot.label),
                 slots = MealSlot.ORDERED.map { slot ->
                     FoodAddSlotUiState(
                         slot = slot,
@@ -514,6 +532,7 @@ internal data class FoodAddUiState(
                 justSaved = justSaved,
                 justDeleted = justDeleted,
                 isTimePickerVisible = isTimePickerVisible,
+                isSlotPickerVisible = isSlotPickerVisible,
                 isLoading = isLoading,
             )
         }
@@ -522,12 +541,15 @@ internal data class FoodAddUiState(
          * PRD_FOOD 10.3's window for a moment, rendered.
          *
          * The bounds are [MealSlotRules.windowOf]'s and the clock face is [FoodDayFormat.time]'s,
-         * so the hours under `Breakfast` and the hours the clock actually preselects it for are
-         * the same two numbers. A null window is [MealSlot.SNACK]'s, which PRD_FOOD 10.3 defines
-         * as the complement of the other three — not an interval, and never drawn as one.
+         * so the hours printed beside `Breakfast` and the hours the clock actually preselects it
+         * for are the same two numbers.
+         *
+         * Every moment has a window now, including the snacks. There is no longer a moment that is
+         * "tout le reste" and therefore nothing left to print `Any other time` over — the six
+         * windows partition the clock, so a reader sees an interval wherever a moment is named.
          */
         private fun hoursOf(slot: MealSlot, locale: Locale): String {
-            val window = MealSlotRules.windowOf(slot) ?: return FoodAddMessages.ANY_OTHER_TIME
+            val window = MealSlotRules.windowOf(slot)
             return FoodAddMessages.slotHours(
                 from = FoodDayFormat.time(window.from, locale),
                 untilExclusive = FoodDayFormat.time(window.untilExclusive, locale),

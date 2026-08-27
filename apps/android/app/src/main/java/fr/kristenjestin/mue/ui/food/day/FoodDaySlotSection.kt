@@ -109,7 +109,7 @@ private val DashWidth: Dp = 1.dp
 private const val PlanOutlineAlpha = 0.4f
 
 /**
- * One of the four moments (PRD_FOOD 10.1), in the order that section fixes: the unconfirmed
+ * One of the six moments (PRD_FOOD 10.1), in the order that section fixes: the unconfirmed
  * proposal if there is one, then the lines sorted by time, then an add button that is always
  * there.
  *
@@ -117,6 +117,22 @@ private const val PlanOutlineAlpha = 0.4f
  * PRD_FOOD 10.4 forbids inventing one, so an empty breakfast shows **no total at all** — not a
  * zero, and not a dash either. Three facts, three readings: nothing logged, a known zero, and
  * an unknown.
+ *
+ * ## What six moments cost the day, and how it is paid
+ *
+ * Every moment keeps its place whether it holds anything or not, which is the property that makes
+ * adding to breakfast always the same gesture in the same spot. Drawn as six full blocks, an
+ * ordinary day would spend two thirds of its height on headings over empty add rows.
+ *
+ * So an **empty snack folds**, and only a snack, and only while it is empty
+ * ([FoodDaySlotUiState.isCollapsed]). Its heading and its add row become the one row that
+ * carried both facts anyway — the name of the moment, and the offer to write in it — at the touch
+ * size PRD_FOOD 18 requires and in the quietest ink the screen has. The three meals keep their
+ * whole block, empty or not.
+ *
+ * The moment is not removed and does not move: the folded row sits exactly where the block would
+ * have been, between the same two meals, and unfolds into a full block the instant a line or a
+ * proposal lands in it.
  */
 @Composable
 internal fun FoodDaySlotSection(
@@ -128,6 +144,26 @@ internal fun FoodDaySlotSection(
     onDismissPlan: (MealPlanKey) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (state.isCollapsed) {
+        /*
+         * Two handles for one row, because the row is two things at once.
+         *
+         * `slot` is the moment, which PRD_FOOD 10.1 keeps on screen always; `addToSlot` is the add
+         * control, which the same section keeps "toujours présent". Folded, one row carries both,
+         * and collapsing the two handles into one would quietly delete the second — a moment with
+         * no reachable way in, which every assertion about `addToSlot` would then stop covering
+         * for exactly the three moments that had just been added.
+         */
+        Column(modifier = modifier.fillMaxWidth().testTag(FoodTestTags.slot(state.slot))) {
+            FoldedSlotRow(
+                state = state,
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.addToSlot(state.slot)),
+            )
+        }
+        return
+    }
+
     Column(
         modifier = modifier.fillMaxWidth().testTag(FoodTestTags.slot(state.slot)),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
@@ -148,6 +184,58 @@ internal fun FoodDaySlotSection(
         }
 
         AddToSlotRow(state = state, onClick = onAdd)
+    }
+}
+
+/**
+ * An empty snack, in one row: its glyph, its name, and a `+`.
+ *
+ * The simplest expression a moment can have while still being a moment. It carries exactly what
+ * the heading and the add row carried between them — which moment this is, and that a line may be
+ * written into it — with nothing drawn twice. No card, no outline, no tile behind the `+`: the
+ * whole point is that it should read as a place where nothing has happened, not as a control
+ * competing with the meals around it.
+ *
+ * It is still a target, at [MueMinTouchTarget] (PRD_FOOD 18), and it still announces the moment
+ * it would add to — the words `Morning snack` alone say neither that it is a button nor what it
+ * does. On a day that has not happened it keeps its place and stops being a control, exactly as
+ * [AddToSlotRow] does, and for the same reason: a row that vanishes is a moment that moved.
+ */
+@Composable
+private fun FoldedSlotRow(
+    state: FoodDaySlotUiState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MueTheme.colors
+    val type = MueTheme.typography
+
+    Row(
+        modifier = modifier
+            .heightIn(min = MueMinTouchTarget)
+            .clip(MueTheme.shapes.field)
+            .clickable(enabled = state.canAdd, role = Role.Button, onClick = onClick)
+            .padding(horizontal = MueTheme.spacing.sm)
+            .announcedAs("${state.addLabel}, ${state.label}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MueIcon(iconName = state.iconName, tint = colors.textQuiet, size = 14.dp)
+
+        MueText(
+            // Locale-independent, as in the heading: a Turkish device would otherwise turn the
+            // `i` of `Evening snack` into a dotted capital.
+            text = state.label.uppercase(Locale.ROOT),
+            style = SlotLabelStyle(type),
+            color = colors.textQuiet,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = MueTheme.spacing.sm),
+        )
+
+        // The `+` is the promise of a line, so it goes where no line may be written.
+        if (state.canAdd) {
+            MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textQuiet, size = 14.dp)
+        }
     }
 }
 
