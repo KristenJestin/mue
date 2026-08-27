@@ -33,7 +33,9 @@ import com.google.mlkit.vision.common.InputImage
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 
 /**
  * The live camera, and the only place in Mue that opens one for reading rather than for a photo.
@@ -95,44 +97,75 @@ internal fun BarcodeScannerPreview(
         if (live) {
             LaunchedEffect(lifecycleOwner) {
                 val provider = ProcessCameraProvider.awaitInstance(context)
-                val preview = Preview.Builder().build().apply {
-                    setSurfaceProvider { request -> surfaceRequest = request }
-                }
-                val scanner = MlKitBarcodeDecoder.newScanner()
-                val lastReported = AtomicReference<String?>(null)
-                // One thread, its own: analysis must never run on the frame loop, and a shared
-                // pool would let a slow decode of one frame delay the app's other work.
-                val executor = Executors.newSingleThreadExecutor()
-                val analysis = ImageAnalysis.Builder()
-                    // The shopper's hand moves. Queuing frames would decode where the phone was
-                    // half a second ago and lag further behind with every one of them.
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
 
-                analysis.setAnalyzer(
-                    executor,
-                    BarcodeFrameAnalyzer(scanner) { code ->
-                        if (lastReported.getAndSet(code) != code) currentOnBarcode(code)
-                    },
-                )
+                /*
+                 * **The main thread, explicitly, and this line is load-bearing.**
+                 *
+                 * `setSurfaceProvider`, `bindToLifecycle` and `unbind` all call
+                 * `Threads.checkMainThread` and throw outright off it. A `LaunchedEffect` starts
+                 * on the composition's dispatcher, so it *looks* as though everything below is
+                 * already on the main thread — and on a warm start it is, because CameraX is
+                 * initialised and `awaitInstance` returns without suspending at all.
+                 *
+                 * On a **cold** one it suspends, and the future that resumes it is completed on
+                 * CameraX's own init executor and delivered by a `DirectExecutor` — so the
+                 * continuation resumes on `CameraX-camerax_init`, and the first call below throws
+                 * `IllegalStateException: Not in application's main thread`.
+                 *
+                 * That is the shape of bug that survives a whole test suite: the scanner works
+                 * every time it is opened *except* the very first time in a fresh process, which
+                 * is the only time an owner meets it. It was caught by running the preview as the
+                 * **only** class of a fresh instrumentation on an emulator, and the stack came out
+                 * of `Preview.setSurfaceProvider` → `Threads.checkMainThread`.
+                 *
+                 * **No test in the suite reproduces it**, and that is stated rather than glossed.
+                 * `ProcessCameraProvider.shutdown()` re-initialises CameraX but does not restore
+                 * the resume path a genuinely first use takes, so `BarcodeScannerPreviewTest`
+                 * passes with this `withContext` deleted — which was checked, not assumed. The
+                 * line stays because the exception was seen, not because something is watching it.
+                 */
+                withContext(Dispatchers.Main.immediate) {
+                    val preview = Preview.Builder().build().apply {
+                        setSurfaceProvider { request -> surfaceRequest = request }
+                    }
+                    val scanner = MlKitBarcodeDecoder.newScanner()
+                    val lastReported = AtomicReference<String?>(null)
+                    // One thread, its own: analysis must never run on the frame loop, and a shared
+                    // pool would let a slow decode of one frame delay the app's other work.
+                    val executor = Executors.newSingleThreadExecutor()
+                    val analysis = ImageAnalysis.Builder()
+                        // The shopper's hand moves. Queuing frames would decode where the phone
+                        // was half a second ago and lag further behind with every one of them.
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
 
-                try {
-                    provider.bindToLifecycle(
-                        lifecycleOwner,
-                        // The back camera, and no fallback to the front one: a selfie camera
-                        // cannot be pointed at a jar the person is holding, and offering it
-                        // would be a scanner that looks alive and reads nothing.
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        analysis,
+                    analysis.setAnalyzer(
+                        executor,
+                        BarcodeFrameAnalyzer(scanner) { code ->
+                            if (lastReported.getAndSet(code) != code) currentOnBarcode(code)
+                        },
                     )
-                    awaitCancellation()
-                } finally {
-                    analysis.clearAnalyzer()
-                    provider.unbind(preview, analysis)
-                    scanner.close()
-                    executor.shutdown()
-                    surfaceRequest = null
+
+                    try {
+                        provider.bindToLifecycle(
+                            lifecycleOwner,
+                            // The back camera, and no fallback to the front one: a selfie camera
+                            // cannot be pointed at a jar the person is holding, and offering it
+                            // would be a scanner that looks alive and reads nothing.
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            analysis,
+                        )
+                        awaitCancellation()
+                    } finally {
+                        // Still on the main thread, and none of these suspends — so cancellation
+                        // cannot cut the release short.
+                        analysis.clearAnalyzer()
+                        provider.unbind(preview, analysis)
+                        scanner.close()
+                        executor.shutdown()
+                        surfaceRequest = null
+                    }
                 }
             }
 
