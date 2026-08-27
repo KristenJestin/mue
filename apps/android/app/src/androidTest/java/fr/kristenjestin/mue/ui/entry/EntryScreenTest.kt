@@ -444,14 +444,23 @@ class EntryScreenTest {
         assertTrue(state.datePickerVisible)
     }
 
+    /**
+     * The header chip appears only when the selected date is not today.
+     *
+     * `Today` is this screen's default, and the chip that used to announce it was permanent — a
+     * chip repeating a default is a chip nobody reads. It now exists exactly when it carries
+     * information, which is also what freed its slot for the scale.
+     */
     @Test
-    fun the_header_chip_says_Today_only_on_today() {
+    fun the_date_chip_exists_only_away_from_today() {
         start()
-        composeRule.onNodeWithText("Today").assertIsDisplayed()
+        composeRule.onNodeWithText("Today").assertDoesNotExist()
+        composeRule.onNodeWithText(EntryFormat.headerDate(TODAY)).assertDoesNotExist()
 
         state = state.copy(date = TODAY.minusDays(3))
         composeRule.waitForIdle()
 
+        composeRule.onNodeWithText(EntryFormat.headerDate(TODAY.minusDays(3))).assertIsDisplayed()
         composeRule.onNodeWithText("Today").assertDoesNotExist()
     }
 

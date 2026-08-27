@@ -266,6 +266,18 @@ class EntryViewModel(
      */
     fun onSave() {
         val snapshot = _uiState.value
+        /*
+         * BR-SCALE-001, ici et pas seulement sur le bouton.
+         *
+         * L'écran éteint `Save measurement` pendant le flux instable, mais un bouton grisé est une
+         * protection d'interface : elle vaut pour un doigt, pas pour une action d'accessibilité,
+         * pas pour un appui arrivé sur la même image que la première trame, et pas pour le
+         * prochain appelant de cette méthode. La valeur affichée pendant le flux ne traverse
+         * jamais le chemin d'écriture — elle n'est donc pas dans `snapshot.weight` — mais celle
+         * qui s'y trouve encore est celle d'avant la mesure, et l'enregistrer serait enregistrer
+         * un poids que personne n'a demandé pendant qu'on est debout sur la balance.
+         */
+        if (snapshot.scale.streaming) return
         if (!MueValidation.isMeasurementDateAllowed(snapshot.date, today())) return
         val measurement = measurementToSave(snapshot)
         closeSession()
@@ -461,9 +473,12 @@ class EntryViewModel(
     /**
      * Les quatre états qui précèdent une valeur : l'indication discrète, et rien d'autre.
      *
-     * [liveHundredths] n'est jamais posé sur la règle. PRD_SCALE 11 veut que le flux soit
-     * *visible* et n'engage rien ; le poser sur la règle en ferait la valeur qu'un appui sur
-     * `Save measurement` enregistrerait, ce que BR-SCALE-001 interdit.
+     * [liveHundredths] **ne passe pas par [postWeight]**, et c'est tout ce qui sépare un flux
+     * visible d'un flux enregistrable. PRD_SCALE 11 veut que la valeur suive le flux, marquée
+     * comme non définitive : l'écran recopie donc ce champ dans la position vivante de la règle,
+     * là où arrivent aussi les pixels d'un glissement, tandis que [EntryUiState.weight] — la seule
+     * valeur que `Save measurement` sache lire — n'est pas touchée. BR-SCALE-001 tient par
+     * l'absence d'un chemin, pas par la présence d'un garde.
      */
     private fun searching(indicator: EntryScaleIndicator, liveHundredths: Int? = null) =
         updateScale {
@@ -602,21 +617,32 @@ class EntryViewModel(
      * n'est **pas** fait ici compte autant : la valeur affichée ne bouge pas, et rien n'empêche
      * une nouvelle mesure stable de la remplacer — elle arrivera dans une autre session, donc
      * avec un autre identifiant, et rétablira la provenance (FR-SCALE-022).
+     *
+     * **Le flux instable se reprend de la même façon**, et c'est la seule chose que cette règle
+     * demandait de plus. Un glissement pendant la mesure est un geste comme un autre
+     * (FR-SCALE-022, BR-SCALE-013) : il coupe le flux, referme la session et rend l'écran à son
+     * propriétaire, au lieu de laisser la balance ramener le poids sous le doigt à la trame
+     * suivante. L'éveil de l'écran part avec, puisque le téléphone qu'on venait de poser est de
+     * nouveau en main (FR-SCALE-020).
      */
     private fun takeValueBack() {
         val scale = _uiState.value.scale
-        if (!scale.fromScale && !scale.outOfRange) return
-        if (scale.fromScale) {
+        val streaming = scale.streaming
+        if (!scale.fromScale && !scale.outOfRange && !streaming) return
+        if (scale.fromScale || streaming) {
             closeSession()
             acceptedReading = null
         }
         _uiState.update {
             it.copy(
                 scale = it.scale.copy(
+                    indicator = null,
+                    liveHundredths = null,
                     fromScale = false,
                     barefootHint = false,
                     outOfRange = false,
                     announcement = null,
+                    keepScreenOn = if (streaming) false else it.scale.keepScreenOn,
                 ),
             )
         }

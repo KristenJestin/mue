@@ -4,15 +4,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.scale.ScaleMessages
 import fr.kristenjestin.mue.ui.scale.ScaleTestTags
@@ -68,14 +73,17 @@ class EntryScaleScreenTest {
         MueTheme(reduceMotion = reduceMotion) {
             EntryContent(
                 state = state,
-                onWeightChange = { state = state.copy(weight = it) },
+                // Un doigt sur la règle est une reprise en main : le `ViewModel` coupe le flux,
+                // retire la provenance et clôt la session (FR-SCALE-022, BR-SCALE-013). Le harnais
+                // en fait autant, sans quoi l'écran testé ne serait pas celui de l'application.
+                onWeightChange = { state = state.copy(weight = it, scale = state.scale.taken()) },
                 onStep = { steps ->
                     state = state.copy(
                         weight = Weight.ofHundredthsClamped(
                             RulerPhysics.step(state.weight.hundredthsKg, steps)
                         ),
                         weightRevision = state.weightRevision + 1,
-                        scale = state.scale.copy(fromScale = false, outOfRange = false),
+                        scale = state.scale.taken(),
                     )
                 },
                 onOpenManualEntry = { state = state.copy(manualEntry = true) },
@@ -106,9 +114,25 @@ class EntryScaleScreenTest {
             weightRevision = state.weightRevision + 1,
             scale = state.scale.copy(
                 paired = true,
+                indicator = null,
+                liveHundredths = null,
+                status = null,
                 fromScale = true,
                 arrivalRevision = state.weightRevision + 1,
                 announcement = EntryScaleAnnouncement.MEASUREMENT_RECEIVED,
+            ),
+        )
+        composeRule.waitForIdle()
+    }
+
+    /** Le flux instable, tel que le `ViewModel` le publie : hors de la valeur enregistrable. */
+    private fun stream(hundredths: Int) {
+        state = state.copy(
+            scale = state.scale.copy(
+                paired = true,
+                indicator = EntryScaleIndicator.MEASURING,
+                liveHundredths = hundredths,
+                status = null,
             ),
         )
         composeRule.waitForIdle()
@@ -125,11 +149,14 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.OUT_OF_RANGE_NOTICE).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.BAREFOOT_HINT).assertDoesNotExist()
+        composeRule.onNodeWithTag(ScaleTestTags.SAVE_BLOCKED_REASON).assertDoesNotExist()
 
-        // Et l'écran du PRD socle est intact.
+        // Et l'écran du PRD socle est intact, jusqu'à ses trois contrôles, qui restent actifs.
         composeRule.onNodeWithText("Where are you today?").assertIsDisplayed()
         composeRule.onNodeWithText("SLIDE TO ADJUST").assertIsDisplayed()
-        composeRule.onNodeWithText("Save measurement").assertIsDisplayed()
+        composeRule.onNodeWithText("Save measurement").assertIsEnabled()
+        composeRule.onNodeWithContentDescription(INCREASE).assertIsEnabled()
+        composeRule.onNodeWithContentDescription(DECREASE).assertIsEnabled()
     }
 
     /**
@@ -252,10 +279,10 @@ class EntryScaleScreenTest {
     /**
      * PRD_SCALE 20 : « l'état de la balance est exposé aux services d'accessibilité ».
      *
-     * Exposé veut dire nommé : sans libellé de zone, une ligne qui dit `Connecting` ne dit pas de
-     * quoi elle parle. Et il ne s'agit que d'un libellé — cette ligne-ci porte le flux instable,
-     * qui change plusieurs fois par seconde, donc elle n'est **pas** une région active. C'est la
-     * seconde moitié de la même phrase du PRD : jamais à chaque trame reçue.
+     * Exposé veut dire nommé : sans libellé de zone, une pastille qui dit `Measuring` ne dit pas de
+     * quoi elle parle. Et il ne s'agit que d'un libellé — la pastille change à chaque état de la
+     * session, donc elle n'est **pas** une région active. C'est la seconde moitié de la même phrase
+     * du PRD : jamais à chaque trame reçue.
      */
     @Test
     fun the_scale_state_is_a_named_region_that_does_not_speak_on_every_frame() {
@@ -268,18 +295,18 @@ class EntryScaleScreenTest {
         )
         start()
 
-        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assert(
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assert(
             SemanticsMatcher.expectValue(
                 SemanticsProperties.PaneTitle,
                 ScaleMessages.SCALE_STATUS_LABEL,
             )
         )
-        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assert(
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assert(
             SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion).not()
         )
     }
 
-    /** PRD_SCALE 20 : la ligne qui prend sa place porte le même libellé de zone. */
+    /** PRD_SCALE 20 : l'état actionnable est la même pastille, donc la même zone nommée. */
     @Test
     fun the_actionable_status_carries_the_same_region_label() {
         state = state.copy(
@@ -295,25 +322,115 @@ class EntryScaleScreenTest {
         )
     }
 
-    /** BR-SCALE-001 : le flux instable est visible et n'est jamais posé sur la règle. */
+    /**
+     * PRD_SCALE 11 : la valeur suit le flux, et le flux ne devient jamais la valeur enregistrable.
+     *
+     * Les deux moitiés se vérifient dans le même test parce qu'elles ne valent que l'une par
+     * l'autre : le grand chiffre affiche bien la trame — sans quoi l'écran paraîtrait gelé
+     * pendant qu'on est debout sur la balance —, et `state.weight`, qui est ce que
+     * `Save measurement` enregistre, n'a pas bougé d'un centième.
+     */
     @Test
-    fun an_unstable_stream_never_reaches_the_ruler() {
-        state = state.copy(
-            scale = EntryScaleUiState(
-                paired = true,
-                indicator = EntryScaleIndicator.MEASURING,
-                liveHundredths = 6_600,
-            ),
-        )
-        start()
+    fun the_unstable_stream_moves_the_readout_and_not_the_savable_value() {
+        state = state.copy(scale = EntryScaleUiState(paired = true))
+        start(reduceMotion = true)
 
-        composeRule.onNodeWithText(ScaleMessages.MEASURING).assertIsDisplayed()
+        stream(8_490)
         composeRule
             .onNodeWithContentDescription(
-                EntryFormat.spokenWeight(Weight.ofHundredthsClamped(START_HUNDREDTHS))
+                EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_490))
             )
             .assertIsDisplayed()
+
+        stream(8_575)
+        composeRule
+            .onNodeWithContentDescription(
+                EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_575))
+            )
+            .assertIsDisplayed()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.NOT_FINAL_YET).assertIsDisplayed()
         assertEquals(START_HUNDREDTHS, state.weight.hundredthsKg)
+    }
+
+    /**
+     * PRD_SCALE 19 : une fois le poids reçu, la pastille perd son libellé et ne garde que sa
+     * couleur et son point — mais elle continue de se dire en entier à un lecteur d'écran.
+     */
+    @Test
+    fun the_link_chip_drops_its_label_once_the_weight_has_landed() {
+        state = state.copy(scale = EntryScaleUiState(paired = true))
+        start(reduceMotion = true)
+
+        stream(8_100)
+        composeRule.onNodeWithText(ScaleMessages.MEASURING).assertIsDisplayed()
+
+        receive(8_120)
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertExists()
+        composeRule.onNodeWithText(ScaleMessages.MEASURING).assertDoesNotExist()
+        composeRule
+            .onNodeWithContentDescription(ScaleMessages.LINK_WEIGHT_RECEIVED)
+            .assertExists()
+    }
+
+    /**
+     * BR-SCALE-011 et §7.3 : exactement trois choses s'éteignent pendant le flux, et rien d'autre.
+     *
+     * Les trois sont celles qui se battraient avec la balance pour la même valeur. Verrouiller le
+     * reste ferait de la balance un maître, ce que ces deux règles interdisent — et la seconde
+     * moitié du test est donc aussi importante que la première.
+     */
+    @Test
+    fun only_the_three_controls_that_fight_the_stream_go_quiet() {
+        state = state.copy(scale = EntryScaleUiState(paired = true))
+        start(reduceMotion = true)
+
+        stream(8_575)
+
+        composeRule.onNodeWithContentDescription(INCREASE).assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription(DECREASE).assertIsNotEnabled()
+        composeRule.onNodeWithText("Save measurement").assertIsNotEnabled()
+        composeRule
+            .onNodeWithContentDescription(
+                EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_575))
+            )
+            .assertIsNotEnabled()
+        composeRule.onNodeWithTag(ScaleTestTags.SAVE_BLOCKED_REASON).assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.WAITING_TO_SETTLE).assertIsDisplayed()
+
+        // Et le reste vit. La règle d'abord : c'est par elle qu'on reprend la valeur.
+        composeRule.onNodeWithContentDescription("Weight scale").assertIsEnabled()
+        composeRule.onNodeWithText(EntryFormat.date(TODAY)).performClick()
+        composeRule.waitForIdle()
+        assertTrue(state.datePickerVisible)
+        assertEquals(0, saveCount)
+    }
+
+    /**
+     * FR-SCALE-022 et BR-SCALE-013 : un glissement pendant la mesure reprend la valeur, et l'écran
+     * rend aussitôt les trois contrôles.
+     */
+    @Test
+    fun a_drag_during_the_stream_takes_the_value_back() {
+        state = state.copy(scale = EntryScaleUiState(paired = true))
+        start(reduceMotion = true)
+        stream(8_575)
+
+        composeRule.onNodeWithContentDescription("Weight scale").performTouchInput {
+            swipe(start = center, end = Offset(center.x + 200f, center.y), durationMillis = 120L)
+        }
+        composeRule.waitForIdle()
+
+        assertTrue(
+            "expected the finger's value, got ${state.weight.hundredthsKg}",
+            state.weight.hundredthsKg < 8_575,
+        )
+        composeRule.onNodeWithTag(ScaleTestTags.SAVE_BLOCKED_REASON).assertDoesNotExist()
+        composeRule.onNodeWithText("Save measurement").assertIsEnabled()
+        composeRule.onNodeWithContentDescription(INCREASE).assertIsEnabled()
+        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
     }
 
     // --- FR-SCALE-024 et 18.3 ---------------------------------------------------------
@@ -348,6 +465,13 @@ class EntryScaleScreenTest {
 
     // --- FR-SCALE-025 et PRD_SCALE 18.5, les états actionnables ------------------------
 
+    /**
+     * PRD_SCALE 18.5 : la phrase existe toujours mot pour mot, point médian compris.
+     *
+     * Elle a changé de rôle en montant dans l'en-tête : la pastille *montre* deux mots, parce
+     * qu'un coin d'écran n'est pas une ligne de texte, et *dit* la phrase entière — c'est son nom
+     * accessible, donc ce qu'un lecteur d'écran lit et ce qu'un test peut exiger.
+     */
     @Test
     fun bluetooth_off_is_offered_word_for_word_and_is_actionable() {
         state = state.copy(
@@ -355,7 +479,8 @@ class EntryScaleScreenTest {
         )
         start()
 
-        composeRule.onNodeWithText("Bluetooth is off · Enable").assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.LINK_BLUETOOTH_OFF).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Bluetooth is off · Enable").assertExists()
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
         composeRule.waitForIdle()
 
@@ -373,11 +498,18 @@ class EntryScaleScreenTest {
         )
         start()
 
-        composeRule.onNodeWithText("Scale unavailable · Open settings").assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.LINK_UNAVAILABLE).assertIsDisplayed()
         // PRD_SCALE 20 : ce qui est annoncé rassure, parce que rien n'est bloqué.
         composeRule
             .onNodeWithContentDescription(ScaleMessages.UNAVAILABLE_ANNOUNCEMENT)
             .assertExists()
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.LiveRegion,
+                androidx.compose.ui.semantics.LiveRegionMode.Polite,
+            )
+        )
+        assertTrue("rien ne s'ouvre sans un geste (FR-SCALE-025)", statusActions.isEmpty())
     }
 
     @Test
@@ -387,7 +519,8 @@ class EntryScaleScreenTest {
         )
         start()
 
-        composeRule.onNodeWithText("Scale not found · Try again").assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Scale not found · Try again").assertExists()
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
         composeRule.waitForIdle()
 
@@ -416,3 +549,14 @@ class EntryScaleScreenTest {
         const val DECREASE = "Decrease weight by 0.05 kilograms"
     }
 }
+
+/**
+ * La reprise en main de BR-SCALE-013, telle que `EntryViewModel.takeValueBack` l'écrit.
+ *
+ * Recopiée ici plutôt qu'appelée, parce que ces tests pilotent `EntryContent` sans `ViewModel` :
+ * ce qui est vérifié est ce que l'écran fait de l'état, pas comment l'état a été produit. Ce que
+ * cette fonction doit rendre fidèlement est la seule chose dont l'écran dépend — le flux s'arrête
+ * et la provenance part, ensemble.
+ */
+private fun EntryScaleUiState.taken(): EntryScaleUiState =
+    copy(indicator = null, liveHundredths = null, fromScale = false, outOfRange = false)

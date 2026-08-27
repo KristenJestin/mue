@@ -115,6 +115,8 @@ class EntryScaleTest {
 
         assertEquals(EntryScaleUiState.ABSENT, model.uiState.value.scale)
         assertFalse(model.uiState.value.scale.paired)
+        // La pastille d'en-tête comprise : sans balance, elle n'existe pas (FR-SCALE-020).
+        assertNull(model.uiState.value.scale.linkChip)
         // `start` est appelé quand même : c'est la source qui sait s'il existe une balance, et son
         // contrat garantit qu'un appel sans balance ne scanne rien et ne demande aucune permission.
         assertEquals(1, scale.starts)
@@ -184,20 +186,114 @@ class EntryScaleTest {
         assertTrue(model.uiState.value.isToday)
     }
 
-    /** PRD_SCALE 11 et BR-SCALE-001 : le flux instable est visible et n'engage rien. */
+    /**
+     * PRD_SCALE 11 et BR-SCALE-001 : le flux pilote l'affichage et n'entre jamais dans la valeur
+     * enregistrable.
+     *
+     * Les deux assertions qui portent la règle sont [EntryUiState.weight] et
+     * [EntryUiState.weightRevision]. La seconde n'est pas une redondance : `weightRevision` est le
+     * compteur du **chemin d'écriture** de cet écran, et une trame qui l'aurait fait avancer aurait
+     * traversé ce chemin — donc aurait pu, un jour, s'y arrêter. Ce que la balance obtient ici est
+     * `liveHundredths`, un canal parallèle que seul l'affichage lit.
+     */
     @Test
-    fun `une trame instable ne touche jamais la valeur`() = runTest {
+    fun `une trame instable ne touche jamais la valeur enregistrable`() = runTest {
         val scale = paired()
         val model = viewModel(scale)
 
         scale.emit(ScaleSessionState.Measuring(7_800))
+        scale.emit(ScaleSessionState.Measuring(8_150))
+        scale.emit(ScaleSessionState.Measuring(8_570))
 
         val state = model.uiState.value
         assertEquals(Weight.DEFAULT, state.weight)
         assertEquals(0, state.weightRevision)
         assertEquals(EntryScaleIndicator.MEASURING, state.scale.indicator)
-        assertEquals(7_800, state.scale.liveHundredths)
+        assertEquals(8_570, state.scale.liveHundredths)
+        assertTrue(state.scale.streaming)
         assertFalse(state.scale.fromScale)
+    }
+
+    /**
+     * BR-SCALE-001, **au niveau du `ViewModel`** et pas seulement sur le bouton.
+     *
+     * L'écran éteint `Save measurement` pendant le flux ; ce test-ci existe parce qu'un bouton
+     * grisé est une protection d'interface, et que cette règle est métier. Un appui qui arrive
+     * quand même — action d'accessibilité, image de retard, appelant futur — ne doit rien écrire.
+     */
+    @Test
+    fun `enregistrer pendant le flux instable est refusé par le ViewModel`() = runTest {
+        val scale = paired()
+        val repository = FakeMeasurementRepository()
+        val model = viewModel(scale, repository = repository)
+        scale.emit(ScaleSessionState.Measuring(8_570))
+
+        model.onSave()
+
+        assertTrue(repository.stored.isEmpty(), "aucune mesure ne s'enregistre pendant le flux")
+        assertFalse(model.uiState.value.justSaved)
+        // La session n'est pas close non plus : rien ne s'est passé, et la balance a le droit de
+        // conclure sur une mesure stable (FR-SCALE-023 ne parle que d'un enregistrement effectif).
+        assertEquals(0, scale.closes)
+
+        // Le poids stable qui suit, lui, s'enregistre normalement.
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(85.75)))
+        model.onSave()
+        assertEquals(8_575, repository.stored.single().weight.hundredthsKg)
+    }
+
+    /**
+     * FR-SCALE-022 et BR-SCALE-013 : un glissement pendant la mesure reprend la main.
+     *
+     * C'est la règle existante appliquée telle quelle à un état où elle ne s'appliquait pas encore,
+     * puisque la reprise en main ne se déclenchait que sur une provenance déjà posée. Trois effets
+     * et pas un de moins : le flux s'arrête, la provenance ne se pose plus, et la session est close
+     * pour que la trame suivante de cette liaison ne ramène pas le poids sous le doigt.
+     */
+    @Test
+    fun `un glissement pendant la mesure reprend la valeur et clôt la session`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        model.onEntryVisible()
+        scale.emit(ScaleSessionState.Measuring(8_570))
+        assertTrue(model.uiState.value.scale.keepScreenOn)
+
+        model.onWeightChanged(Weight.ofHundredthsClamped(7_200))
+
+        val state = model.uiState.value
+        assertEquals(7_200, state.weight.hundredthsKg)
+        assertFalse(state.scale.streaming)
+        assertNull(state.scale.indicator)
+        assertNull(state.scale.liveHundredths)
+        assertFalse(state.scale.fromScale)
+        assertEquals(1, scale.closes)
+        // Le téléphone qu'on venait de poser est de nouveau en main (FR-SCALE-020).
+        assertFalse(state.scale.keepScreenOn)
+        // Et la valeur reprise est enregistrable, comme une saisie manuelle (BR-SCALE-011).
+        assertTrue(state.scale.linkChip != null)
+    }
+
+    /** BR-SCALE-011 : la même reprise, aux boutons et au clavier. */
+    @Test
+    fun `les boutons et le clavier reprennent aussi la main pendant la mesure`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        scale.emit(ScaleSessionState.Measuring(8_570))
+
+        model.onStep(1)
+
+        assertFalse(model.uiState.value.scale.streaming)
+        assertEquals(1, scale.closes)
+
+        scale.emit(ScaleSessionState.Measuring(8_600))
+        assertTrue(model.uiState.value.scale.streaming)
+
+        model.onManualEntryOpened()
+        model.onManualInputChanged("80.0")
+
+        assertFalse(model.uiState.value.scale.streaming)
+        assertEquals(8_000, model.uiState.value.weight.hundredthsKg)
+        assertEquals(2, scale.closes)
     }
 
     // --- BR-SCALE-013, la reprise en main ---------------------------------------------
@@ -703,6 +799,102 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Searching)
         scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
         assertEquals(EntryScaleAnnouncement.UNAVAILABLE, model.uiState.value.scale.announcement)
+    }
+
+    // --- La pastille d'en-tête (PRD_SCALE 11, 19, 20, FR-SCALE-020) --------------------
+
+    /**
+     * Ce que la pastille dit dans chaque état, et ce qu'elle ne dit pas.
+     *
+     * Un seul test pour la table entière, parce que ce qui est vérifié est justement qu'elle est
+     * une table : chaque état de liaison a exactement une ligne, et l'ordre entre elles — ce qui
+     * attend un geste, puis ce qui est arrivé, puis ce qui est en cours — est ce qui garantit
+     * qu'aucun état n'en masque un autre.
+     */
+    @Test
+    fun `la pastille dit l'état de la liaison, un état à la fois`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        fun chip() = assertNotNull(model.uiState.value.scale.linkChip)
+
+        scale.emit(ScaleSessionState.Searching)
+        assertEquals("Searching", chip().label)
+        assertEquals(ScaleMessages.SEARCHING, chip().description)
+        assertTrue(chip().active)
+        assertTrue(chip().pulsing)
+        assertNull(chip().action)
+
+        scale.emit(ScaleSessionState.Connecting)
+        assertEquals("Connecting", chip().label)
+
+        scale.emit(ScaleSessionState.WaitingForStepOn)
+        assertEquals("Ready", chip().label)
+        // La pastille dit la liaison, la légende sous la valeur dit le geste (PRD_SCALE 7.4).
+        assertEquals(ScaleMessages.STEP_ON_THE_SCALE, chip().description)
+
+        scale.emit(ScaleSessionState.Measuring(8_570))
+        assertEquals("Measuring", chip().label)
+
+        scale.emit(ScaleSessionState.NotFound)
+        assertEquals("Try again", chip().label)
+        assertEquals("Scale not found · Try again", chip().description)
+        assertFalse(chip().active)
+        assertFalse(chip().pulsing)
+        assertEquals(EntryScaleStatus.NOT_FOUND, chip().action)
+
+        scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
+        assertEquals("Bluetooth off", chip().label)
+        assertEquals(EntryScaleStatus.BLUETOOTH_OFF, chip().action)
+        // PRD_SCALE 20 : le seul changement que la pastille annonce d'elle-même.
+        assertTrue(chip().announce)
+        assertEquals(ScaleMessages.UNAVAILABLE_ANNOUNCEMENT, chip().description)
+
+        scale.emit(ScaleSessionState.Searching)
+        scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.PERMISSION_MISSING))
+        assertEquals("Unavailable", chip().label)
+        assertEquals(EntryScaleStatus.PERMISSION_MISSING, chip().action)
+    }
+
+    /**
+     * PRD_SCALE 19 : une fois le poids reçu, la pastille perd son libellé et ne garde que sa
+     * couleur et son point.
+     *
+     * Nommer la balance là n'apprendrait rien — on est debout dessus — et le nom par défaut est
+     * celui du modèle, qui ferait déborder la pastille. Ce que le libellé cesse de dire, la
+     * description continue de le dire en entier : un lecteur d'écran n'a ni couleur ni point.
+     */
+    @Test
+    fun `la pastille perd son libellé une fois le poids reçu`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        scale.emit(ScaleSessionState.Measuring(8_570))
+        assertEquals("Measuring", model.uiState.value.scale.linkChip?.label)
+
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(85.75)))
+
+        val chip = assertNotNull(model.uiState.value.scale.linkChip)
+        assertNull(chip.label)
+        assertEquals("Weight received from your scale", chip.description)
+        assertTrue(chip.active)
+        assertFalse(chip.pulsing)
+        assertNull(chip.action)
+        assertFalse(chip.announce, "l'arrivée est annoncée par la marque de provenance, avec sa valeur")
+    }
+
+    /** PRD_SCALE 18.2 : entre deux sessions la pastille est un point, et ce n'est pas une faute. */
+    @Test
+    fun `entre deux sessions la pastille se tait sans disparaître`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+
+        scale.emit(ScaleSessionState.Searching)
+        scale.emit(ScaleSessionState.Idle)
+
+        val chip = assertNotNull(model.uiState.value.scale.linkChip)
+        assertNull(chip.label)
+        assertNull(chip.action)
+        assertFalse(chip.active)
+        assertEquals("No scale in range", chip.description)
     }
 
     @Test

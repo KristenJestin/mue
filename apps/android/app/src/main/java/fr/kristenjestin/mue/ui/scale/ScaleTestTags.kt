@@ -138,8 +138,13 @@ internal object ScaleTestTags {
     // region Entry (PRD_SCALE 11, FR-SCALE-022, FR-SCALE-024, PRD_SCALE 19)
 
     /**
-     * The search / connect / measure indicator. Discreet by construction (PRD_SCALE 19) and
-     * absent entirely when no scale is paired (PRD_SCALE 18.1), which is what a test asserts.
+     * The one discreet caption under the value: `Step on the scale`, then `Not final yet` while
+     * the unstable stream runs (PRD_SCALE 11). One tag for both, because only one is ever on
+     * screen and its text is what tells them apart.
+     *
+     * It says what to *do* and what the number *is*, never where the link stands — that moved to
+     * [ENTRY_STATUS] in the header. Absent entirely when no scale is paired (PRD_SCALE 18.1),
+     * which is what a test asserts.
      */
     const val ENTRY_INDICATOR: String = "scale:entryIndicator"
 
@@ -150,14 +155,29 @@ internal object ScaleTestTags {
     const val SOURCE_MARK: String = "scale:sourceMark"
 
     /**
-     * The one actionable status line of PRD_SCALE 18.5 — `Scale not found · Try again`,
-     * `Bluetooth is off · Enable`, `Scale unavailable · Open settings`. One tag for the three,
-     * because only one is ever on screen and its text is what tells them apart.
+     * The link-state chip in the header, top right — the whole state of the session in one place.
+     *
+     * It carries the four states of a session in progress, the wordless mark of a weight that has
+     * landed, and the three actionable lines of PRD_SCALE 18.5 — `Scale not found · Try again`,
+     * `Bluetooth is off · Enable`, `Scale unavailable · Open settings`, spoken in full and shown
+     * short. One tag for all of them, because only one chip is ever on screen and its label, its
+     * description and its click action are what tell them apart.
+     *
+     * It does not exist at all without a paired scale (FR-SCALE-020, PRD_SCALE 18.1).
      */
     const val ENTRY_STATUS: String = "scale:entryStatus"
 
     /** FR-SCALE-024: a stable weigh-in outside `30.0–250.0 kg`, said once and never posted. */
     const val OUT_OF_RANGE_NOTICE: String = "scale:outOfRangeNotice"
+
+    /**
+     * Why `Save measurement` is quiet while frames arrive (BR-SCALE-001).
+     *
+     * Its own handle because it is the one thing on this screen whose *absence* is the rule: the
+     * three states the scale can be in without a stream running must leave it off, and only the
+     * stream may put it there.
+     */
+    const val SAVE_BLOCKED_REASON: String = "scale:saveBlockedReason"
 
     // endregion
 

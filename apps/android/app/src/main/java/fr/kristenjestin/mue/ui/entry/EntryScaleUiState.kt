@@ -22,9 +22,13 @@ import fr.kristenjestin.mue.ui.scale.ScaleMessages
  *   Gouverne la seule réservation de place de l'écran ; sans balance, aucune ligne n'est réservée.
  * @property indicator L'indication discrète de recherche, de connexion ou de mesure, ou `null`.
  * @property liveHundredths Le flux instable, en centièmes de kilogramme, pendant
- *   [EntryScaleIndicator.MEASURING]. **Jamais posé sur la règle** (BR-SCALE-001) : il est affiché
- *   dans la ligne d'indication, où il ne peut pas devenir la valeur qu'un appui sur
- *   `Save measurement` enregistrerait.
+ *   [EntryScaleIndicator.MEASURING]. **Il pilote l'affichage — la règle et le grand chiffre — et
+ *   ne devient jamais [EntryUiState.weight]** (PRD_SCALE 11, BR-SCALE-001). C'est toute la
+ *   distinction : la valeur enregistrable a un seul chemin d'écriture, `postWeight`, que le flux
+ *   n'emprunte pas ; ce champ est un canal d'affichage parallèle, que `EntryScreen` recopie dans
+ *   [RulerState] sans passer par [EntryUiState.weightRevision]. Un appui sur `Save measurement`
+ *   ne peut donc pas enregistrer une trame instable, et pas seulement parce que le bouton est
+ *   éteint.
  * @property status La ligne actionnable de PRD_SCALE 18.5, ou `null`. Elle ne bloque jamais la
  *   saisie manuelle (BR-SCALE-011).
  * @property fromScale La valeur affichée vient de la balance et personne n'y a touché depuis
@@ -57,6 +61,75 @@ data class EntryScaleUiState(
     val announcement: EntryScaleAnnouncement? = null,
     val keepScreenOn: Boolean = false,
 ) {
+
+    /**
+     * Le flux instable court : la valeur à l'écran n'appartient à personne encore.
+     *
+     * C'est le seul prédicat de cet écran qui éteigne quoi que ce soit, et il n'en éteint que
+     * trois : les contrôles `−` et `+`, la saisie au clavier et `Save measurement`. Chacun des
+     * trois se battrait avec la balance pour la même valeur ; tout le reste — la règle au doigt,
+     * la date, les onglets — reste vivant, parce que BR-SCALE-011 veut que toutes les fonctions de
+     * Mue restent disponibles et que le §7.3 veut que la balance propose là où l'utilisateur
+     * dispose. Verrouiller l'écran ferait de la balance un maître.
+     */
+    val streaming: Boolean get() = indicator == EntryScaleIndicator.MEASURING
+
+    /**
+     * La pastille d'en-tête, ou `null` quand aucune balance n'est enregistrée (FR-SCALE-020).
+     *
+     * Dérivée plutôt que portée : l'état de liaison est déjà entièrement décrit par les quatre
+     * champs qu'elle lit, et un cinquième champ à tenir en cohérence avec eux serait un endroit de
+     * plus où l'écran pourrait mentir. Écrite ici et non dans le composable pour qu'un test JVM
+     * puisse la lire — ce que dit la pastille dans chaque état est une règle, pas un pixel.
+     *
+     * L'ordre des branches est la priorité de PRD_SCALE 11 lue à l'envers : ce qui demande un
+     * geste passe avant ce qui est arrivé, qui passe avant ce qui est en train de se passer.
+     */
+    val linkChip: EntryLinkChip?
+        get() {
+            if (!paired) return null
+            status?.let { actionable ->
+                // PRD_SCALE 20 : l'indisponibilité est le seul changement que cette pastille
+                // annonce d'elle-même ; l'arrivée d'une mesure appartient à la marque de
+                // provenance, qui la dit avec sa valeur et une seule fois.
+                val announced = announcement == EntryScaleAnnouncement.UNAVAILABLE
+                return EntryLinkChip(
+                    label = actionable.chipLabel,
+                    description = if (announced) {
+                        ScaleMessages.UNAVAILABLE_ANNOUNCEMENT
+                    } else {
+                        actionable.message
+                    },
+                    active = false,
+                    pulsing = false,
+                    announce = announced,
+                    action = actionable,
+                )
+            }
+            if (fromScale) {
+                return EntryLinkChip(
+                    label = null,
+                    description = ScaleMessages.LINK_WEIGHT_RECEIVED,
+                    active = true,
+                    pulsing = false,
+                )
+            }
+            indicator?.let {
+                return EntryLinkChip(
+                    label = it.chipLabel,
+                    description = it.message,
+                    active = true,
+                    pulsing = true,
+                )
+            }
+            return EntryLinkChip(
+                label = null,
+                description = ScaleMessages.LINK_IDLE,
+                active = false,
+                pulsing = false,
+            )
+        }
+
     companion object {
         /**
          * Aucune balance enregistrée : l'écran est exactement celui du PRD socle (PRD_SCALE 18.1).
@@ -69,19 +142,57 @@ data class EntryScaleUiState(
 }
 
 /**
+ * Tout ce que la pastille d'en-tête dessine, en une valeur (PRD_SCALE 11, 19, 20).
+ *
+ * Elle est le seul porteur de l'état de liaison depuis que celui-ci a quitté le bas de l'écran :
+ * l'ancienne version le répartissait entre un point de présence dans l'en-tête et une légende sous
+ * la valeur, et aucun des deux ne répondait à la première question qu'on se pose — « est-ce qu'elle
+ * parle à ma balance, là, maintenant ? ».
+ *
+ * **Discrète par construction** (PRD_SCALE 19) : une pastille de la taille de celle qui portait la
+ * date, dans un coin, qui ne concurrence jamais la valeur du poids.
+ *
+ * @property label Deux mots au plus, ou `null` quand la pastille se tait — ce qu'elle fait dès que
+ *   le poids est reçu, où sa couleur et son point disent déjà tout ce qu'il y a à dire.
+ * @property description Ce qu'un lecteur d'écran entend, **toujours complet**, y compris quand
+ *   [label] est `null` : une couleur et un point ne s'énoncent pas (PRD_SCALE 20).
+ * @property active La liaison vit : ambre plutôt que gris. Vrai pendant la session et une fois la
+ *   mesure posée, faux quand rien ne se passe ou que quelque chose attend un geste.
+ * @property pulsing Le point respire, parce que quelque chose est en cours. Une mesure posée ne
+ *   pulse pas : elle est arrivée.
+ * @property announce Le seul cas où la pastille prend la parole d'elle-même (PRD_SCALE 20).
+ * @property action Le geste de FR-SCALE-025, ou `null`. Rien ne s'ouvre sans lui.
+ */
+@Immutable
+data class EntryLinkChip(
+    val label: String?,
+    val description: String,
+    val active: Boolean,
+    val pulsing: Boolean,
+    val announce: Boolean = false,
+    val action: EntryScaleStatus? = null,
+)
+
+/**
  * L'indication discrète de PRD_SCALE 11, réduite à ce que l'écran en montre.
  *
  * Quatre états du domaine et quatre libellés, alors que `Searching` et `Connecting` pourraient se
  * confondre : les distinguer ne coûte rien ici et le mot exact est celui de PRD_SCALE 11.
  *
- * **Discret par construction** (PRD_SCALE 19) : c'est une ligne de texte, jamais une carte, jamais
- * une couleur d'accent, jamais un élément qui pourrait concurrencer la valeur du poids.
+ * **Discret par construction** (PRD_SCALE 19) : une pastille dans un coin et une légende sous la
+ * valeur, jamais une carte, jamais un élément qui pourrait concurrencer la valeur du poids.
+ *
+ * @property message La phrase entière : ce qu'un lecteur d'écran entend, et ce que la légende sous
+ *   la valeur affiche quand elle a quelque chose à dire.
+ * @property chipLabel La même chose en deux mots, pour le coin de l'écran. `Looking for your scale`
+ *   est la bonne phrase sous une valeur et déborde d'une pastille ; les deux états dont la phrase
+ *   tient déjà en un mot réemploient la leur au lieu d'en inventer une seconde.
  */
-enum class EntryScaleIndicator(val message: String) {
-    SEARCHING(ScaleMessages.SEARCHING),
-    CONNECTING(ScaleMessages.CONNECTING),
-    STEP_ON(ScaleMessages.STEP_ON_THE_SCALE),
-    MEASURING(ScaleMessages.MEASURING),
+enum class EntryScaleIndicator(val message: String, val chipLabel: String) {
+    SEARCHING(ScaleMessages.SEARCHING, ScaleMessages.LINK_SEARCHING),
+    CONNECTING(ScaleMessages.CONNECTING, ScaleMessages.CONNECTING),
+    STEP_ON(ScaleMessages.STEP_ON_THE_SCALE, ScaleMessages.LINK_READY),
+    MEASURING(ScaleMessages.MEASURING, ScaleMessages.MEASURING),
 }
 
 /**
@@ -98,19 +209,25 @@ enum class EntryScaleIndicator(val message: String) {
  *
  * Aucune de ces valeurs n'ouvre quoi que ce soit toute seule : chacune décrit un geste que
  * l'utilisateur peut faire, jamais un écran système que Mue ouvrirait de lui-même (FR-SCALE-025).
+ *
+ * @property message La phrase de PRD_SCALE 18.5, mot pour mot, point médian compris. Elle n'a pas
+ *   quitté l'écran en passant dans l'en-tête : elle est ce que la pastille **dit**, donc son nom
+ *   accessible (PRD_SCALE 20), là où [chipLabel] est ce qu'elle **montre**.
+ * @property chipLabel La même chose en deux mots. Ce qui survit à la coupe est chaque fois l'offre
+ *   — `Try again`, `Bluetooth off` — parce que c'est elle qui dit quoi faire du doigt.
  */
-enum class EntryScaleStatus(val message: String) {
+enum class EntryScaleStatus(val message: String, val chipLabel: String) {
     /** Les deux minutes se sont écoulées. Le geste relance une session (FR-SCALE-020). */
-    NOT_FOUND(ScaleMessages.SCALE_NOT_FOUND),
+    NOT_FOUND(ScaleMessages.SCALE_NOT_FOUND, ScaleMessages.LINK_TRY_AGAIN),
 
     /** La radio est éteinte. Le geste ouvre la demande d'activation du système. */
-    BLUETOOTH_OFF(ScaleMessages.BLUETOOTH_IS_OFF),
+    BLUETOOTH_OFF(ScaleMessages.BLUETOOTH_IS_OFF, ScaleMessages.LINK_BLUETOOTH_OFF),
 
     /** Permission absente ou révoquée. Le geste ouvre la fiche de l'application. */
-    PERMISSION_MISSING(ScaleMessages.SCALE_UNAVAILABLE),
+    PERMISSION_MISSING(ScaleMessages.SCALE_UNAVAILABLE, ScaleMessages.LINK_UNAVAILABLE),
 
     /** API ≤ 30 : le scanner de la plateforme exige la localisation système. */
-    SYSTEM_LOCATION_OFF(ScaleMessages.SCALE_UNAVAILABLE),
+    SYSTEM_LOCATION_OFF(ScaleMessages.SCALE_UNAVAILABLE, ScaleMessages.LINK_UNAVAILABLE),
 }
 
 /**

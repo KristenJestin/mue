@@ -65,11 +65,15 @@ object EntryFormat {
     fun date(date: LocalDate, locale: Locale = Locale.getDefault()): String =
         date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(locale))
 
-    /** The header chip: `Today` while the measurement is dated today, the day itself otherwise. */
-    fun headerDate(date: LocalDate, today: LocalDate, locale: Locale = Locale.getDefault()): String =
-        if (date == today) {
-            "Today"
-        } else {
-            date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
-        }
+    /**
+     * The header chip, which is only ever the date itself.
+     *
+     * It used to answer `Today` on today, and the chip was therefore permanent. A chip that
+     * repeats the default state of the screen it sits on is a chip nobody reads, so the screen
+     * now drops it entirely while [EntryUiState.isToday] holds and this function has one case
+     * left. That is also why the scale could take the slot: a received weigh-in selects today
+     * (BR-SCALE-009), so during a live session the date has nothing to say.
+     */
+    fun headerDate(date: LocalDate, locale: Locale = Locale.getDefault()): String =
+        date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale))
 }

@@ -267,6 +267,24 @@ internal object ScaleMessages {
     /** FR-SCALE-022 and PRD_SCALE 19: the provenance mark, beside the value, never on it. */
     const val FROM_YOUR_SCALE: String = "From your scale"
 
+    /**
+     * PRD_SCALE 11: the unstable stream drives the readout, and says so.
+     *
+     * The value is allowed to move on screen — a screen frozen while someone is visibly standing
+     * on a scale watching numbers move reads as broken — and this caption is the second half of
+     * that sentence, "marquée comme non définitive". BR-SCALE-001 is upheld on the save path, not
+     * by hiding the number.
+     */
+    const val NOT_FINAL_YET: String = "Not final yet"
+
+    /**
+     * FR-SCALE-023 and BR-SCALE-001: why `Save measurement` is quiet while frames arrive.
+     *
+     * A control that goes dark without saying why is read as a fault. The sentence is also a
+     * promise: the wait ends on its own, there is nothing to do about it.
+     */
+    const val WAITING_TO_SETTLE: String = "Waiting for the weight to settle"
+
     /*
      * `Save measurement` is deliberately NOT declared here.
      *
@@ -299,6 +317,56 @@ internal object ScaleMessages {
      * revoked permission, shown once per appearance of the screen and opening no dialog.
      */
     const val SCALE_UNAVAILABLE: String = "Scale unavailable · Open settings"
+
+    // endregion
+
+    // region Entry: the header link chip (PRD_SCALE 11, 19, 20, FR-SCALE-020)
+
+    /*
+     * The link state moved into the header, top right, and a corner of a screen is not a line of
+     * text: `Looking for your scale` is the right sentence for a caption under the value and far
+     * too long for a chip beside the wordmark. So each state gets a *label* here — two words at
+     * most — while the sentence it already owns above stays what a screen reader hears
+     * (PRD_SCALE 20). Nothing below duplicates a string: a state whose full wording is already
+     * short enough, `Connecting` and `Measuring`, keeps that one constant for both jobs.
+     */
+
+    /** [SEARCHING] shortened for the chip; the long form is what is spoken. */
+    const val LINK_SEARCHING: String = "Searching"
+
+    /**
+     * The link is up and the sequence has been sent. The chip states the *link* — it is ready —
+     * while [STEP_ON_THE_SCALE] under the value states the gesture, which is PRD_SCALE 7.4's
+     * order of importance: the physical act stays the main one, the connection is a detail.
+     */
+    const val LINK_READY: String = "Ready"
+
+    /** [BLUETOOTH_IS_OFF] shortened for the chip. The chip is still what opens the setting. */
+    const val LINK_BLUETOOTH_OFF: String = "Bluetooth off"
+
+    /** [SCALE_NOT_FOUND] shortened for the chip: what is left is the offer, which is the point. */
+    const val LINK_TRY_AGAIN: String = "Try again"
+
+    /** [SCALE_UNAVAILABLE] shortened for the chip — a missing permission, or system location. */
+    const val LINK_UNAVAILABLE: String = "Unavailable"
+
+    /**
+     * PRD_SCALE 19 and 20: what the chip *says* once it has stopped showing a label.
+     *
+     * The chip goes wordless when the weight lands. Naming the scale there teaches nothing — the
+     * reader is standing on it — and the default name is the model, `HB BODY FAT`, which would
+     * blow a header chip open; identity belongs to `Profile > Scales` (FR-SCALE-012). None of that
+     * applies to a screen reader, which has no colour and no dot to read, so the spoken form stays
+     * whole.
+     */
+    const val LINK_WEIGHT_RECEIVED: String = "Weight received from your scale"
+
+    /**
+     * PRD_SCALE 18.2: between sessions the chip is a dot and nothing else, and this is what it
+     * reads as. A scale asleep or out of range is the normal state of a bathroom scale, so the
+     * words state it flatly — no fault, no apology (PRD_SCALE 7.3).
+     */
+    const val LINK_IDLE: String = "No scale in range"
 
     // endregion
 
