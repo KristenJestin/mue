@@ -72,11 +72,50 @@ class SyncWorker(
  */
 object SyncScheduler {
 
-    private const val PERIODIC_WORK = "mue.sync.periodic"
+    /** The unique name the period is registered under. Public so a test can go and read it. */
+    const val PERIODIC_WORK: String = "mue.sync.periodic"
     private const val ONE_SHOT_WORK = "mue.sync.now"
 
-    /** PRD 9.4 gives no exact hour, so this is the shortest period WorkManager will honour. */
-    private const val PERIOD_HOURS = 6L
+    /**
+     * How long the phone may stay wrong while nobody is looking at it.
+     *
+     * PRD 9.4 asks for "périodiquement par le mécanisme Android approprié, sans promesse d'heure
+     * exacte" and names no figure, so this is an implementation choice and has to be argued.
+     *
+     * It was six hours, and six hours is indefensible now that there is something to compare it
+     * to. A weight written on the Web at nine in the morning could be invisible to the phone until
+     * three in the afternoon; the owner had no way to tell, and pressing `Sync now` to find out is
+     * exactly the question [LiveSyncChannel] exists to stop him having to ask.
+     *
+     * One hour, and not the fifteen-minute floor:
+     *
+     * - **The live channel already owns the case that matters.** While the app is open the phone
+     *   is current within seconds, and opening it synchronises anyway (PRD 9.4's first three
+     *   triggers). What is left for this worker is the phone in a pocket: the outbox of a change
+     *   made offline, waiting for a network, and a bound on how stale Room is when something other
+     *   than a screen reads it. An hour bounds both without pretending to be live.
+     * - **Fifteen minutes would be ninety-six attempts a day**, most of them away from home where
+     *   every one is a TCP connection that will not complete — and a connection that fails slowly
+     *   holds the radio up for the length of the connect timeout. Four times the wakeups to shorten
+     *   a window nobody is watching.
+     * - **An hour is comfortably above the floor**, so Doze and App Standby batch it with whatever
+     *   else the device is already waking for instead of deferring a request that was too eager to
+     *   be honoured. WorkManager makes no promise of the exact minute, and this asks for none.
+     *
+     * ### What it costs
+     *
+     * Twenty-four runs a day rather than four. A run that finds nothing is one TLS handshake, one
+     * `push` with an empty batch and one `pull` that answers an empty page — a few kilobytes and
+     * well under a second of radio, and only when the constraints already hold. Because Doze
+     * coalesces deferrable work into maintenance windows, the marginal cost of most of those runs
+     * is close to zero: the radio is up for something else. The honest worst case is a phone in
+     * constant use with a reachable server, where twenty extra wakeups a day are on the order of a
+     * tenth of a percent of a battery — less than the screen spends rendering the list once.
+     *
+     * Away from home the cost is *lower* than at home, not higher: the connection is refused and
+     * the run ends in milliseconds.
+     */
+    const val PERIOD_HOURS: Long = 1L
 
     private val constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -84,9 +123,18 @@ object SyncScheduler {
         .build()
 
     /**
-     * Registered once per install and kept: `KEEP` means an app start does not reset the period
-     * or the backoff of a run already waiting, which is what an app started ten times in a
-     * minute would otherwise do.
+     * Registered at every application start, and **updated** rather than kept.
+     *
+     * `KEEP` was right while there was only ever one period to register, and wrong the moment
+     * there were two. A phone that installed the six-hour build has that period written into its
+     * WorkManager database; `KEEP` sees a registration under this name, does nothing, and the new
+     * period never arrives — not on this launch, not on any launch, not until the app is
+     * reinstalled. A constant nobody can ever change is not a constant, it is a fossil.
+     *
+     * `UPDATE` rewrites the specification in place and keeps the schedule: it does not restart the
+     * current interval, so an app started ten times in a minute still does not push the next run
+     * ten times further away, which is the property `KEEP` was chosen for. What it costs is one
+     * small write per start, and what it buys is that [PERIOD_HOURS] means something.
      */
     fun ensurePeriodic(context: Context) {
         val request = PeriodicWorkRequestBuilder<SyncWorker>(PERIOD_HOURS, TimeUnit.HOURS)
@@ -95,7 +143,7 @@ object SyncScheduler {
             .build()
 
         WorkManager.getInstance(context)
-            .enqueueUniquePeriodicWork(PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP, request)
+            .enqueueUniquePeriodicWork(PERIODIC_WORK, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
     /**
