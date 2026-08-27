@@ -59,10 +59,26 @@ function assertDisposable(url: string): void {
   );
 }
 
+/**
+ * A handle on the throwaway database, whatever `DATABASE_URL` happens to name.
+ *
+ * It *redirects* rather than validates. Refusing the development database would
+ * only have turned a silent wipe into a red test, and the next person would
+ * have reached for the override. Tests want an empty cluster; the development
+ * one is never it, so the name is replaced and the rest of the URL — host,
+ * port, role, password — is kept.
+ *
+ * `mue_test` is created by `infra/initdb`. Set `MUE_TEST_DATABASE` to point
+ * somewhere else.
+ */
 export function createTestDatabase(): DatabaseHandle {
   const config = readDatabaseConfig();
   assertLoopback(config.url);
-  return createDatabase(config);
+
+  const url = new URL(config.url);
+  url.pathname = `/${process.env["MUE_TEST_DATABASE"] ?? "mue_test"}`;
+
+  return createDatabase({ ...config, url: url.toString() });
 }
 
 /**
