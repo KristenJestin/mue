@@ -168,6 +168,18 @@ object SyncMessages {
                 "Synchronised so far: ${plural(sent, "change")} sent, " +
                     "${plural(outcome.changes, "change")} received. More is still coming."
 
+            // "Up to date" is a claim about the queue, not about the exchange. A run that sent
+            // and received nothing *because there was nothing to send* is up to date; a run that
+            // sent nothing while rows sit in the outbox untried is not, and saying so beside a
+            // `1 change waiting` counter reads as a contradiction — which is exactly how it was
+            // reported. `deferred` rows are the health profile of PRD 13.4, held back because the
+            // contract has no branch for them yet; they are not a fault and must not be described
+            // as one, but they are also not "up to date".
+            sent == 0 && outcome.changes == 0 && outcome.deferred > 0 ->
+                "Nothing to exchange. ${plural(outcome.deferred, "change")} " +
+                    "${if (outcome.deferred == 1) "is" else "are"} waiting for a server that " +
+                    "understands it, and will go out on its own once one does."
+
             sent == 0 && outcome.changes == 0 -> "Everything is already up to date."
 
             else -> "Synchronised: ${plural(sent, "change")} sent, " +

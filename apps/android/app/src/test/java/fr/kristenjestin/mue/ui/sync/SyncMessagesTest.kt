@@ -27,6 +27,7 @@ class SyncMessagesTest {
         duplicates: Int = 0,
         rejected: Int = 0,
         unreadable: Int = 0,
+        deferred: Int = 0,
         changes: Int = 0,
         moreAvailable: Boolean = false,
     ) = SyncOutcome.Completed(
@@ -34,7 +35,7 @@ class SyncMessagesTest {
         applied = applied,
         duplicates = duplicates,
         rejected = rejected,
-        deferred = 0,
+        deferred = deferred,
         unreadable = unreadable,
         pages = 1,
         changes = changes,
@@ -47,6 +48,48 @@ class SyncMessagesTest {
 
         assertEquals("Everything is already up to date.", note.message)
         assertFalse(note.isProblem)
+    }
+
+    /**
+     * The contradiction the owner reported: `Everything is already up to date.` printed beside a
+     * `1 change waiting to be sent` counter.
+     *
+     * Both sentences were true of different things — the exchange moved nothing, and the outbox
+     * holds a row — but read together they say the app cannot count. A run that sends nothing
+     * *because there is nothing to send* is up to date; a run that sends nothing while a row sits
+     * untried is not, and the difference is `deferred`.
+     */
+    @Test
+    fun aRunHoldingSomethingBackDoesNotClaimToBeUpToDate() {
+        val note = SyncMessages.describe(completed(deferred = 1))
+
+        assertFalse(note.message.contains("up to date"), "up to date is a claim about the queue")
+        assertEquals(
+            "Nothing to exchange. 1 change is waiting for a server that understands it, " +
+                "and will go out on its own once one does.",
+            note.message,
+        )
+        assertFalse(note.isProblem, "a deferred row is not a fault")
+    }
+
+    /** The plural, and the verb that has to follow it. */
+    @Test
+    fun severalHeldBackChangesAreCountedAndAgree() {
+        val note = SyncMessages.describe(completed(deferred = 3))
+
+        assertEquals(
+            "Nothing to exchange. 3 changes are waiting for a server that understands it, " +
+                "and will go out on its own once one does.",
+            note.message,
+        )
+    }
+
+    /** A run that actually moved something says so, whatever is still held back. */
+    @Test
+    fun aRunThatMovedDataIsNotSilencedByADeferredRow() {
+        val note = SyncMessages.describe(completed(applied = 2, deferred = 1))
+
+        assertEquals("Synchronised: 2 changes sent, 0 changes received.", note.message)
     }
 
     @Test
