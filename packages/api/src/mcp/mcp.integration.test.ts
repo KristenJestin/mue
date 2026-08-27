@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createAuth, OAUTH_SCOPES, revokeAgent, type AuthHandle } from "@mue/auth";
-import { schema } from "@mue/db";
+import { createTestDatabase, schema } from "@mue/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -197,10 +197,21 @@ beforeAll(async () => {
       consentPage: "/oauth-consent",
       secureCookies: false,
     },
+    // Without this, `createAuth` falls back to `createDatabase()` — that is,
+    // `DATABASE_URL`, which is the development cluster a phone pairs with. This
+    // suite then deleted its signing key and signed up accounts in it, and the
+    // owner's phone could not authenticate until the row was removed by hand:
+    // a key encrypted under the secret above cannot be decrypted by the running
+    // server, and the symptom is a bare 401 with nothing in any log.
+    //
+    // `createTestDatabase` rewrites the database name to `mue_test`, so the
+    // redirect that protects `resetSchemas` protects this too. Any other suite
+    // that builds its own `createAuth` needs the same argument.
+    database: createTestDatabase(),
   });
 
   // A signing key encrypted under a different secret cannot be decrypted, and the
-  // development database is shared with every other suite that boots Better Auth.
+  // test database is shared with every other suite that boots Better Auth.
   await handle.database.sql`delete from mue_auth.jwks`;
 
   app = new Hono();
