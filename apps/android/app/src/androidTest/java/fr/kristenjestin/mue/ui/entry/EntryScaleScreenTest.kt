@@ -52,6 +52,17 @@ class EntryScaleScreenTest {
 
     private val statusActions = mutableListOf<EntryScaleStatus>()
 
+    /**
+     * Combien de fois `Save measurement` a été activé.
+     *
+     * `EntryUiState.justSaved` ne peut pas répondre à cette question : c'est un drapeau
+     * transitoire que `MuePrimaryButton` éteint de lui-même au bout de
+     * `MueMotion.SaveConfirmationMillis`, et le `waitForIdle` qui suit un clic laisse l'horloge
+     * l'atteindre. Le lire après coup revient à demander « la confirmation est-elle *encore*
+     * affichée ? », ce qui n'est pas ce que ces tests veulent savoir.
+     */
+    private var saveCount = 0
+
     @Composable
     private fun Harness(reduceMotion: Boolean) {
         MueTheme(reduceMotion = reduceMotion) {
@@ -74,7 +85,10 @@ class EntryScaleScreenTest {
                 onOpenDatePicker = { state = state.copy(datePickerVisible = true) },
                 onDismissDatePicker = { state = state.copy(datePickerVisible = false) },
                 onDateSelected = { state = state.copy(date = it, datePickerVisible = false) },
-                onSave = { state = state.copy(justSaved = true) },
+                onSave = {
+                    saveCount += 1
+                    state = state.copy(justSaved = true)
+                },
                 onSaveConfirmationFinished = { state = state.copy(justSaved = false) },
                 onScaleStatusAction = { statusActions += it },
             )
@@ -394,7 +408,7 @@ class EntryScaleScreenTest {
 
         composeRule.onNodeWithText("Save measurement").performClick()
         composeRule.waitForIdle()
-        assertTrue(state.justSaved)
+        assertEquals(1, saveCount)
     }
 
     private companion object {
