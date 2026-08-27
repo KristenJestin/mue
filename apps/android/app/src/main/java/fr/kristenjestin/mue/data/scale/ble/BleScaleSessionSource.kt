@@ -170,7 +170,17 @@ internal class BleScaleSessionSource(
      */
     override fun stop() = endSession()
 
-    /** Une nouvelle session pleine de deux minutes, depuis n'importe quel état (FR-SCALE-020). */
+    /**
+     * Une nouvelle session pleine de deux minutes, depuis n'importe quel état (FR-SCALE-020).
+     *
+     * C'est le `Try again` de FR-SCALE-023, et `Entry` l'offre partout où aucune session ne court :
+     * après un enregistrement — donc depuis `Idle`, où [closeSession] vient de laisser la machine —
+     * comme après une mesure posée ou un poids hors bornes, qui sont des états **conclus**. Aucun
+     * de ces départs n'est un cas particulier ici : [endSession] invalide l'identifiant et remet au
+     * repos quoi qu'il arrivât avant, [openSession] en frappe un neuf. C'est toute la différence
+     * avec [start], qui refuse délibérément de balayer un état conclu — l'un est un effet de bord
+     * du cycle de vie de l'écran, l'autre est un geste que quelqu'un a fait.
+     */
     override fun retry() {
         endSession()
         openSession()

@@ -103,7 +103,7 @@ class EntryScreenTest {
                     )
                 },
                 onSaveConfirmationFinished = { state = state.copy(justSaved = false) },
-                onScaleStatusAction = {},
+                onScaleAction = {},
             )
         }
     }

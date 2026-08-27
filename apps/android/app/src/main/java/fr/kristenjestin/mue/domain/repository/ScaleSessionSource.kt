@@ -50,9 +50,19 @@ interface ScaleSessionSource {
     fun stop()
 
     /**
-     * Ouvre une nouvelle session de deux minutes après un [ScaleSessionState.NotFound].
+     * Ouvre une nouvelle session de deux minutes, **depuis n'importe quel état**.
      *
-     * C'est le seul chemin de relance en dehors d'une réouverture de l'écran (FR-SCALE-020).
+     * C'est le seul chemin de relance en dehors d'une réouverture de l'écran (FR-SCALE-020), et
+     * c'est ce que FR-SCALE-023 appelle `Try again`. Il ne se limite pas à
+     * [ScaleSessionState.NotFound] : un état conclu — une mesure posée, un poids hors bornes — et
+     * un état de repos ([ScaleSessionState.Idle], après [closeSession]) sont exactement les
+     * situations d'où l'écran `Entry` doit pouvoir repartir sans que l'utilisateur ait à quitter
+     * l'onglet. [start], lui, reste sans effet sur un état conclu : c'est la différence entre les
+     * deux et la raison pour laquelle ce contrat en compte deux.
+     *
+     * La session ouverte porte un **nouveau** `sessionId` et l'ancien est invalidé avant toute
+     * chose : une trame en retard de la session précédente ne peut donc jamais compléter
+     * celle-ci (PRD_SCALE 9.4, BR-SCALE-012).
      */
     fun retry()
 

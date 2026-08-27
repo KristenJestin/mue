@@ -82,8 +82,30 @@ data class EntryScaleUiState(
      * plus où l'écran pourrait mentir. Écrite ici et non dans le composable pour qu'un test JVM
      * puisse la lire — ce que dit la pastille dans chaque état est une règle, pas un pixel.
      *
-     * L'ordre des branches est la priorité de PRD_SCALE 11 lue à l'envers : ce qui demande un
-     * geste passe avant ce qui est arrivé, qui passe avant ce qui est en train de se passer.
+     * **Trois branches, et la dernière est une offre** (FR-SCALE-023). Ce qui demande un geste
+     * système passe en premier ; une session vivante — et elle seule — passe ensuite ; tout le
+     * reste propose de relancer une recherche. Cette troisième branche est la correction d'un
+     * défaut, pas un ajout : la pastille n'était actionnable que dans les quatre états de
+     * PRD_SCALE 18.5, si bien qu'après un enregistrement, après une reprise en main et après une
+     * mesure hors bornes, l'écran n'offrait plus **aucun** chemin vers une nouvelle pesée — il
+     * fallait quitter l'onglet `Entry` et y revenir, ce que rien n'indiquait. FR-SCALE-023 dit
+     * pourtant « tant que l'utilisateur ne quitte pas `Entry` **ou n'active pas explicitement
+     * `Try again`** » : le second membre de cette phrase n'existait que derrière l'expiration des
+     * deux minutes.
+     *
+     * Ce qui distingue encore ces trois culs-de-sac tient en un booléen, [fromScale], et il ne
+     * décide que de la couleur : la valeur à l'écran vient de la balance, donc l'en-tête reste
+     * ambre et la provenance ne se perd pas entre l'enregistrement et la pesée suivante. Le
+     * libellé, lui, est le même partout — l'affordance est ce qu'on est venu chercher, et une
+     * pastille cliquable qui ne dit pas qu'elle l'est vaut moins que pas de bouton du tout.
+     *
+     * [indicator] passe **avant** [fromScale], ce qui n'était pas le cas tant que la relance
+     * n'existait pas : une session ne pouvait alors se rouvrir derrière une valeur reçue qu'en
+     * quittant l'écran. Elle se rouvre maintenant d'un doigt, et une pastille qui répondrait
+     * « poids reçu » à quelqu'un qui vient d'appuyer sur `Try again` serait muette au moment
+     * précis où on lui demande quelque chose. Aucun autre état n'est concerné : une mesure posée
+     * efface l'indication en arrivant (`acceptReading`), donc les deux champs ne sont jamais
+     * vrais ensemble en dehors d'une relance.
      */
     val linkChip: EntryLinkChip?
         get() {
@@ -103,18 +125,11 @@ data class EntryScaleUiState(
                     active = false,
                     pulsing = false,
                     announce = announced,
-                    action = actionable,
-                )
-            }
-            if (fromScale) {
-                return EntryLinkChip(
-                    label = null,
-                    description = ScaleMessages.LINK_WEIGHT_RECEIVED,
-                    active = true,
-                    pulsing = false,
+                    action = actionable.action,
                 )
             }
             indicator?.let {
+                // Une session court : il n'y a rien à relancer, et le point respire pour le dire.
                 return EntryLinkChip(
                     label = it.chipLabel,
                     description = it.message,
@@ -123,10 +138,11 @@ data class EntryScaleUiState(
                 )
             }
             return EntryLinkChip(
-                label = null,
-                description = ScaleMessages.LINK_IDLE,
-                active = false,
+                label = ScaleMessages.LINK_TRY_AGAIN,
+                description = ScaleMessages.LINK_SEARCH_AGAIN,
+                active = fromScale,
                 pulsing = false,
+                action = EntryScaleAction.RESTART_SEARCH,
             )
         }
 
@@ -152,16 +168,22 @@ data class EntryScaleUiState(
  * **Discrète par construction** (PRD_SCALE 19) : une pastille de la taille de celle qui portait la
  * date, dans un coin, qui ne concurrence jamais la valeur du poids.
  *
- * @property label Deux mots au plus, ou `null` quand la pastille se tait — ce qu'elle fait dès que
- *   le poids est reçu, où sa couleur et son point disent déjà tout ce qu'il y a à dire.
+ * @property label Deux mots au plus, ou `null` quand la pastille n'a rien à écrire. Un [label] nul
+ *   et une [action] non nulle ne vont jamais ensemble : un bouton qui ne se nomme pas est pire
+ *   que pas de bouton, et c'est la raison pour laquelle `Try again` s'affiche jusque derrière une
+ *   valeur reçue, là où la pastille se taisait autrefois (FR-SCALE-023).
  * @property description Ce qu'un lecteur d'écran entend, **toujours complet**, y compris quand
- *   [label] est `null` : une couleur et un point ne s'énoncent pas (PRD_SCALE 20).
- * @property active La liaison vit : ambre plutôt que gris. Vrai pendant la session et une fois la
- *   mesure posée, faux quand rien ne se passe ou que quelque chose attend un geste.
+ *   [label] est `null` : une couleur et un point ne s'énoncent pas (PRD_SCALE 20). Dès qu'il y a
+ *   une [action], cette phrase dit le **geste** et non l'état : c'est le nom accessible d'un
+ *   bouton.
+ * @property active La liaison vit : ambre plutôt que gris. Vrai pendant la session et tant que la
+ *   valeur à l'écran vient de la balance, faux quand rien ne s'est passé ou que quelque chose
+ *   attend un geste système.
  * @property pulsing Le point respire, parce que quelque chose est en cours. Une mesure posée ne
  *   pulse pas : elle est arrivée.
  * @property announce Le seul cas où la pastille prend la parole d'elle-même (PRD_SCALE 20).
- * @property action Le geste de FR-SCALE-025, ou `null`. Rien ne s'ouvre sans lui.
+ * @property action Le geste offert, ou `null` — ce dernier cas étant exactement celui d'une
+ *   session en cours. Rien ne s'ouvre et rien ne se relance sans lui.
  */
 @Immutable
 data class EntryLinkChip(
@@ -170,8 +192,48 @@ data class EntryLinkChip(
     val active: Boolean,
     val pulsing: Boolean,
     val announce: Boolean = false,
-    val action: EntryScaleStatus? = null,
+    val action: EntryScaleAction? = null,
 )
+
+/**
+ * Ce qu'un appui sur la pastille déclenche — et rien de ce qui l'a rendue actionnable.
+ *
+ * **Pourquoi un type de plus.** La pastille portait jusqu'ici un [EntryScaleStatus] en guise
+ * d'action, ce qui allait tant que tout geste naissait d'un état de PRD_SCALE 18.5. FR-SCALE-023
+ * en demande un qui n'a pas d'état : relancer une recherche après un enregistrement, après une
+ * reprise en main ou après une mesure hors bornes. Réemployer [EntryScaleStatus.NOT_FOUND] pour ce
+ * geste aurait été un mensonge à deux étages — « scale not found » est faux juste après une pesée
+ * réussie, et cette valeur porte la phrase de PRD_SCALE 18.5 mot pour mot, donc un lecteur
+ * d'écran se serait entendu annoncer une balance introuvable au moment où il venait d'en recevoir
+ * le poids. Séparer les deux notions rend la chose impossible à écrire : un état décrit ce qui
+ * *est*, une action décrit ce qui *arrive* quand on appuie, et l'écran n'a plus besoin du premier
+ * pour router le second.
+ *
+ * Trois de ces quatre valeurs ouvrent un écran du système, ce que seule l'interface peut faire —
+ * un `ViewModel` n'a pas de `Context` et ne doit pas en acquérir un. Aucune n'ouvre quoi que ce
+ * soit d'elle-même : chacune décrit un geste que l'utilisateur a fait (FR-SCALE-025).
+ */
+enum class EntryScaleAction {
+
+    /**
+     * Ouvre une nouvelle session de deux minutes (FR-SCALE-020, FR-SCALE-023).
+     *
+     * Le `Try again` de FR-SCALE-023, offert dès qu'une balance est appairée et qu'aucune session
+     * ne court — pas seulement à l'expiration du délai. La session close ne renaît pas au passage :
+     * la nouvelle porte un autre `sessionId`, et l'ancien reste retenu pour que ses trames tardives
+     * ne complètent jamais celle-ci (PRD_SCALE 9.4, BR-SCALE-012).
+     */
+    RESTART_SEARCH,
+
+    /** Ouvre la demande d'activation de la radio, portée par le système. */
+    ENABLE_BLUETOOTH,
+
+    /** Ouvre la fiche de l'application, seul endroit où une permission refusée se rend. */
+    OPEN_APP_SETTINGS,
+
+    /** Ouvre le réglage de localisation du système (API ≤ 30, PRD_SCALE 16.1). */
+    OPEN_LOCATION_SETTINGS,
+}
 
 /**
  * L'indication discrète de PRD_SCALE 11, réduite à ce que l'écran en montre.
@@ -215,19 +277,42 @@ enum class EntryScaleIndicator(val message: String, val chipLabel: String) {
  *   accessible (PRD_SCALE 20), là où [chipLabel] est ce qu'elle **montre**.
  * @property chipLabel La même chose en deux mots. Ce qui survit à la coupe est chaque fois l'offre
  *   — `Try again`, `Bluetooth off` — parce que c'est elle qui dit quoi faire du doigt.
+ * @property action Ce que l'appui déclenche. Porté par l'état plutôt que déduit par l'écran : le
+ *   lien entre un constat et le geste qui le répare est une règle du module, et la table où il
+ *   s'écrit doit être la même que celle des phrases.
  */
-enum class EntryScaleStatus(val message: String, val chipLabel: String) {
+enum class EntryScaleStatus(
+    val message: String,
+    val chipLabel: String,
+    val action: EntryScaleAction,
+) {
     /** Les deux minutes se sont écoulées. Le geste relance une session (FR-SCALE-020). */
-    NOT_FOUND(ScaleMessages.SCALE_NOT_FOUND, ScaleMessages.LINK_TRY_AGAIN),
+    NOT_FOUND(
+        ScaleMessages.SCALE_NOT_FOUND,
+        ScaleMessages.LINK_TRY_AGAIN,
+        EntryScaleAction.RESTART_SEARCH,
+    ),
 
     /** La radio est éteinte. Le geste ouvre la demande d'activation du système. */
-    BLUETOOTH_OFF(ScaleMessages.BLUETOOTH_IS_OFF, ScaleMessages.LINK_BLUETOOTH_OFF),
+    BLUETOOTH_OFF(
+        ScaleMessages.BLUETOOTH_IS_OFF,
+        ScaleMessages.LINK_BLUETOOTH_OFF,
+        EntryScaleAction.ENABLE_BLUETOOTH,
+    ),
 
     /** Permission absente ou révoquée. Le geste ouvre la fiche de l'application. */
-    PERMISSION_MISSING(ScaleMessages.SCALE_UNAVAILABLE, ScaleMessages.LINK_UNAVAILABLE),
+    PERMISSION_MISSING(
+        ScaleMessages.SCALE_UNAVAILABLE,
+        ScaleMessages.LINK_UNAVAILABLE,
+        EntryScaleAction.OPEN_APP_SETTINGS,
+    ),
 
     /** API ≤ 30 : le scanner de la plateforme exige la localisation système. */
-    SYSTEM_LOCATION_OFF(ScaleMessages.SCALE_UNAVAILABLE, ScaleMessages.LINK_UNAVAILABLE),
+    SYSTEM_LOCATION_OFF(
+        ScaleMessages.SCALE_UNAVAILABLE,
+        ScaleMessages.LINK_UNAVAILABLE,
+        EntryScaleAction.OPEN_LOCATION_SETTINGS,
+    ),
 }
 
 /**

@@ -8,9 +8,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -18,9 +21,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.unit.height
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.scale.ScaleMessages
 import fr.kristenjestin.mue.ui.scale.ScaleTestTags
+import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -55,7 +60,7 @@ class EntryScaleScreenTest {
         )
     )
 
-    private val statusActions = mutableListOf<EntryScaleStatus>()
+    private val actions = mutableListOf<EntryScaleAction>()
 
     /**
      * Combien de fois `Save measurement` a été activé.
@@ -98,7 +103,7 @@ class EntryScaleScreenTest {
                     state = state.copy(justSaved = true)
                 },
                 onSaveConfirmationFinished = { state = state.copy(justSaved = false) },
-                onScaleStatusAction = { statusActions += it },
+                onScaleAction = { actions += it },
             )
         }
     }
@@ -355,11 +360,22 @@ class EntryScaleScreenTest {
     }
 
     /**
-     * PRD_SCALE 19 : une fois le poids reçu, la pastille perd son libellé et ne garde que sa
-     * couleur et son point — mais elle continue de se dire en entier à un lecteur d'écran.
+     * FR-SCALE-023 : une fois le poids enregistré, la pastille **montre** ce qu'elle offre.
+     *
+     * Elle perdait son libellé en arrivant ici, ce qui allait tant qu'elle n'était que la couleur
+     * et le point de PRD_SCALE 19. Elle relance une recherche depuis que `Try again` ne dépend plus
+     * du délai de deux minutes, et une cible tactile invisible n'aide personne : le libellé, la
+     * taille de la cible et le nom accessible sont les trois faces de la même affordance, donc les
+     * trois assertions de ce test.
+     *
+     * L'enregistrement passe par le vrai bouton et se compte avec [saveCount] : `justSaved` est un
+     * drapeau que `MuePrimaryButton` éteint lui-même, et le `waitForIdle` d'après le clic laisse
+     * l'horloge l'atteindre. L'état de la balance, lui, ne bouge pas — `EntryViewModel.onSave`
+     * clôt la session sans toucher à la provenance, ce que le harnais reproduit en ne touchant à
+     * rien.
      */
     @Test
-    fun the_link_chip_drops_its_label_once_the_weight_has_landed() {
+    fun the_link_chip_offers_another_search_once_the_weight_is_saved() {
         state = state.copy(scale = EntryScaleUiState(paired = true))
         start(reduceMotion = true)
 
@@ -367,12 +383,95 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithText(ScaleMessages.MEASURING).assertIsDisplayed()
 
         receive(8_120)
+        composeRule.onNodeWithText("Save measurement").performClick()
+        composeRule.waitForIdle()
+        assertEquals(1, saveCount)
 
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertExists()
         composeRule.onNodeWithText(ScaleMessages.MEASURING).assertDoesNotExist()
+        composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
         composeRule
-            .onNodeWithContentDescription(ScaleMessages.LINK_WEIGHT_RECEIVED)
+            .onNodeWithContentDescription(ScaleMessages.LINK_SEARCH_AGAIN)
             .assertExists()
+        assertTheChipIsATouchTarget()
+
+        // La provenance n'a pas quitté l'écran pour autant (FR-SCALE-022).
+        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertExists()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf(EntryScaleAction.RESTART_SEARCH), actions)
+    }
+
+    /**
+     * FR-SCALE-023 : les deux autres culs-de-sac, vus de l'écran.
+     *
+     * La reprise en main et la mesure hors bornes laissent la même pastille que l'enregistrement,
+     * à la couleur près — la valeur affichée n'appartient plus à la balance — et surtout à la même
+     * taille de cible. Les deux sont dans le même test parce que ce qui est vérifié est justement
+     * qu'ils se ressemblent : trois chemins, une seule offre.
+     */
+    @Test
+    fun the_link_chip_offers_another_search_after_a_take_back_and_out_of_range() {
+        state = state.copy(scale = EntryScaleUiState(paired = true))
+        start(reduceMotion = true)
+        receive(8_120)
+
+        composeRule.onNodeWithContentDescription(INCREASE).performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
+        composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription(ScaleMessages.LINK_SEARCH_AGAIN).assertExists()
+        assertTheChipIsATouchTarget()
+
+        // FR-SCALE-024 : le refus s'affiche, l'écran ne change pas, et la pastille reste une offre.
+        state = state.copy(scale = state.scale.copy(outOfRange = true))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(ScaleTestTags.OUT_OF_RANGE_NOTICE).assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
+        assertTheChipIsATouchTarget()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
+        composeRule.waitForIdle()
+        assertEquals(listOf(EntryScaleAction.RESTART_SEARCH), actions)
+    }
+
+    /**
+     * L'autre moitié : pendant une session, la pastille n'est pas un bouton.
+     *
+     * Rien à relancer, donc rien à toucher — et surtout pas de cible tactile posée sur ce qui est
+     * en train d'aboutir. L'absence d'action se vérifie par l'action manquante et non par une
+     * hauteur : c'est elle que le doigt et le lecteur d'écran rencontrent, à toute taille de police.
+     */
+    @Test
+    fun a_live_session_offers_nothing_to_tap() {
+        state = state.copy(
+            scale = EntryScaleUiState(
+                paired = true,
+                indicator = EntryScaleIndicator.SEARCHING,
+            ),
+        )
+        start(reduceMotion = true)
+
+        composeRule.onNodeWithText(ScaleMessages.LINK_SEARCHING).assertIsDisplayed()
+        composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertDoesNotExist()
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertHasNoClickAction()
+
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
+        composeRule.waitForIdle()
+        assertTrue("une session en cours ne propose rien", actions.isEmpty())
+    }
+
+    /** La cible tactile de FR-SCALE-025, offerte à la relance comme aux quatre états système. */
+    private fun assertTheChipIsATouchTarget() {
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertHasClickAction()
+        val height = composeRule
+            .onNodeWithTag(ScaleTestTags.ENTRY_STATUS)
+            .getUnclippedBoundsInRoot()
+            .height
+        assertTrue("the link chip is $height, under $MueMinTouchTarget", height >= MueMinTouchTarget)
     }
 
     /**
@@ -484,7 +583,7 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
         composeRule.waitForIdle()
 
-        assertEquals(listOf(EntryScaleStatus.BLUETOOTH_OFF), statusActions)
+        assertEquals(listOf(EntryScaleAction.ENABLE_BLUETOOTH), actions)
     }
 
     @Test
@@ -509,7 +608,7 @@ class EntryScaleScreenTest {
                 androidx.compose.ui.semantics.LiveRegionMode.Polite,
             )
         )
-        assertTrue("rien ne s'ouvre sans un geste (FR-SCALE-025)", statusActions.isEmpty())
+        assertTrue("rien ne s'ouvre sans un geste (FR-SCALE-025)", actions.isEmpty())
     }
 
     @Test
@@ -524,7 +623,7 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
         composeRule.waitForIdle()
 
-        assertEquals(listOf(EntryScaleStatus.NOT_FOUND), statusActions)
+        assertEquals(listOf(EntryScaleAction.RESTART_SEARCH), actions)
     }
 
     /** BR-SCALE-011 : rien de tout cela ne bloque une pesée saisie à la main. */

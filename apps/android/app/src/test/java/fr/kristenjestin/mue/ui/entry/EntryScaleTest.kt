@@ -654,7 +654,7 @@ class EntryScaleTest {
         assertEquals(EntryScaleStatus.PERMISSION_MISSING, model.uiState.value.scale.status)
         assertEquals("Scale unavailable · Open settings", model.uiState.value.scale.status?.message)
 
-        model.onScaleStatusAction(EntryScaleStatus.PERMISSION_MISSING)
+        model.onScaleAction(EntryScaleAction.OPEN_APP_SETTINGS)
         assertNull(model.uiState.value.scale.status)
 
         // Pas de relance spontanée dans le même affichage.
@@ -688,9 +688,12 @@ class EntryScaleTest {
         assertEquals(EntryScaleStatus.NOT_FOUND, model.uiState.value.scale.status)
         assertEquals("Scale not found · Try again", model.uiState.value.scale.status?.message)
 
-        model.onScaleStatusAction(EntryScaleStatus.NOT_FOUND)
+        model.onScaleAction(EntryScaleAction.RESTART_SEARCH)
 
         assertEquals(1, scale.retries)
+        // Le constat relancé cesse d'être vrai à l'instant de l'appui : la pastille ne peut plus
+        // annoncer une balance introuvable à un lecteur d'écran (PRD_SCALE 18.5, 20).
+        assertNull(model.uiState.value.scale.status)
     }
 
     /** PRD_SCALE 18.2 : endormie, hors de portée, déconnectée — aucun message d'erreur. */
@@ -840,11 +843,11 @@ class EntryScaleTest {
         assertEquals("Scale not found · Try again", chip().description)
         assertFalse(chip().active)
         assertFalse(chip().pulsing)
-        assertEquals(EntryScaleStatus.NOT_FOUND, chip().action)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip().action)
 
         scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
         assertEquals("Bluetooth off", chip().label)
-        assertEquals(EntryScaleStatus.BLUETOOTH_OFF, chip().action)
+        assertEquals(EntryScaleAction.ENABLE_BLUETOOTH, chip().action)
         // PRD_SCALE 20 : le seul changement que la pastille annonce d'elle-même.
         assertTrue(chip().announce)
         assertEquals(ScaleMessages.UNAVAILABLE_ANNOUNCEMENT, chip().description)
@@ -852,19 +855,29 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Searching)
         scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.PERMISSION_MISSING))
         assertEquals("Unavailable", chip().label)
-        assertEquals(EntryScaleStatus.PERMISSION_MISSING, chip().action)
+        assertEquals(EntryScaleAction.OPEN_APP_SETTINGS, chip().action)
+
+        // Le geste et le constat sont deux choses : la localisation coupée dit la même phrase que
+        // la permission absente et n'ouvre pas le même écran (PRD_SCALE 16.1, 18.5).
+        scale.emit(ScaleSessionState.Searching)
+        scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.SYSTEM_LOCATION_OFF))
+        assertEquals("Unavailable", chip().label)
+        assertEquals(EntryScaleAction.OPEN_LOCATION_SETTINGS, chip().action)
     }
 
     /**
-     * PRD_SCALE 19 : une fois le poids reçu, la pastille perd son libellé et ne garde que sa
-     * couleur et son point.
+     * PRD_SCALE 19 et FR-SCALE-023 : le poids reçu garde sa couleur, et gagne une offre.
      *
-     * Nommer la balance là n'apprendrait rien — on est debout dessus — et le nom par défaut est
-     * celui du modèle, qui ferait déborder la pastille. Ce que le libellé cesse de dire, la
-     * description continue de le dire en entier : un lecteur d'écran n'a ni couleur ni point.
+     * La pastille perdait ici son libellé, ce qui était juste tant qu'elle était décorative :
+     * nommer la balance n'apprend rien — on est debout dessus — et le nom par défaut est celui du
+     * modèle, qui la ferait déborder. Elle est actionnable dans cet état depuis que `Try again` ne
+     * dépend plus du délai de deux minutes, et une pastille qu'on peut toucher sans que rien ne le
+     * dise est pire qu'une pastille inerte. Ce qu'elle **montre** est donc l'offre, et ce qu'elle
+     * **dit** est le geste ; l'ambre, elle, ne bouge pas, parce que la valeur à l'écran vient
+     * toujours de la balance.
      */
     @Test
-    fun `la pastille perd son libellé une fois le poids reçu`() = runTest {
+    fun `une fois le poids reçu la pastille propose une nouvelle recherche`() = runTest {
         val scale = paired()
         val model = viewModel(scale)
         scale.emit(ScaleSessionState.Measuring(8_570))
@@ -873,17 +886,24 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Stable(scaleReadingOf(85.75)))
 
         val chip = assertNotNull(model.uiState.value.scale.linkChip)
-        assertNull(chip.label)
-        assertEquals("Weight received from your scale", chip.description)
-        assertTrue(chip.active)
+        assertEquals(ScaleMessages.LINK_TRY_AGAIN, chip.label)
+        assertEquals("Look for your scale again", chip.description)
+        assertTrue(chip.active, "la provenance ne se perd pas dans l'en-tête")
         assertFalse(chip.pulsing)
-        assertNull(chip.action)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
         assertFalse(chip.announce, "l'arrivée est annoncée par la marque de provenance, avec sa valeur")
     }
 
-    /** PRD_SCALE 18.2 : entre deux sessions la pastille est un point, et ce n'est pas une faute. */
+    /**
+     * PRD_SCALE 18.2 et FR-SCALE-023 : entre deux sessions, la pastille propose la suivante.
+     *
+     * Elle se contentait d'énoncer `No scale in range`, ce qui est vrai, n'est pas une faute
+     * (PRD_SCALE 7.3) et ne mène nulle part : c'était le troisième cul-de-sac de cet écran, avec
+     * l'enregistrement et la reprise en main. Le gris reste — rien n'est en cours et la valeur
+     * affichée n'appartient plus à la balance —, mais il y a maintenant quelque chose à toucher.
+     */
     @Test
-    fun `entre deux sessions la pastille se tait sans disparaître`() = runTest {
+    fun `entre deux sessions la pastille propose d'en rouvrir une`() = runTest {
         val scale = paired()
         val model = viewModel(scale)
 
@@ -891,10 +911,190 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Idle)
 
         val chip = assertNotNull(model.uiState.value.scale.linkChip)
-        assertNull(chip.label)
-        assertNull(chip.action)
+        assertEquals(ScaleMessages.LINK_TRY_AGAIN, chip.label)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
         assertFalse(chip.active)
-        assertEquals("No scale in range", chip.description)
+        assertEquals("Look for your scale again", chip.description)
+
+        model.onScaleAction(assertNotNull(chip.action))
+
+        assertEquals(1, scale.retries)
+    }
+
+    // --- FR-SCALE-023, les trois culs-de-sac ------------------------------------------
+
+    /*
+     * `Try again` existait, et n'était branché que sur l'expiration des deux minutes.
+     *
+     * FR-SCALE-023 dit « aucune nouvelle recherche ne démarre tant que l'utilisateur ne quitte pas
+     * `Entry` **ou n'active pas explicitement `Try again`** ». Les trois tests qui suivent sont les
+     * trois états d'où ce second chemin manquait : après un enregistrement, après une reprise en
+     * main, après une mesure hors bornes. Dans les trois, le seul moyen de repeser était de quitter
+     * l'onglet et d'y revenir, et rien ne l'indiquait. Ils sont écrits séparément parce que ce sont
+     * trois chemins différents vers la même pastille — la session close par `onSave`, celle close
+     * par `takeValueBack`, et celle que la couche BLE conclut d'elle-même.
+     */
+
+    @Test
+    fun `après un enregistrement la pastille propose une nouvelle recherche`() = runTest {
+        val scale = paired()
+        val repository = FakeMeasurementRepository()
+        val model = viewModel(scale, repository = repository, profile = completeProfile)
+        model.onEntryVisible()
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35)))
+
+        model.onSave()
+
+        assertEquals(1, repository.stored.size)
+        assertEquals(1, scale.closes, "FR-SCALE-023 : l'enregistrement clôt bien la session")
+
+        val chip = assertNotNull(model.uiState.value.scale.linkChip)
+        assertEquals(ScaleMessages.LINK_TRY_AGAIN, chip.label)
+        assertEquals(ScaleMessages.LINK_SEARCH_AGAIN, chip.description)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
+        assertTrue(chip.active, "la valeur enregistrée vient toujours de la balance : ambre")
+
+        model.onScaleAction(assertNotNull(chip.action))
+
+        assertEquals(1, scale.retries)
+    }
+
+    @Test
+    fun `après une reprise en main la pastille propose une nouvelle recherche`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35)))
+
+        model.onStep(1)
+
+        val chip = assertNotNull(model.uiState.value.scale.linkChip)
+        assertEquals(ScaleMessages.LINK_TRY_AGAIN, chip.label)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
+        assertFalse(chip.active, "la valeur est redevenue celle de l'utilisateur : plus d'ambre")
+
+        model.onScaleAction(assertNotNull(chip.action))
+
+        assertEquals(1, scale.retries)
+    }
+
+    @Test
+    fun `après une mesure hors bornes la pastille propose une nouvelle recherche`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        scale.emit(ScaleSessionState.Searching)
+
+        // 18 kg : une main appuyée sur le plateau (FR-SCALE-024).
+        scale.emit(ScaleSessionState.OutOfRange(1_800))
+
+        val chip = assertNotNull(model.uiState.value.scale.linkChip)
+        assertEquals(ScaleMessages.LINK_TRY_AGAIN, chip.label)
+        assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
+
+        model.onScaleAction(assertNotNull(chip.action))
+
+        assertEquals(1, scale.retries)
+        // Le message de refus part avec l'appui : il parlait de la pesée qu'on vient d'abandonner.
+        assertFalse(model.uiState.value.scale.outOfRange)
+    }
+
+    /**
+     * L'autre moitié de la règle : une session en cours n'a rien à proposer.
+     *
+     * Offrir `Try again` pendant que la balance cherche, se connecte, attend qu'on monte ou mesure
+     * ferait de la pastille un bouton d'annulation déguisé — un doigt maladroit couperait la pesée
+     * en train d'aboutir. C'est l'indication discrète de PRD_SCALE 11 qui occupe alors la pastille,
+     * et elle ne se touche pas.
+     */
+    @Test
+    fun `pendant une session vivante la pastille n'offre aucune relance`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+
+        val live = listOf(
+            ScaleSessionState.Searching,
+            ScaleSessionState.Connecting,
+            ScaleSessionState.WaitingForStepOn,
+            ScaleSessionState.Measuring(7_400),
+        )
+        for (state in live) {
+            scale.emit(state)
+            val chip = assertNotNull(model.uiState.value.scale.linkChip, "$state")
+            assertNull(chip.action, "$state")
+            assertTrue(chip.pulsing, "$state")
+        }
+
+        /*
+         * Y compris derrière une valeur déjà reçue, ce qui est exactement l'état d'une relance qui
+         * vient de partir. La pastille dit alors la session en cours et non la mesure précédente :
+         * répondre « poids reçu » à quelqu'un qui vient d'appuyer sur `Try again` serait se taire
+         * au moment où on lui demande quelque chose.
+         */
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35)))
+        scale.emit(ScaleSessionState.Searching)
+        val searching = assertNotNull(model.uiState.value.scale.linkChip)
+        assertEquals(ScaleMessages.LINK_SEARCHING, searching.label)
+        assertNull(searching.action)
+        assertTrue(searching.active, "la valeur à l'écran vient toujours de la balance")
+
+        // Et sans balance appairée, il n'y a toujours rien à toucher (PRD_SCALE 18.1).
+        scale.emit(ScaleSessionState.Absent)
+        assertNull(model.uiState.value.scale.linkChip)
+    }
+
+    /**
+     * PRD_SCALE 9.4 et BR-SCALE-012 : relancer ne rouvre pas la session close, il en ouvre une.
+     *
+     * Le cas est celui d'un enregistrement anticipé — l'utilisateur appuie sur `Save measurement`
+     * pendant que l'impédance est encore attendue — suivi d'un `Try again`. La trame en retard
+     * arrive alors *pendant* la nouvelle session, porteuse de l'ancien identifiant. Rien ne
+     * l'autorise à compléter quoi que ce soit : la composition n'est jamais ajoutée en silence
+     * après la confirmation `Saved`, et la nouvelle pesée est une pesée neuve.
+     */
+    @Test
+    fun `une trame de la session close ne complète pas la session relancée`() = runTest {
+        val scale = paired()
+        val repository = FakeMeasurementRepository()
+        val model = viewModel(scale, repository = repository, profile = completeProfile)
+        model.onEntryVisible()
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(74.35, sessionId = "session-1")))
+        model.onSave()
+        assertEquals(1, repository.stored.size)
+
+        // La relance passe par la pastille, comme le doigt de l'utilisateur : ce test tomberait
+        // aussi si l'écran cessait de l'offrir après un enregistrement.
+        val offered = assertNotNull(model.uiState.value.scale.linkChip)
+        model.onScaleAction(assertNotNull(offered.action))
+        scale.emit(ScaleSessionState.Searching)
+
+        // L'impédance de la pesée déjà enregistrée arrive enfin, avec l'ancien identifiant.
+        scale.emit(
+            ScaleSessionState.Complete(
+                scaleReadingOf(74.35, impedanceOhm = 545, sessionId = "session-1"),
+                impedanceRefused = true,
+            ),
+        )
+
+        val state = model.uiState.value
+        assertEquals(
+            EntryScaleIndicator.SEARCHING,
+            state.scale.indicator,
+            "la trame tardive ne change rien du tout, pas même l'indication",
+        )
+        assertFalse(state.scale.barefootHint)
+        assertNull(repository.stored.single().impedanceOhm)
+        assertNull(repository.stored.single().bodyComposition)
+
+        // La session relancée, elle, pose bien sa propre mesure, sous son propre identifiant.
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(80.0, sessionId = "session-2")))
+        assertEquals(8_000, model.uiState.value.weight.hundredthsKg)
+        assertTrue(model.uiState.value.scale.fromScale)
+
+        model.onSave()
+        val saved = repository.stored.single()
+        assertEquals(8_000, saved.weight.hundredthsKg)
+        assertEquals(MeasurementSource.SCALE, saved.source)
+        assertNull(saved.impedanceOhm, "l'impédance de la session close n'a pas été reprise")
+        assertNull(saved.bodyComposition)
     }
 
     @Test

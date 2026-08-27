@@ -351,22 +351,20 @@ internal object ScaleMessages {
     const val LINK_UNAVAILABLE: String = "Unavailable"
 
     /**
-     * PRD_SCALE 19 and 20: what the chip *says* once it has stopped showing a label.
+     * FR-SCALE-023 and PRD_SCALE 20: what the chip *does* whenever no session is running.
      *
-     * The chip goes wordless when the weight lands. Naming the scale there teaches nothing — the
-     * reader is standing on it — and the default name is the model, `HB BODY FAT`, which would
-     * blow a header chip open; identity belongs to `Profile > Scales` (FR-SCALE-012). None of that
-     * applies to a screen reader, which has no colour and no dot to read, so the spoken form stays
-     * whole.
+     * It replaces the two sentences that used to sit here — `Weight received from your scale` and
+     * `No scale in range`. Both stated where the link stood, which was the right thing to say
+     * while the chip was decoration; it is a button in those states now, and the accessible name
+     * of a button is its gesture, not the state that preceded it. Reading out a state to someone
+     * who cannot see that the element is tappable is exactly how an affordance goes missing.
+     *
+     * Nothing is lost with them. Provenance is carried, visibly and spoken, by the
+     * `From your scale` mark under the value, with its own description and its own live region
+     * (FR-SCALE-022, PRD_SCALE 19) — and a scale that has to be looked for again is, by itself,
+     * the plain statement of PRD_SCALE 18.2 that none is in range. No fault, no apology, an offer.
      */
-    const val LINK_WEIGHT_RECEIVED: String = "Weight received from your scale"
-
-    /**
-     * PRD_SCALE 18.2: between sessions the chip is a dot and nothing else, and this is what it
-     * reads as. A scale asleep or out of range is the normal state of a bathroom scale, so the
-     * words state it flatly — no fault, no apology (PRD_SCALE 7.3).
-     */
-    const val LINK_IDLE: String = "No scale in range"
+    const val LINK_SEARCH_AGAIN: String = "Look for your scale again"
 
     // endregion
 

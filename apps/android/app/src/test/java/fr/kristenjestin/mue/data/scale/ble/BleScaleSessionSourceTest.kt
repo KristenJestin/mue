@@ -456,6 +456,73 @@ class BleScaleSessionSourceTest {
         }
 
     /**
+     * FR-SCALE-023 : `Try again` rouvre une session pleine depuis un état **conclu** comme depuis
+     * le **repos**.
+     *
+     * `Entry` n'offrait ce geste qu'après le délai de deux minutes ; il l'offre désormais dès
+     * qu'aucune session ne court, ce qui vise deux états de plus. `Complete` est le premier : une
+     * mesure posée conclut la session, et [BleScaleSessionSource.start] est délibérément inerte
+     * sur un état conclu — sans quoi une recomposition relancerait un scan derrière une pesée déjà
+     * arrivée. `Idle` est le second : c'est là que [BleScaleSessionSource.closeSession] laisse la
+     * machine après un enregistrement, et `start()` y repartirait mais personne ne l'appelle tant
+     * que l'écran ne redevient pas visible. L'offre de la pastille ne vaut donc que si `retry()`
+     * couvre les deux, et « couvrir » veut dire une fenêtre **entière** et un `sessionId` neuf,
+     * pas le reste de la précédente.
+     */
+    @Test
+    fun `retry rouvre une session pleine depuis un état conclu comme depuis le repos`() = runTest {
+        val f = fixture(listOf(hbScale))
+        f.reachWaitingForStepOn(this)
+
+        f.link.deliver(weightFrame(8_575, stable = true))
+        runCurrent()
+        f.link.deliver(impedanceFrame(545))
+        runCurrent()
+        assertIs<ScaleSessionState.Complete>(f.state)
+        assertEquals(1, f.transport.scanStarts)
+
+        // Un état conclu : `start()` ne le balaie pas.
+        f.source.start()
+        runCurrent()
+        assertIs<ScaleSessionState.Complete>(f.state)
+        assertEquals(1, f.transport.scanStarts)
+
+        // `retry()`, lui, le remplace par une recherche.
+        f.source.retry()
+        runCurrent()
+        assertEquals(ScaleSessionState.Searching, f.state)
+        assertEquals(2, f.transport.scanStarts)
+
+        // Le repos, tel que l'enregistrement le laisse.
+        f.source.closeSession()
+        runCurrent()
+        assertEquals(ScaleSessionState.Idle, f.state)
+
+        f.source.retry()
+        runCurrent()
+        assertEquals(ScaleSessionState.Searching, f.state)
+        assertEquals(3, f.transport.scanStarts)
+
+        // Et la fenêtre est pleine : deux minutes comptées depuis l'appui.
+        advanceTimeBy(SEARCH_WINDOW_MS - 1)
+        runCurrent()
+        assertEquals(ScaleSessionState.Searching, f.state)
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals(ScaleSessionState.NotFound, f.state)
+
+        // Chaque relance porte son propre identifiant : la quatrième session est bien la quatrième
+        // (PRD_SCALE 9.4).
+        f.source.retry()
+        runCurrent()
+        f.transport.advertise(hbAdvertisement)
+        runCurrent()
+        f.link.deliver(weightFrame(8_575, stable = true))
+        runCurrent()
+        assertEquals("session-4", assertIs<ScaleSessionState.Stable>(f.state).reading.sessionId)
+    }
+
+    /**
      * PRD_SCALE 14.3 point 5 : « attendre au maximum dix secondes après le poids stable […]
      * au-delà, la session devient `Complete` sans composition. »
      *

@@ -177,13 +177,14 @@ fun EntryScreen(modifier: Modifier = Modifier) {
          * because a `ViewModel` has no `Context` and must not acquire one; the ViewModel is still
          * told, so it can retry the session or remember that the notice has been given.
          */
-        onScaleStatusAction = { status ->
-            viewModel.onScaleStatusAction(status)
-            val intent = when (status) {
-                EntryScaleStatus.NOT_FOUND -> null
-                EntryScaleStatus.BLUETOOTH_OFF -> ScalePermissions.enableBluetoothIntent(context)
-                EntryScaleStatus.PERMISSION_MISSING -> ScalePermissions.appSettingsIntent(context)
-                EntryScaleStatus.SYSTEM_LOCATION_OFF ->
+        onScaleAction = { action ->
+            viewModel.onScaleAction(action)
+            val intent = when (action) {
+                // La relance ne quitte pas Mue : le `ViewModel` a déjà rouvert la session.
+                EntryScaleAction.RESTART_SEARCH -> null
+                EntryScaleAction.ENABLE_BLUETOOTH -> ScalePermissions.enableBluetoothIntent(context)
+                EntryScaleAction.OPEN_APP_SETTINGS -> ScalePermissions.appSettingsIntent(context)
+                EntryScaleAction.OPEN_LOCATION_SETTINGS ->
                     ScalePermissions.systemLocationSettingsIntent()
             }
             // A settings screen that no ROM ships is not an error worth showing anyone: the
@@ -208,7 +209,7 @@ internal fun EntryContent(
     onDateSelected: (LocalDate) -> Unit,
     onSave: () -> Unit,
     onSaveConfirmationFinished: () -> Unit,
-    onScaleStatusAction: (EntryScaleStatus) -> Unit,
+    onScaleAction: (EntryScaleAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
@@ -288,7 +289,7 @@ internal fun EntryContent(
 
     MueScreenScaffold(
         modifier = modifier,
-        trailing = { EntryHeaderChips(state = state, onStatusAction = onScaleStatusAction) },
+        trailing = { EntryHeaderChips(state = state, onAction = onScaleAction) },
     ) {
         MueScreenTitle(
             title = ScreenTitle,
@@ -943,7 +944,7 @@ private fun SaveBlockedReason(scale: EntryScaleUiState) {
 @Composable
 private fun EntryHeaderChips(
     state: EntryUiState,
-    onStatusAction: (EntryScaleStatus) -> Unit,
+    onAction: (EntryScaleAction) -> Unit,
 ) {
     val chip = state.scale.linkChip
     val dated = !state.isToday
@@ -956,7 +957,7 @@ private fun EntryHeaderChips(
         horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        chip?.let { ScaleLinkChip(chip = it, onAction = onStatusAction) }
+        chip?.let { ScaleLinkChip(chip = it, onAction = onAction) }
         if (dated) MueHeaderChip(EntryFormat.headerDate(state.date))
     }
 }
@@ -965,26 +966,31 @@ private fun EntryHeaderChips(
  * The whole state of the link, in a chip the size of the one that used to say `Today`.
  *
  * Three things carry it and they are deliberately not words: the colour (amber while the session
- * lives, grey otherwise), the dot, and whether that dot breathes. The label is the fourth and the
- * first to go — once the weight has landed there is nothing useful left to write there, and the
- * one thing that could be written, the scale's name, defaults to the model (`HB BODY FAT`) and
- * would burst the chip. Identity belongs to `Profile > Scales` (FR-SCALE-012).
+ * lives or while the value on screen came from the scale, grey otherwise), the dot, and whether
+ * that dot breathes. What is *not* written there is the scale's name — it defaults to the model,
+ * `HB BODY FAT`, and would burst the chip; identity belongs to `Profile > Scales` (FR-SCALE-012).
  *
- * **A screen reader loses none of that** (PRD_SCALE 20). The description is the full sentence in
+ * **The label never goes quiet under an action** (FR-SCALE-023). The chip used to drop its label
+ * once the weight had landed, which was right while it was decoration and became wrong the day it
+ * started offering `Try again` in that state: a tappable chip that says nothing tappable is worse
+ * than no button, since the only clue left would be a touch target nobody can see.
+ *
+ * **A screen reader loses none of it** (PRD_SCALE 20). The description is the full sentence in
  * every state, label or no label, and the pane title names the region so `Connecting` is heard as
  * a fact about the scale rather than about the screen. The live region is set for exactly one
  * change — the scale becoming unusable — because that is the one the reader has to be told about
  * without looking; the arrival of a measurement is announced by the provenance mark, with its
  * value, once.
  *
- * The tap of FR-SCALE-025 comes with the three actionable states and with nothing else. It opens
- * no dialog and no system screen by itself: [onAction] carries the intent back to the screen,
- * which is the only place a `Context` exists.
+ * The tap comes with every state that has something to offer and with nothing else — never during
+ * a live session, where there is nothing to ask for. It opens no dialog and no system screen by
+ * itself: [onAction] carries the intent back to the screen, which is the only place a `Context`
+ * exists.
  */
 @Composable
 private fun ScaleLinkChip(
     chip: EntryLinkChip,
-    onAction: (EntryScaleStatus) -> Unit,
+    onAction: (EntryScaleAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MueTheme.colors
@@ -995,11 +1001,42 @@ private fun ScaleLinkChip(
     val action = chip.action
 
     Box(
-        // FR-SCALE-025 : le geste est offert, donc il a la taille d'une cible tactile. Les états
-        // qui n'attendent rien gardent la hauteur de la pastille de date, et l'en-tête avec.
-        modifier = modifier.then(
-            if (action != null) Modifier.heightIn(min = MueMinTouchTarget) else Modifier
-        ),
+        /*
+         * FR-SCALE-023 et FR-SCALE-025 : le geste est offert, donc il a la taille d'une cible
+         * tactile — la même règle pour la relance que pour les quatre états de PRD_SCALE 18.5. Les
+         * états qui n'attendent rien, c'est-à-dire les sessions en cours, gardent la hauteur de la
+         * pastille de date, et l'en-tête avec.
+         *
+         * La hauteur, le clic et le nom accessible sont **sur le même nœud**. La pastille dessinée
+         * est plus basse que quarante-huit points, et il ne suffit pas de lui réserver la place :
+         * une hauteur portée par la boîte pendant que le clic vit sur le fond coloré à l'intérieur
+         * donnerait une cible aussi petite qu'avant, avec la place d'une grande. C'est la boîte qui
+         * s'écoute, la ligne colorée reste à sa taille, et le doigt attrape les deux. C'est la
+         * construction de `MuePill`, pour la même raison et jusqu'à son `indication = null` : une
+         * onde qui déborderait la pastille dessinerait le rectangle de la cible, qui n'a pas à se
+         * voir.
+         */
+        modifier = modifier
+            .then(
+                if (action != null) {
+                    Modifier
+                        .heightIn(min = MueMinTouchTarget)
+                        .clickable(
+                            interactionSource = null,
+                            indication = null,
+                            role = Role.Button,
+                            onClick = { onAction(action) },
+                        )
+                } else {
+                    Modifier
+                }
+            )
+            .testTag(ScaleTestTags.ENTRY_STATUS)
+            .semantics(mergeDescendants = true) {
+                paneTitle = ScaleMessages.SCALE_STATUS_LABEL
+                contentDescription = chip.description
+                if (chip.announce) liveRegion = LiveRegionMode.Polite
+            },
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -1009,20 +1046,7 @@ private fun ScaleLinkChip(
                 .clip(shape)
                 .background(container)
                 .border(1.dp, colors.surfaceBorder, shape)
-                .then(
-                    if (action != null) {
-                        Modifier.clickable(role = Role.Button, onClick = { onAction(action) })
-                    } else {
-                        Modifier
-                    }
-                )
-                .padding(horizontal = LinkChipHorizontalPadding, vertical = spacing.sm)
-                .testTag(ScaleTestTags.ENTRY_STATUS)
-                .semantics(mergeDescendants = true) {
-                    paneTitle = ScaleMessages.SCALE_STATUS_LABEL
-                    contentDescription = chip.description
-                    if (chip.announce) liveRegion = LiveRegionMode.Polite
-                },
+                .padding(horizontal = LinkChipHorizontalPadding, vertical = spacing.sm),
         ) {
             ScaleLinkDot(
                 tint = if (chip.active) colors.accent else colors.textQuiet,
@@ -1140,7 +1164,7 @@ private fun EntryPreview(state: EntryUiState) {
             onDateSelected = {},
             onSave = {},
             onSaveConfirmationFinished = {},
-            onScaleStatusAction = {},
+            onScaleAction = {},
         )
     }
 }

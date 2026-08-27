@@ -374,30 +374,47 @@ class EntryViewModel(
     }
 
     /**
-     * Le geste offert par la ligne d'état de PRD_SCALE 18.5.
+     * Le geste offert par la pastille d'en-tête (FR-SCALE-023, FR-SCALE-025).
      *
-     * Seul [EntryScaleStatus.NOT_FOUND] agit ici — c'est l'unique chemin de relance hors d'une
-     * réouverture de l'écran (FR-SCALE-020). Les trois autres ouvrent un réglage système, ce qui
-     * appartient à l'écran : un `ViewModel` n'a pas de `Context` et ne doit pas en avoir un.
-     * Ce qui est enregistré ici, c'est que la notice de permission a été donnée pour cet
-     * affichage et ne sera pas relancée spontanément (FR-SCALE-025).
+     * Seul [EntryScaleAction.RESTART_SEARCH] agit sur la liaison : c'est le `Try again` de
+     * FR-SCALE-023, l'unique chemin de relance hors d'une réouverture de l'écran, et il est
+     * désormais offert dès qu'aucune session ne court — pas seulement après le délai de deux
+     * minutes. Les trois autres ouvrent un réglage système, ce qui appartient à l'écran : un
+     * `ViewModel` n'a pas de `Context` et ne doit pas en avoir un. Ce qui est enregistré ici pour
+     * eux, c'est que la notice de permission a été donnée pour cet affichage et ne sera pas
+     * relancée spontanément (FR-SCALE-025).
+     *
+     * **Une relance ne ressuscite rien.** [acceptedReading] et [EntryScaleUiState.fromScale] sont
+     * délibérément laissés en place : la valeur à l'écran vient toujours de la balance et la
+     * provenance ne doit pas clignoter entre deux pesées. Ce qui empêche la mesure précédente de
+     * revenir n'est pas leur effacement mais [closedSessionId], et la nouvelle mesure les
+     * remplacera tous les deux en arrivant, avec son propre `sessionId`.
      */
-    fun onScaleStatusAction(status: EntryScaleStatus) {
-        when (status) {
-            EntryScaleStatus.NOT_FOUND -> {
-                // `closedSessionId` n'est pas effacé : la nouvelle session porte un autre
-                // identifiant, et laisser l'ancien en place est ce qui garantit qu'une trame de
-                // la précédente ne pourra jamais compléter celle-ci (PRD_SCALE 9.4).
-                _uiState.update { it.copy(scale = it.scale.copy(outOfRange = false)) }
+    fun onScaleAction(action: EntryScaleAction) {
+        when (action) {
+            EntryScaleAction.RESTART_SEARCH -> {
+                /*
+                 * `closedSessionId` n'est **pas** effacé : la nouvelle session porte un autre
+                 * identifiant, et laisser l'ancien en place est ce qui garantit qu'une trame de la
+                 * précédente — l'impédance en retard d'une mesure déjà enregistrée, typiquement —
+                 * ne pourra jamais compléter celle-ci (PRD_SCALE 9.4, BR-SCALE-012).
+                 *
+                 * Le constat qui vient d'être relancé, lui, cesse d'être vrai à l'instant de
+                 * l'appui : `Scale not found` et le message hors bornes partent tout de suite,
+                 * sans attendre le premier état de la nouvelle session (FR-SCALE-024).
+                 */
+                _uiState.update {
+                    it.copy(scale = it.scale.copy(status = null, outOfRange = false))
+                }
                 scaleSession?.retry()
             }
 
-            EntryScaleStatus.PERMISSION_MISSING, EntryScaleStatus.SYSTEM_LOCATION_OFF -> {
+            EntryScaleAction.OPEN_APP_SETTINGS, EntryScaleAction.OPEN_LOCATION_SETTINGS -> {
                 permissionNoticeSpent = true
                 _uiState.update { it.copy(scale = it.scale.copy(status = null)) }
             }
 
-            EntryScaleStatus.BLUETOOTH_OFF -> Unit
+            EntryScaleAction.ENABLE_BLUETOOTH -> Unit
         }
     }
 
