@@ -181,10 +181,38 @@ class DataSyncSectionTest {
             .assertExists()
     }
 
+    /**
+     * A callback that is not given is a button that is not drawn.
+     *
+     * The section is embedded in `Server settings`, which can perform neither action — its
+     * `Server settings` would re-open the screen it is on, and it is the one control there named
+     * after what people arrive wanting to do, so drawing it inert was a false path placed exactly
+     * where the eye lands. The nullable callback is what makes rendering it impossible rather
+     * than merely discouraged.
+     */
+    @Test
+    fun anActionWithNoCallbackIsNotDrawnAtAll() {
+        setContent(paired, onSyncNow = null, onOpenServerSettings = null)
+
+        composeRule.onNodeWithTag(SyncTestTags.SYNC_NOW).assertDoesNotExist()
+        composeRule.onNodeWithTag(SyncTestTags.SERVER_SETTINGS).assertDoesNotExist()
+        // Everything PRD 9.1 asks the section to *say* is still said.
+        composeRule.onNodeWithTag(SyncTestTags.STATUS_LINE).assertExists()
+    }
+
+    /** Each is independent: a screen may keep one and drop the other. */
+    @Test
+    fun theTwoActionsAreDroppedSeparately() {
+        setContent(paired, onOpenServerSettings = null)
+
+        composeRule.onNodeWithTag(SyncTestTags.SYNC_NOW).assertIsEnabled()
+        composeRule.onNodeWithTag(SyncTestTags.SERVER_SETTINGS).assertDoesNotExist()
+    }
+
     private fun setContent(
         state: DataSyncUiState,
-        onSyncNow: () -> Unit = {},
-        onOpenServerSettings: () -> Unit = {},
+        onSyncNow: (() -> Unit)? = {},
+        onOpenServerSettings: (() -> Unit)? = {},
     ) {
         composeRule.setContent {
             MueTheme {

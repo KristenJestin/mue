@@ -369,8 +369,40 @@ class ServerSettingsScreenTest {
         setContent(DataSyncUiState(), PairingFormState())
 
         composeRule.onNodeWithTag(SyncTestTags.STATUS_LINE).assertExists()
-        // ...but its `Sync now` is inert on a screen that has no server to sync with.
-        composeRule.onNodeWithTag(SyncTestTags.SYNC_NOW).assertIsNotEnabled()
+    }
+
+    /**
+     * The second defect, and it was worse than a duplicate.
+     *
+     * `Server settings` inside `Server settings` is the only control on the screen carrying the
+     * name of the thing somebody arrives wanting to do — change the address, change the account —
+     * so it is read as the way in and pressed first. It went nowhere: the screen passed an empty
+     * lambda to the section, which drew the button anyway. Someone told to disconnect in order to
+     * change anything, looking at a button called `Server settings` that does nothing, has been
+     * given a false path exactly where they were looking.
+     *
+     * `Sync now` is the milder case of the same rule: the app's one `Sync now` is the one in
+     * `Profile`, and a second copy that cannot run is not a second `Sync now`.
+     *
+     * Both are gone because the section no longer takes a callback it will not call. The status,
+     * the server, the date and the counts stay — that half is why the section is repeated here.
+     */
+    @Test
+    fun theRepeatedSectionOffersNoActionThisScreenCannotPerform() {
+        setContent(paired, PairingFormState())
+
+        composeRule.onNodeWithTag(SyncTestTags.STATUS_LINE).assertExists()
+        composeRule.onNodeWithTag(SyncTestTags.SERVER_SETTINGS).assertDoesNotExist()
+        composeRule.onNodeWithTag(SyncTestTags.SYNC_NOW).assertDoesNotExist()
+    }
+
+    /** And the same when there is nothing paired: an inert button is still a promise. */
+    @Test
+    fun theRepeatedSectionOffersNoActionWhenUnpairedEither() {
+        setContent(DataSyncUiState(), PairingFormState())
+
+        composeRule.onNodeWithTag(SyncTestTags.SERVER_SETTINGS).assertDoesNotExist()
+        composeRule.onNodeWithTag(SyncTestTags.SYNC_NOW).assertDoesNotExist()
     }
 
     @Test

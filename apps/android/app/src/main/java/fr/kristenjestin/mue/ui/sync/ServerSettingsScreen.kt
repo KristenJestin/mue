@@ -157,11 +157,18 @@ internal fun ServerSettingsScreen(
 
             DataSyncSection(
                 state = state,
-                // The section's own `Sync now` and `Server settings` would be a button that
-                // re-opens the screen it is on, so this copy is the read-only half: the state,
-                // the server, the date and the counts, with the actions left to the screen.
-                onSyncNow = {},
-                onOpenServerSettings = {},
+                // Both null, so neither button is drawn. They used to be drawn with `{}` behind
+                // them, which produced a `Server settings` button on the `Server settings`
+                // screen: the one control on the page named after what someone opening it has
+                // come to do, and it did nothing. `Sync now` was the same mistake, quieter — the
+                // app's `Sync now` is the one in `Profile`, and a copy that cannot run is not a
+                // second one.
+                //
+                // The section is still repeated, because its other half is worth repeating: the
+                // state, the server, the date and the counts, read from the same row that decides
+                // what `Profile` says, so the two can never disagree.
+                onSyncNow = null,
+                onOpenServerSettings = null,
                 locale = locale,
                 zone = zone,
             )

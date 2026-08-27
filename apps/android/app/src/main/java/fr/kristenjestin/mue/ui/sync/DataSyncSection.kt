@@ -52,8 +52,19 @@ import java.util.Locale
 @Composable
 internal fun DataSyncSection(
     state: DataSyncUiState,
-    onSyncNow: () -> Unit,
-    onOpenServerSettings: () -> Unit,
+    /**
+     * Null where this screen cannot synchronise, and the button is then not drawn at all.
+     *
+     * Nullable rather than a `showActions` flag on purpose: the type is what makes it impossible
+     * to draw a control with nothing behind it. `Server settings` embedded this section and
+     * passed `{}` for both, so the screen rendered a `Sync now` and a `Server settings` that
+     * looked ordinary, were enabled, and did nothing — and the second one carried the name of
+     * precisely what somebody opening that screen has come to do. A false path where the eye
+     * lands is worse than a missing one.
+     */
+    onSyncNow: (() -> Unit)?,
+    /** Null on the `Server settings` screen itself: it is where that action leads. */
+    onOpenServerSettings: (() -> Unit)?,
     modifier: Modifier = Modifier,
     locale: Locale = rememberMueLocale(),
     zone: ZoneId = ZoneId.systemDefault(),
@@ -109,25 +120,31 @@ internal fun DataSyncSection(
             )
         }
 
-        MueSecondaryButton(
-            label = if (state.syncing) SyncMessages.CONNECTING else SyncMessages.SYNC_NOW,
-            onClick = onSyncNow,
-            modifier = Modifier
-                .padding(top = spacing.md)
-                .testTag(SyncTestTags.SYNC_NOW),
-            // `Sync now` with no server would run an engine that returns `NotPaired` and change
-            // nothing. It stays on screen because PRD 9.1 lists it, and it is inert because
-            // pressing it would be theatre.
-            enabled = state.connected && !state.syncing,
-        )
+        onSyncNow?.let { syncNow ->
+            MueSecondaryButton(
+                label = if (state.syncing) SyncMessages.CONNECTING else SyncMessages.SYNC_NOW,
+                onClick = syncNow,
+                modifier = Modifier
+                    .padding(top = spacing.md)
+                    .testTag(SyncTestTags.SYNC_NOW),
+                // `Sync now` with no server would run an engine that returns `NotPaired` and
+                // change nothing. It stays on screen because PRD 9.1 lists it, and it is inert
+                // because pressing it would be theatre. That is *disabled*, not absent, and it is
+                // a different statement from the one above: "there is nothing to synchronise with
+                // yet" rather than "this action does not belong on this screen".
+                enabled = state.connected && !state.syncing,
+            )
+        }
 
-        MueSecondaryButton(
-            label = SyncMessages.SERVER_SETTINGS,
-            onClick = onOpenServerSettings,
-            modifier = Modifier
-                .padding(top = spacing.sm)
-                .testTag(SyncTestTags.SERVER_SETTINGS),
-        )
+        onOpenServerSettings?.let { open ->
+            MueSecondaryButton(
+                label = SyncMessages.SERVER_SETTINGS,
+                onClick = open,
+                modifier = Modifier
+                    .padding(top = spacing.sm)
+                    .testTag(SyncTestTags.SERVER_SETTINGS),
+            )
+        }
     }
 }
 
