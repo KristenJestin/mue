@@ -1,6 +1,8 @@
 import type { MueError, MutationResult, PullResponse } from "@mue/contracts";
 import { type DatabaseHandle, createTestDatabase, migrate, schema, seedUser } from "@mue/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { readChanges } from "./pull";
 import { submitMutations } from "./push";
@@ -240,14 +242,180 @@ describe("section 13.4 — a conflict on one field follows the last accepted mut
   });
 
   /**
-   * No base to compare against, so nothing can be shown to be untouched. Section 13.4's
-   * conflict rule applies to the whole payload: the last accepted mutation stands.
+   * No base to compare against, so nothing can be shown to be untouched — but a value the
+   * author states is still a value the author states. Section 13.4's conflict rule applies
+   * to it: the last accepted mutation stands.
+   *
+   * The birth date is the other half, and it is the rule this file's next block is about:
+   * the laptop states null with no base, which is not a conflict because it is not a
+   * statement. See "an author with no base cannot empty a field".
    */
-  test("an author that quoted no base states every field, and states them last", async () => {
+  test("an author that quoted no base states every value it has, and states them last", async () => {
     await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
     await submit(profileUpsert({ heightCm: 180, birthDate: null }, null, LAPTOP));
 
-    expect(await stored()).toEqual({ heightCm: 180, birthDate: null, revision: 2n });
+    expect(await stored()).toEqual({ heightCm: 180, birthDate: "1998-11-18", revision: 2n });
+  });
+});
+
+/**
+ * The defect, and the distinction that closes it.
+ *
+ * `mue_app.sync_journal` held three entries of `{heightCm: null, birthDate: null}` from three
+ * different android origins, each minutes after a *clear app data → pair → open Profile →
+ * Save*, each replacing a row that held `171 / 1998-11-18`.
+ *
+ * Section 12.2 requires an upsert to state the complete aggregate — that is what makes the
+ * merge above possible and it is not being weakened here — so a freshly-paired phone with an
+ * empty local profile sends exactly the payload a person who cleared both fields sends. The
+ * payloads are the same. The difference is that a person clears a field *on a profile they
+ * are looking at*, which has a revision their client holds and quotes, and a phone that has
+ * never received the aggregate has nothing to quote.
+ *
+ * So `baseRevision` is the discriminator, and it is evidence rather than a claim: on Android
+ * it is filled from `sync_aggregate_state.revision`, a column written only by a completed
+ * pull or a completed push. `FirstPushBaseRevisionTest` in the Android suite pins the two
+ * bodies that arrive here, byte for byte.
+ */
+describe("section 12.2 — a complete payload from a client that has seen nothing", () => {
+  const FROM_A_FRESHLY_PAIRED_PHONE = { heightCm: null, birthDate: null } as const;
+
+  /**
+   * The revisions `cleared-height-save.json` quotes as its base, built by applying three real
+   * mutations rather than by writing a row. Revision 3's journal snapshot is what the phone
+   * pulled and what its clear is an edit of.
+   */
+  async function profileAsThePhonePulledIt(): Promise<void> {
+    await submit(profileUpsert({ heightCm: 180, birthDate: null }, null, PHONE));
+    await submit(profileUpsert({ heightCm: 171, birthDate: null }, "1", PHONE));
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, "2", PHONE));
+  }
+
+  /**
+   * The bytes an Android phone actually produced, as `FirstPushBaseRevisionTest` proves it
+   * does — not a re-statement of them here.
+   *
+   * The path this closes is the whole one: `ProfileScreen` → `DataStoreUserProfileRepository`
+   * → `HealthProfileDao.upsertWithMutation` → `sync_mutations` → `SyncWire.toEnvelope` → these
+   * bytes → `submitMutations` → `mue_app.health_profile`. Half of it is Kotlin and half is
+   * TypeScript, so the join has to be a file: neither suite can be edited into agreement with
+   * itself, and a value that changes anywhere along the path turns one of the two red.
+   */
+  function fromThePhone(name: string): unknown {
+    const path = join(import.meta.dir, "../../../../apps/android/app/src/test/resources", name);
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8").trim();
+    } catch {
+      // Named rather than left as an ENOENT, because the interesting fact is *whose* file it
+      // is: the Android suite asserts these bytes, so moving one silently unlinks the two
+      // halves of the path this describe block exists to cover.
+      throw new Error(
+        `${path} is missing. FirstPushBaseRevisionTest in the Android suite asserts these ` +
+          "exact bytes; this test submits them. Both must read the same file.",
+      );
+    }
+    return JSON.parse(text);
+  }
+
+  test("a device that has never seen the profile cannot empty it", async () => {
+    await profileAsThePhonePulledIt();
+
+    // Cleared app data, paired again, opened Profile, saved. A null base, and two nulls.
+    const result = accepted(
+      (await submit(fromThePhone("first-push/freshly-paired-empty-save.json")))[0],
+    );
+
+    expect(result.revision).toBe("4");
+    expect(await stored()).toEqual({ heightCm: 171, birthDate: "1998-11-18", revision: 4n });
+  });
+
+  /**
+   * The other half, and the one a blunt "refuse an empty profile" rule would have broken.
+   * The height goes because the author was editing revision 3 and moved it; the birth date
+   * stays because the author was editing revision 3 and did not.
+   *
+   * The same phone, the same screen, the same repository call — one pull apart.
+   */
+  test("a person who clears a field quotes the version they were clearing", async () => {
+    await profileAsThePhonePulledIt();
+
+    await submit(fromThePhone("first-push/cleared-height-save.json"));
+
+    expect(await stored()).toEqual({ heightCm: null, birthDate: "1998-11-18", revision: 4n });
+  });
+
+  /** And clearing *both* is expressible too, for the same reason: there is a base. */
+  test("a person who clears both fields quotes it too, and both fields go", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(profileUpsert(FROM_A_FRESHLY_PAIRED_PHONE, "1", PHONE));
+
+    expect(await stored()).toEqual({ heightCm: null, birthDate: null, revision: 2n });
+  });
+
+  /**
+   * What the rule does **not** protect, asserted rather than left to a comment.
+   *
+   * A client with no base that carries a *wrong* value still overwrites: `heightCm: 180` is
+   * an assertion and this server cannot know it came from a stale seed rather than from a
+   * person. Telling those apart is a fact about the client — whether a field was ever
+   * edited — and no client has a column for it today.
+   */
+  test("but a wrong value from the same device still stands, because it is stated", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(profileUpsert({ heightCm: 180, birthDate: null }, null, LAPTOP));
+
+    expect(await stored()).toEqual({ heightCm: 180, birthDate: "1998-11-18", revision: 2n });
+  });
+
+  /**
+   * The first profile an account ever has. There is no stored aggregate, so there is nothing
+   * for a null to yield to and nothing to protect: an empty profile is created, exactly as
+   * section 13.4's "le profil existe avant d'être rempli" describes.
+   */
+  test("the first profile of an account may be empty, and is created", async () => {
+    await submit(profileUpsert(FROM_A_FRESHLY_PAIRED_PHONE, null, PHONE));
+
+    expect(await stored()).toEqual({ heightCm: null, birthDate: null, revision: 1n });
+  });
+
+  /**
+   * A `baseRevision` the journal cannot answer is no base — a server restored from a backup
+   * whose revisions the phone has outrun, or a snapshot written by a payload version this
+   * build cannot parse. It degrades to the same rule and for the same reason: the server has
+   * no third version, so it cannot tell an emptying from an absence.
+   *
+   * The cost is one round trip, and it is worth naming: the person's clear does not take
+   * effect on this attempt. Their next pull gives them a base the journal does hold, and the
+   * clear they repeat from it is applied.
+   */
+  test("a base the journal cannot give back is no base, and protects the same way", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(profileUpsert({ heightCm: null, birthDate: null }, "4096", PHONE));
+
+    expect(await stored()).toEqual({ heightCm: 171, birthDate: "1998-11-18", revision: 2n });
+  });
+
+  /**
+   * "Reste audité" (rule 3) survives the change. Every version is still journalled, including
+   * the one the merge kept rather than replaced, and the snapshot is the merged aggregate —
+   * so the phone that sent the empty payload pulls the profile back rather than believing its
+   * nulls stood.
+   */
+  test("the refused emptying is journalled as what was kept, and the phone converges", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(profileUpsert(FROM_A_FRESHLY_PAIRED_PHONE, null, LAPTOP));
+
+    expect(await auditedVersions()).toEqual([
+      { heightCm: 171, birthDate: "1998-11-18" },
+      { heightCm: 171, birthDate: "1998-11-18" },
+    ]);
+
+    const response = await pull(null);
+    if (response.status !== "ok") throw new Error("expected a page");
+    const last = response.changes.at(-1);
+    expect(last?.payload).toEqual({ heightCm: 171, birthDate: "1998-11-18" });
+    expect(last?.meta.originId).toBe(LAPTOP.id);
   });
 });
 

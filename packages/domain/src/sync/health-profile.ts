@@ -52,13 +52,43 @@ const { healthProfile, syncJournal } = schema;
  * When the two authors both moved the same field, the second branch applies to it and
  * the last accepted mutation wins, which is rule 3 exactly.
  *
- * ## When there is no base
+ * ## When there is no base, and what a null then means
  *
  * `baseRevision` is null (the author believed no profile existed) or the journal has no
- * entry at that revision. There is then nothing to compare against, so every field of
- * the payload is taken as stated and the mutation behaves as rule 3's conflict: last
- * accepted wins, replaced version audited. That is a documented degradation to the rule
- * section 13.4 states, not a silent invention of a different one.
+ * entry at that revision. There is no third version, so no field can be *shown* to have
+ * been left alone and the merge above cannot run.
+ *
+ * That degradation used to take every field of the payload as stated, and it is where a
+ * freshly-paired phone erased a profile it had never seen. Section 12.2 makes an upsert
+ * state the complete aggregate, so a phone whose local profile is empty sends
+ * `{heightCm: null, birthDate: null}` — byte for byte what a person who cleared both
+ * fields sends. The payloads are identical and so are their `baseRevision`s if you only
+ * look at the type. **What differs is whether there is one at all:** a person clears a
+ * field on a profile they are looking at, and that profile has a revision their client
+ * holds and quotes. A client that has never received the aggregate has nothing to quote.
+ *
+ * So the degradation is asymmetric, and each half is the honest reading of the evidence:
+ *
+ * | the author's value | with no base | outcome |
+ * |---|---|---|
+ * | a value | an assertion — nobody types a height by accident | the author's value stands, rule 3 as before |
+ * | null | the *absence* of one, indistinguishable from "I have never had this field" | the *stored* value stands |
+ *
+ * A null with no base is therefore not destructive, and a null with a base still is —
+ * which is what keeps "I cleared my height" expressible. Clearing a field is an edit, and
+ * an edit has something to be an edit *of*.
+ *
+ * Nothing about section 12.2 changes. The payload still carries the whole aggregate, both
+ * fields are still always present, and no client sends anything different from what it
+ * sent before: a partial payload would break rule 2 for everybody, and none is asked for.
+ * This is only how the server reads a payload it has been given no basis for, and rule
+ * 2's three-way merge is untouched wherever a base exists.
+ *
+ * It protects no field an author states positively. A client that arrives with a *wrong*
+ * height — seeded from an old install, or typed before its first pull — still overwrites,
+ * because `heightCm: 180` is a claim and this server cannot know it is a stale one.
+ * Telling a seeded value from an edited one is a fact about the client, and no client has
+ * a column for it.
  *
  * ## Section 16, and why no message below quotes a value
  *
@@ -120,12 +150,26 @@ async function readBase(
 }
 
 /**
- * One field of the merge. `stored` wins only where the author demonstrably did not move
- * the field: same value as the base it was editing.
+ * One field of the three-way merge. `stored` wins only where the author demonstrably did
+ * not move the field: same value as the base it was editing.
  */
-function mergeField<T>(incoming: T, base: T | undefined, stored: T): T {
-  if (base === undefined) return incoming;
+function mergeField<T>(incoming: T, base: T, stored: T): T {
   return incoming === base ? stored : incoming;
+}
+
+/**
+ * One field of an author who quoted no base, or whose base the journal could not give
+ * back. There is no third version, so the question is not "did this move?" — which cannot
+ * be answered — but "is this an assertion at all?".
+ *
+ * A value is one: it was typed, or it was pulled and kept. A null is not: it is exactly
+ * what an aggregate looks like to a client that has never received it, and section 12.2
+ * requires it to be sent either way. So a null yields to what is stored and everything
+ * else stands — the narrowest rule that separates "I emptied this" from "I never had it"
+ * out of what the wire already carries.
+ */
+function stateField<T>(incoming: T | null, stored: T | null): T | null {
+  return incoming === null ? stored : incoming;
 }
 
 /** Section 13.4's merge, over the two fields the profile has. */
@@ -134,10 +178,24 @@ export function mergeHealthProfile(
   base: HealthProfilePayloadV1 | undefined,
   stored: HealthProfilePayloadV1 | undefined,
 ): HealthProfilePayloadV1 {
+  // Nothing stored: the aggregate is being created, every field is the author's own, and
+  // a null is the empty profile section 13.4 says exists before anyone fills it in. There
+  // is nothing here for a null to destroy, so no rule is needed to stop it.
   if (stored === undefined) return incoming;
+
+  // No base. `undefined` covers both ways that happens — a null `baseRevision`, and a
+  // revision whose journal snapshot this build cannot read back — because they leave the
+  // server in the same position: holding a payload it has no basis to interpret.
+  if (base === undefined) {
+    return {
+      heightCm: stateField(incoming.heightCm, stored.heightCm),
+      birthDate: stateField(incoming.birthDate, stored.birthDate),
+    };
+  }
+
   return {
-    heightCm: mergeField(incoming.heightCm, base?.heightCm, stored.heightCm),
-    birthDate: mergeField(incoming.birthDate, base?.birthDate, stored.birthDate),
+    heightCm: mergeField(incoming.heightCm, base.heightCm, stored.heightCm),
+    birthDate: mergeField(incoming.birthDate, base.birthDate, stored.birthDate),
   };
 }
 
