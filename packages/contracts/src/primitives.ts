@@ -87,7 +87,16 @@ export const aggregateIdSchema = z
  * Sorted, so an addition lands in an obvious place rather than at whichever end the author
  * happened to type.
  */
-export const AGGREGATE_TYPES = ["healthProfile", "measurement"] as const;
+export const AGGREGATE_TYPES = [
+  "activitySession",
+  "customExerciseDefinition",
+  "food",
+  "foodLogEntry",
+  "healthProfile",
+  "mealPlanEntry",
+  "measurement",
+  "recipe",
+] as const;
 
 export const aggregateTypeSchema = z.enum(AGGREGATE_TYPES).meta({
   id: "AggregateType",

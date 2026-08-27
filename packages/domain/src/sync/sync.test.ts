@@ -184,7 +184,9 @@ describe("FR-SYNC-007 — a partial failure", () => {
       upsert("2026-08-10", 7000),
       upsert("2026-08-11", 999_999),
       upsert("2026-08-12", 7100),
-      { ...upsert("2026-08-13", 7200), aggregateType: "recipe" },
+      // Not `recipe`: that used to be a type this server did not synchronise, and it is now one
+      // of the eight. An aggregate the matrix has never named is what this branch is about.
+      { ...upsert("2026-08-13", 7200), aggregateType: "sleepSession" },
       upsert("2026-08-14", 7300),
     ]);
 

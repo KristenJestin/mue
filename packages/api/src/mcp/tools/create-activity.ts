@@ -20,6 +20,7 @@ import {
   toolFailure,
   toolSuccess,
 } from "../errors";
+import { mutationIdFromIdempotencyKey } from "../idempotency";
 import type { MueTool, ToolContext } from "./types";
 
 /**
@@ -191,8 +192,14 @@ async function handler(context: ToolContext, args: CreateActivityArgs) {
 
   const movement = args.movement as z.infer<typeof activityMovementSchema>;
   const durationSeconds = args.durationSeconds ?? (args.durationMinutes ?? 0) * 60;
-  // UUIDv7 so a mutation identifier sorts by creation time, as `@mue/contracts` requires.
-  const mutationId = args.idempotencyKey ?? Bun.randomUUIDv7();
+  // `mutationIdSchema` is `z.uuidv7()` and `submitMutation` refuses anything else before it looks
+  // at the payload. An agent supplies a `crypto.randomUUID()` — a v4 — so the key it can produce
+  // is derived into an identifier the contract accepts, deterministically, so a retry carrying the
+  // same key still deduplicates. See `../idempotency.ts`.
+  const mutationId =
+    args.idempotencyKey === undefined
+      ? Bun.randomUUIDv7()
+      : mutationIdFromIdempotencyKey(args.idempotencyKey);
 
   const outcome = await context.services.createActivitySession({
     userId: context.identity.userId,

@@ -5,12 +5,23 @@ import fr.kristenjestin.mue.data.local.database.MeasurementEntity
 import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
+import fr.kristenjestin.mue.data.local.database.StrengthExerciseEntity
+import fr.kristenjestin.mue.data.local.database.StrengthSetEntity
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
+import fr.kristenjestin.mue.data.remote.sync.ActivitySessionUpsertChangeDto
+import fr.kristenjestin.mue.data.remote.sync.CustomExerciseUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
+import fr.kristenjestin.mue.data.remote.sync.FoodLogEntryUpsertChangeDto
+import fr.kristenjestin.mue.data.remote.sync.FoodUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.HealthProfileUpsertChangeDto
+import fr.kristenjestin.mue.data.remote.sync.MealPlanEntryUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
+import fr.kristenjestin.mue.data.remote.sync.RecipeUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncWire
+import fr.kristenjestin.mue.domain.model.FoodAggregates
+import fr.kristenjestin.mue.domain.model.MealPlanKey
+import java.util.UUID
 
 /**
  * Everything the engine does to local storage, as one interface.
@@ -68,10 +79,14 @@ interface SyncStore {
     suspend fun pending(limit: Int): List<SyncMutationEntity>
 
     /**
-     * How many `pending` rows this build has no wire branch for — the four food aggregates of
-     * PRD 10.1 that `AGGREGATE_TYPES` does not name yet. They are journalled, kept, block
-     * nothing, and go out unchanged the day `packages/contracts` grows their branch, which is
-     * exactly how `healthProfile` left this set.
+     * How many `pending` rows this build has no wire branch for.
+     *
+     * It is zero today, and it has not been for the life of this feature: `healthProfile` was
+     * counted here, then the four food aggregates were, and all eight of PRD 10.1's matrix are on
+     * the wire now. The number stays reported rather than removed because the state it describes
+     * is one this codebase has reached twice — a row journalled by `SyncOutbox` ahead of the
+     * contract that could carry it — and a run that says nothing about what it is holding back is
+     * how `Changes pending` came to mean two different things.
      */
     suspend fun deferredCount(): Int
 
@@ -113,7 +128,18 @@ interface SyncStore {
  * during a pull leaves the phone with the cursor it had before and the page is simply fetched
  * again — which FR-SYNC-006 makes free, since re-applying a page repeats no effect.
  */
-class RoomSyncStore(private val database: MueDatabase) : SyncStore {
+class RoomSyncStore(
+    private val database: MueDatabase,
+    /**
+     * `session_equipment.id` is minted locally on every write, so a received session needs one per
+     * item — the payload carries none, because the identifier is not stable across two saves of
+     * the same session and could never be a merge key.
+     *
+     * It is injected for the same reason `RoomActivityRepository` injects its own: a test that
+     * asserts on an exact row cannot do so against `UUID.randomUUID()`.
+     */
+    private val newRowId: () -> String = { UUID.randomUUID().toString() },
+) : SyncStore {
 
     private val syncDao get() = database.syncDao()
 
@@ -143,7 +169,61 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
             syncDao.remintMutationId(candidate.mutationId, MutationIds.random())
             repaired++
         }
-        repaired
+        repaired + repairMealPlanIdentifiers()
+    }
+
+    /**
+     * The second half of the same pass: aggregate identifiers a newer build spells differently.
+     *
+     * It runs inside [repairUnsendableMutationIds]'s transaction rather than behind a second
+     * [SyncStore] method, because it answers the same question — *what has this queue been left
+     * holding that no future run could unstick?* — and because the engine reports one number for
+     * "rows this start repaired", which is what a log line is for.
+     *
+     * `MealPlanIdRepair` carries the argument for why rewriting these identifiers is safe. The
+     * short version is structural rather than observational: `mealPlanEntry` has never been in
+     * `SENDABLE_LOCAL_AGGREGATE_TYPES`, so no row of that type has ever left a phone, so no
+     * server has recorded the old spelling and there is nothing to fork away from.
+     */
+    private suspend fun repairMealPlanIdentifiers(): Int {
+        val type = MealPlanIdRepair.FOOD_MEAL_PLAN_TYPE
+        var renamed = 0
+
+        for (candidate in syncDao.aggregateIdRepairCandidates(type)) {
+            val verdict = MealPlanIdRepair.verdict(
+                aggregateType = candidate.aggregateType,
+                aggregateId = candidate.aggregateId,
+                state = candidate.state,
+            )
+            if (verdict != MealPlanIdRepair.Verdict.RENAME) continue
+            val canonical = MealPlanIdRepair.canonicalOrNull(candidate.aggregateId) ?: continue
+            syncDao.renameMutationAggregateId(candidate.mutationId, canonical)
+            renamed++
+        }
+
+        /*
+         * `sync_aggregate_state` moves too, and it has to.
+         *
+         * That table is keyed by `(aggregate_type, aggregate_id)` and holds the local tombstone of
+         * FR-SYNC-005. Renaming the outbox and leaving this behind would have the next save insert
+         * a *second* metadata row under the new spelling with no `deleted_at`, and a proposal the
+         * user had deleted would quietly lose the tombstone that stops an old copy resurrecting
+         * it.
+         *
+         * A row whose destination already exists is left alone rather than merged: the primary key
+         * would refuse the update, and merging two metadata rows is a decision about server state
+         * that this pass has no basis to make. It cannot arise from anything this build does —
+         * nothing writes the canonical spelling until the repair has run — so leaving it is
+         * leaving a case that does not occur, not papering over one that does.
+         */
+        val existing = syncDao.aggregateStatesOfType(type).map { it.aggregateId }.toSet()
+        for (state in syncDao.aggregateStatesOfType(type)) {
+            val canonical = MealPlanIdRepair.canonicalOrNull(state.aggregateId) ?: continue
+            if (canonical in existing) continue
+            syncDao.renameAggregateState(type, state.aggregateId, canonical)
+        }
+
+        return renamed
     }
 
     override suspend fun serverUrl(): String? = syncDao.syncState()?.serverUrl
@@ -196,7 +276,7 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
             // In journal order, which is the order the server accepted them in. An upsert
             // followed by a delete of the same aggregate must not become a delete followed by
             // an upsert, and PRD 12.3 makes the sequence — not any clock — that order.
-            for (change in changes) applyChange(change)
+            for (change in changes) applyChange(change, at)
             syncDao.recordSuccess(nextCursor, at)
         }
     }
@@ -216,7 +296,7 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
      * origin and the mutation that produced it — and copying it entire is what keeps
      * `deletedAt` and `revision` from ever disagreeing about the same change.
      */
-    private suspend fun applyChange(change: SyncChangeDto) {
+    private suspend fun applyChange(change: SyncChangeDto, at: Long) {
         // The engine refuses a page it cannot apply *before* calling `applyPage`, so this can
         // only be null if that check were removed. Throwing rolls the transaction back and
         // leaves the cursor where it was, which is what PRD 12.4 demands of exactly this case.
@@ -230,6 +310,61 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
                     weightCg = change.payload.weightCg,
                 )
             )
+
+            /*
+             * A whole session, written through the same five tables its own save uses — and
+             * journalling nothing. A change that arrived from the server has already been
+             * journalled there; minting an outbox row for it would push it straight back, take a
+             * second revision, and return as another change.
+             *
+             * The definitions are resolved first, and outside `saveDetail` rather than inside it,
+             * because `strength_exercises.exercise_definition_id` is a `RESTRICT` foreign key: an
+             * exercise pointing at a definition this phone has never received would abort this
+             * transaction, and the cursor is written in it. `ActivityDao.resolveDefinition` turns
+             * the snapshot the payload carries into a row, or points the exercise at the
+             * definition that already holds the same folded name (PRD_ACTIVITIES 9.2).
+             */
+            is ActivitySessionUpsertChangeDto -> {
+                val activityDao = database.activityDao()
+                val exercises = mutableListOf<StrengthExerciseEntity>()
+                val sets = mutableListOf<StrengthSetEntity>()
+                for (exercise in change.payload.exercises) {
+                    val definitionId = activityDao.resolveDefinition(
+                        SyncWire.definitionSnapshotEntity(exercise.definition)
+                    )
+                    exercises += SyncWire.strengthExerciseEntity(
+                        sessionId = change.payload.id,
+                        exercise = exercise,
+                        definitionId = definitionId,
+                    )
+                    sets += SyncWire.strengthSetEntities(exercise)
+                }
+                activityDao.saveDetail(
+                    session = SyncWire.activitySessionEntity(change.payload, at),
+                    metrics = SyncWire.activityMetricEntities(change.payload),
+                    equipment = SyncWire.sessionEquipmentEntities(change.payload, newRowId),
+                    exercises = exercises,
+                    sets = sets,
+                )
+            }
+
+            is CustomExerciseUpsertChangeDto ->
+                database.exerciseCatalogDao()
+                    .applyRemote(SyncWire.customExerciseEntity(change.payload))
+
+            is FoodUpsertChangeDto ->
+                database.foodDao().upsert(SyncWire.foodEntity(change.payload, at))
+
+            is RecipeUpsertChangeDto -> database.recipeDao().saveDetail(
+                recipe = SyncWire.recipeEntity(change.payload, at),
+                ingredients = SyncWire.recipeIngredientEntities(change.payload),
+            )
+
+            is FoodLogEntryUpsertChangeDto ->
+                database.foodLogDao().upsert(SyncWire.foodLogEntryEntity(change.payload, at))
+
+            is MealPlanEntryUpsertChangeDto ->
+                database.mealPlanDao().upsert(SyncWire.mealPlanEntryEntity(change.payload, at))
 
             /*
              * The whole aggregate, replacing the row keyed by `HealthProfileEntity.ROW_ID` —
@@ -257,6 +392,43 @@ class RoomSyncStore(private val database: MueDatabase) : SyncStore {
                 // journals one. See `HealthProfileDao.clear` for why it is applied rather than
                 // refused if one ever arrives.
                 SyncAggregateStateEntity.TYPE_HEALTH_PROFILE -> database.healthProfileDao().clear()
+
+                // The metrics, equipment, exercises and sets follow through SQLite's own cascade,
+                // which is the same path a local deletion takes.
+                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION ->
+                    database.activityDao().deleteSession(change.aggregateId)
+
+                /*
+                 * Unreachable, and applied rather than refused if it ever arrives.
+                 *
+                 * `packages/domain` refuses a `customExerciseDefinition` delete — PRD_ACTIVITIES
+                 * 9.2 keeps a definition for ever — so no server journals one. Throwing here would
+                 * roll back the transaction that carries the cursor and stop the phone
+                 * synchronising for good on a page it could never get past, which is a far worse
+                 * answer to "the server did something impossible" than doing nothing. The tombstone
+                 * below is still written, so a later upsert is judged against it.
+                 */
+                SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE -> Unit
+
+                FoodAggregates.TYPE_FOOD -> database.foodDao().deleteById(change.aggregateId)
+
+                FoodAggregates.TYPE_RECIPE -> database.recipeDao().deleteRecipe(change.aggregateId)
+
+                FoodAggregates.TYPE_FOOD_LOG_ENTRY ->
+                    database.foodLogDao().deleteById(change.aggregateId)
+
+                /*
+                 * The identifier is split back into the two columns the table is keyed by.
+                 *
+                 * `MealPlanKey.parseOrNull` reads either separator, so a tombstone the server
+                 * journalled under an identifier this phone wrote before the change still deletes
+                 * the right row. An unparseable one deletes nothing rather than throwing, for the
+                 * reason above: a page that cannot be applied is a cursor that never moves again.
+                 */
+                FoodAggregates.TYPE_MEAL_PLAN_ENTRY ->
+                    MealPlanKey.parseOrNull(change.aggregateId)?.let { key ->
+                        database.mealPlanDao().delete(key.plannedOn.toString(), key.slot.id)
+                    }
 
                 else -> error("no local delete for aggregate type $localType")
             }

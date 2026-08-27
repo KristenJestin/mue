@@ -4,6 +4,7 @@ import fr.kristenjestin.mue.data.local.database.ActivityDao
 import fr.kristenjestin.mue.data.local.database.ActivityDetailRows
 import fr.kristenjestin.mue.data.local.database.toDomain
 import fr.kristenjestin.mue.data.local.database.toEntity
+import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.logic.StrengthRules
 import fr.kristenjestin.mue.domain.model.ActivityId
 import fr.kristenjestin.mue.domain.model.ActivityMetrics
@@ -28,9 +29,29 @@ import java.util.UUID
  * The write path is the module's only gate: `StrengthRules` decides what is worth storing, so
  * the invariant "the database never holds an invalid set, nor an exercise with none" is enforced
  * here, once, and every query downstream may take a stored set at face value.
+ *
+ * ## The outbox, and what its absence cost
+ *
+ * PRD 10.1 marks finished sessions `Synchronisé: Oui`, and this class took no [SyncOutbox] and
+ * minted nothing. Not "journalled and undeliverable", as the four food aggregates were —
+ * *nothing*: every session ever recorded, with its metrics, its equipment, its exercises and its
+ * sets, existed on one phone and in no outbox row, and an uninstall took the lot. A food row at
+ * least survives a reinstall through the Ciqual catalogue and can be typed again; a session
+ * cannot.
+ *
+ * The row is minted here and written by [ActivityDao.saveDetailWithMutation], in the same
+ * transaction as the five business tables, which is FR-SYNC-001 for the aggregate rather than
+ * for its pieces. One mutation carries the whole session, because PRD 10.2 forbids a session
+ * appearing without its mandatory children and five rows would be five chances for four of them
+ * to arrive.
+ *
+ * The outbox is defaulted, as it is on every other repository here, so a test that does not care
+ * about synchronisation constructs one without arranging for it — and still journals, which is
+ * what keeps a test honest about what a save really does.
  */
 class RoomActivityRepository(
     private val dao: ActivityDao,
+    private val outbox: SyncOutbox = SyncOutbox(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val now: () -> Long = System::currentTimeMillis,
     private val newRowId: () -> String = { UUID.randomUUID().toString() },
@@ -62,7 +83,12 @@ class RoomActivityRepository(
             .distinctBy { it.equipmentType to it.customNameFolded }
             .mapIndexed { index, item -> item.copy(position = index) }
 
-        dao.saveDetail(
+        // The payload is built from what is *about* to be written, not from `detail`: the sets
+        // `StrengthRules` dropped and the equipment the fold deduplicated are not in the database,
+        // so a payload built from the argument would send an aggregate this phone does not hold.
+        val normalised = detail.copy(exercises = exercises, equipment = equipment)
+
+        dao.saveDetailWithMutation(
             session = detail.session.toEntity(createdAt = stamp, updatedAt = stamp),
             metrics = detail.metrics.values.map { it.toEntity(sessionId) },
             equipment = equipment.map { it.toEntity(newRowId(), sessionId) },
@@ -70,12 +96,16 @@ class RoomActivityRepository(
             sets = exercises.flatMap { exercise ->
                 exercise.sets.map { it.toEntity(exercise.exercise.id.value) }
             },
+            mutation = outbox.activitySessionUpsert(normalised),
         )
     }
 
-    /** The metrics, equipment, exercises and sets follow through SQLite's own cascade. */
+    /**
+     * The metrics, equipment, exercises and sets follow through SQLite's own cascade; the
+     * tombstone stays behind (FR-SYNC-005).
+     */
     override suspend fun delete(id: ActivityId) = withContext(ioDispatcher) {
-        dao.deleteSession(id.value)
+        dao.deleteSessionWithMutation(id.value, outbox.activitySessionDelete(id))
     }
 
     override suspend fun findLastPerformance(

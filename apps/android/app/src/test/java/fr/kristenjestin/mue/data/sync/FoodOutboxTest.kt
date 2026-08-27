@@ -125,9 +125,9 @@ class FoodOutboxAggregateTypeTest {
     /** PRD_FOOD 21.3: `(date, moment)` is the business key, so it is the aggregate id. */
     @Test
     fun `a proposition is identified by its date and moment, not by an invented id`() {
-        assertEquals("2026-09-01/dinner", outbox.mealPlanUpsert(plan).aggregateId)
+        assertEquals("2026-09-01:dinner", outbox.mealPlanUpsert(plan).aggregateId)
         assertEquals(
-            "2026-09-01/dinner",
+            "2026-09-01:dinner",
             outbox.mealPlanDelete(MealPlanKey(LocalDate.of(2026, 9, 1), MealSlot.DINNER)).aggregateId,
         )
     }
@@ -267,7 +267,7 @@ class FoodPayloadShapeTest {
         val fromPlan = logEntry.copy(fromPlan = plan.key)
         val payload = assertNotNull(outbox.foodLogUpsert(fromPlan).payload)
 
-        assertTrue(payload.contains("\"fromPlan\":\"2026-09-01/dinner\""), payload)
+        assertTrue(payload.contains("\"fromPlan\":\"2026-09-01:dinner\""), payload)
     }
 
     @Test

@@ -1,112 +1,77 @@
-import { instantSchema, localDateSchema } from "@mue/contracts";
+import {
+  ACTIVITY_ENVIRONMENTS,
+  ACTIVITY_MOVEMENTS,
+  MAX_CUSTOM_MOVEMENT_NAME_LENGTH,
+  MAX_NOTES_LENGTH,
+  PERCEIVED_EFFORT_MAX,
+  PERCEIVED_EFFORT_MIN,
+  SESSION_MAX_SECONDS,
+  SESSION_MIN_SECONDS,
+  activityEnvironmentSchema,
+  activityMovementSchema,
+  activitySessionPayloadV1Schema,
+  instantSchema,
+  localTimeSchema,
+  originTypeSchema,
+} from "@mue/contracts";
 import { z } from "zod";
 
 /**
- * The `ActivitySession` payload, transcribed from Android's own domain model.
+ * The `ActivitySession` shapes the MCP tools read, re-exported from `@mue/contracts`.
  *
- * TODO(sync-agent): move this to `@mue/contracts` as `activitySessionPayloadV1` and
- * add `"activitySession"` to `AGGREGATE_TYPES`. `@mue/contracts` ships one aggregate
- * today (`measurement`), so there is nothing here to reuse yet, and PLATFORM-CONTRACT
- * section 3 makes the contracts package the single source of truth. This file exists
- * so the MCP slice can be built and proven before that lands, and it is deliberately a
- * transcription with no rule of its own: the bounds below are Android's constants, not
- * new policy.
+ * This file used to *transcribe* Android's domain model, with a `TODO(sync-agent)` asking for it
+ * to move into `@mue/contracts` as `activitySessionPayloadV1` once that package carried more than
+ * one aggregate. It does now, so the transcription is gone and what remains is a set of
+ * re-exports: PLATFORM-CONTRACT section 3 makes the contracts package the single source of
+ * truth, and two copies of a bound are two bounds that will one day differ.
  *
- * Sources, all under `apps/android/.../domain/model/`:
- *   `Movement.kt`            - the movement ids
- *   `ActivityEnvironment.kt` - the environment and source ids
- *   `ActivitySession.kt`     - the custom-name and notes lengths
- *   `ActivityUnits.kt`       - the session duration range and the 1-10 effort scale
+ * Two things changed in the move, and both are widenings the MCP slice could not see:
  *
- * The whole session is one opaque aggregate (PLATFORM-CONTRACT decision 1), so the
- * three child collections travel inside it and never merge on their own ids.
+ * - `source` is an enum rather than `z.string().min(1).max(40)`, and `agent` is one of its
+ *   members. The eight sessions this database already holds were written with it.
+ * - the payload's three child collections are described rather than left as `z.array(z.unknown())`
+ *   — the V1 tools still create none of them, but a *phone* now pushes sessions that carry all
+ *   three, and a read tool has to be able to describe what it returns.
  */
 
-export const ACTIVITY_MOVEMENTS = [
-  "walking",
-  "running",
-  "cycling",
-  "swimming",
-  "strength_training",
-  "rowing",
-  "elliptical",
-  "hiking",
-  "yoga",
-  "climbing",
-  "dancing",
-  "pilates",
-  "mobility",
-  "team_sport",
-  "other",
-] as const;
+export {
+  ACTIVITY_ENVIRONMENTS,
+  ACTIVITY_MOVEMENTS,
+  MAX_CUSTOM_MOVEMENT_NAME_LENGTH,
+  MAX_NOTES_LENGTH,
+  PERCEIVED_EFFORT_MAX,
+  PERCEIVED_EFFORT_MIN,
+  SESSION_MAX_SECONDS,
+  SESSION_MIN_SECONDS,
+  activityEnvironmentSchema,
+  activityMovementSchema,
+  localTimeSchema,
+};
 
-export const ACTIVITY_ENVIRONMENTS = ["indoor", "outdoor", "unknown"] as const;
-
-/** `ActivitySession.MAX_CUSTOM_MOVEMENT_NAME_LENGTH`. */
-export const MAX_CUSTOM_MOVEMENT_NAME_LENGTH = 60;
-/** `ActivitySession.MAX_NOTES_LENGTH`. */
-export const MAX_NOTES_LENGTH = 500;
-/** `ActivityDuration.SESSION_MIN_SECONDS` and `SESSION_MAX_SECONDS`, 1 min to 99 h 59. */
-export const SESSION_MIN_SECONDS = 60;
-export const SESSION_MAX_SECONDS = 359_940;
-/** `PerceivedEffort.MIN` and `MAX`, the 1-to-10 scale of the Activity PRD 8.2. */
-export const PERCEIVED_EFFORT_MIN = 1;
-export const PERCEIVED_EFFORT_MAX = 10;
-
-/**
- * How the session entered Mue, as Android's `ActivitySource` spells it.
- *
- * `agent` is not one of Android's three values, and that is deliberate rather than an
- * oversight: `ActivitySource.fromId` is documented as total and non-throwing precisely
- * so a newer build can add an id, and an unknown one degrades to `MANUAL`. Recording
- * `manual` instead would be a small lie about a session nobody typed, and the sync
- * metadata cannot carry the truth on its own -- `originType` says the change arrived
- * from an agent, not that the *session* was created by one, and the two diverge the
- * moment the phone edits an agent-created session.
- *
- * TODO(sync-agent): confirm this id when `activitySession` joins `@mue/contracts`.
- */
-export const AGENT_ACTIVITY_SOURCE = "agent";
-
-/** Local wall time, minute precision, exactly as Room stores `started_at_time`. */
-export const localTimeSchema = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "expected a 24-hour local time such as 18:00");
-
-export const activityMovementSchema = z.enum(ACTIVITY_MOVEMENTS);
-export const activityEnvironmentSchema = z.enum(ACTIVITY_ENVIRONMENTS);
-
-/**
- * One stored session. `metrics`, `equipment` and `exercises` are the `jsonb` columns
- * of `mue_app.activity_sessions`; V1's agent tools create none of them, and they are
- * described here so a reader of this file is not left thinking a session has no
- * children.
- */
-export const activitySessionPayloadSchema = z.object({
-  id: z.uuid(),
-  movement: activityMovementSchema,
-  customMovementName: z.string().min(1).max(MAX_CUSTOM_MOVEMENT_NAME_LENGTH).nullable(),
-  environment: activityEnvironmentSchema,
-  startedOn: localDateSchema,
-  startedAtTime: localTimeSchema.nullable(),
-  durationSeconds: z.int().min(SESSION_MIN_SECONDS).max(SESSION_MAX_SECONDS),
-  perceivedEffort: z.int().min(PERCEIVED_EFFORT_MIN).max(PERCEIVED_EFFORT_MAX).nullable(),
-  notes: z.string().min(1).max(MAX_NOTES_LENGTH).nullable(),
-  source: z.string().min(1).max(40),
-  metrics: z.array(z.unknown()),
-  equipment: z.array(z.unknown()),
-  exercises: z.array(z.unknown()),
-});
+/** The stored session, as the contract states it. */
+export const activitySessionPayloadSchema = activitySessionPayloadV1Schema;
 
 export type ActivitySessionPayload = z.infer<typeof activitySessionPayloadSchema>;
 
+/**
+ * How the session entered Mue, for a session an agent created.
+ *
+ * `agent` is not one of Android's three `ActivitySource` ids, and that is deliberate rather than
+ * an oversight: `ActivitySource.fromId` is documented as total and non-throwing precisely so a
+ * newer build can add an id, and an unknown one degrades to `MANUAL`. Recording `manual` instead
+ * would be a small lie about a session nobody typed, and the sync metadata cannot carry the truth
+ * on its own — `originType` says the change arrived from an agent, not that the *session* was
+ * created by one, and the two diverge the moment the phone edits an agent-created session.
+ */
+export const AGENT_ACTIVITY_SOURCE = "agent";
+
 /** What a read tool returns: the payload plus the section 12.1 metadata. */
-export const activitySessionViewSchema = activitySessionPayloadSchema.extend({
+export const activitySessionViewSchema = activitySessionPayloadV1Schema.safeExtend({
   revision: z.string(),
   createdAt: instantSchema,
   updatedAt: instantSchema,
   deletedAt: instantSchema.nullable(),
-  originType: z.enum(["android", "agent", "server"]),
+  originType: originTypeSchema,
   originId: z.string().nullable(),
   lastMutationId: z.string(),
 });

@@ -535,8 +535,20 @@ class SyncEngineTest {
         engine(store, api).sync()
 
         assertNull(api.pullRequests.single().cursor)
+        // All eight of PRD 10.1's aggregates. A type the client omits is one the server treats as
+        // unsupported, so a missing entry would answer `upgrade_required` for a change this build
+        // applies perfectly well — and stop the cursor on it.
         assertEquals(
-            mapOf("healthProfile" to listOf(1), "measurement" to listOf(1)),
+            mapOf(
+                "activitySession" to listOf(1),
+                "customExerciseDefinition" to listOf(1),
+                "food" to listOf(1),
+                "foodLogEntry" to listOf(1),
+                "healthProfile" to listOf(1),
+                "mealPlanEntry" to listOf(1),
+                "measurement" to listOf(1),
+                "recipe" to listOf(1),
+            ),
             api.pullRequests.single().supportedSchemaVersions,
         )
     }

@@ -198,7 +198,7 @@ class MealPlanEntryEntityTest {
 
     @Test
     fun `the aggregate id the outbox journals is the same pair`() {
-        assertEquals("2026-09-01/dinner", entry.aggregateId)
+        assertEquals("2026-09-01:dinner", entry.aggregateId)
         assertEquals(entry.key, assertNotNull(fr.kristenjestin.mue.domain.model.MealPlanKey
             .parseOrNull(entry.aggregateId)))
     }

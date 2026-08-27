@@ -1,0 +1,31 @@
+{
+  "baseServings": 2,
+  "description": "The one that survives a 6 a.m. start.",
+  "id": "b5e8f271-0c3a-4d69-8e12-9f4a7b0c5d38",
+  "ingredients": [
+    {
+      "foodId": "7c3d9e15-6a2b-4f80-9c47-1e5d8a2b3c40",
+      "foodName": "Skyr nature",
+      "id": "c6f9a382-1d4b-4e7a-9f23-0a5b8c1d6e49",
+      "position": 0,
+      "quantityThousandths": 300000,
+      "unit": "gram"
+    },
+    {
+      "foodId": "e81bc504-3f6d-4a9c-9145-2c7d0e3f8a61",
+      "foodName": "Myrtilles",
+      "id": "d70ab493-2e5c-4f8b-8034-1b6c9d2e7f50",
+      "position": 1,
+      "quantityThousandths": 80000,
+      "unit": "gram"
+    }
+  ],
+  "isFavourite": true,
+  "name": "Skyr bowl",
+  "prepTimeMinutes": 5,
+  "steps": [
+    "Spoon the skyr into two bowls.",
+    "Top with the blueberries."
+  ],
+  "type": "breakfast"
+}

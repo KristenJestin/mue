@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Shared HTTP schemas and the generated openapi.json",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

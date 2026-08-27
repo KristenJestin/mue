@@ -32,12 +32,22 @@ class AppContainer(private val applicationContext: Context) {
         RoomMeasurementRepository(database.measurementDao(), sync.outbox)
     }
 
+    /**
+     * The same [SyncContainer.outbox] every other repository is given, and not a second instance.
+     *
+     * Both of these were built without one, so nothing journalled a session or a personal
+     * exercise definition and PRD 10.1 marked both `Synchronisé: Oui` all the same. One shared
+     * outbox is what keeps `mutation_id`, the pending state and the payload schema version
+     * identical for every aggregate the engine drains — and it is what makes the `minted` signal
+     * cover a session, so saving one now schedules a send instead of waiting for the hourly
+     * worker.
+     */
     val activityRepository: ActivityRepository by lazy {
-        RoomActivityRepository(database.activityDao())
+        RoomActivityRepository(database.activityDao(), sync.outbox)
     }
 
     val exerciseCatalogRepository: ExerciseCatalogRepository by lazy {
-        RoomExerciseCatalogRepository(database.exerciseCatalogDao())
+        RoomExerciseCatalogRepository(database.exerciseCatalogDao(), sync.outbox)
     }
 
     val userProfileRepository: UserProfileRepository by lazy {

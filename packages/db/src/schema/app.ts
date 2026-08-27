@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   date,
   index,
@@ -261,6 +262,179 @@ export const customExercises = mueApp.table(
       .on(t.userId, t.nameFolded)
       .where(sql`deleted_at is null`),
     index("custom_exercises_tombstone_idx")
+      .on(t.userId, t.deletedAt)
+      .where(sql`deleted_at is not null`),
+  ],
+);
+
+/**
+ * The four Food aggregates of PRD_FOOD 21.2, and the one decision they share
+ * with `activity_sessions`: a scalar an agent filters on is a column, a child
+ * collection is `jsonb`, and the aggregate is replaced whole.
+ *
+ * PRD_FOOD 21.3 is what licenses that. A custom food, a recipe and a journal
+ * line are all "derniere mutation acceptee, agregat entier"; the recipe adds
+ * "les ingredients ne sont pas fusionnes ligne a ligne" in as many words. So an
+ * ingredient id is a marker inside a snapshot rather than a merge key -- and it
+ * could not be one anyway, since `RecipeDao.saveDetailWithMutation` deletes and
+ * reinserts the whole list on every save. Mirror tables would duplicate Room
+ * for no V1 capability and would advertise a stability the ids do not have.
+ *
+ * Every number is a whole count of its canonical unit, exactly as Room stores
+ * it and exactly as the wire carries it: thousandths of a kilocalorie,
+ * milligrams, thousandths of a gram. No float enters this database, so nothing
+ * can be rounded a second time.
+ *
+ * An unknown nutrient is a NULL column, never a zero. PRD_FOOD 13.1 forbids
+ * inventing a value, and a zero here would be handed back to the phone on the
+ * next pull as a fact it never stated.
+ */
+export const foods = mueApp.table(
+  "foods",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    name: text("name").notNull(),
+    /** `custom` or `open_food_facts`. The Ciqual catalogue is not synchronised. */
+    source: text("source").notNull(),
+    referenceUnit: text("reference_unit").notNull(),
+    rawLabel: text("raw_label").notNull(),
+    cookedLabel: text("cooked_label").notNull(),
+    energyMilliKcal: integer("energy_milli_kcal"),
+    proteinMilligrams: integer("protein_milligrams"),
+    carbsMilligrams: integer("carbs_milligrams"),
+    fatMilligrams: integer("fat_milligrams"),
+    fibreMilligrams: integer("fibre_milligrams"),
+    brand: text("brand"),
+    barcode: text("barcode"),
+    sourceId: text("source_id"),
+    sourceVersion: text("source_version"),
+    servingLabel: text("serving_label"),
+    servingThousandths: integer("serving_thousandths"),
+    cookedRatioThousandths: integer("cooked_ratio_thousandths"),
+    imageRef: text("image_ref"),
+    ...aggregateMetadata(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    index("foods_barcode_idx")
+      .on(t.userId, t.barcode)
+      .where(sql`barcode is not null and deleted_at is null`),
+    index("foods_tombstone_idx")
+      .on(t.userId, t.deletedAt)
+      .where(sql`deleted_at is not null`),
+  ],
+);
+
+/** A recipe with its ingredients and its steps, replaced whole (PRD_FOOD 21.2). */
+export const recipes = mueApp.table(
+  "recipes",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    name: text("name").notNull(),
+    type: text("type").notNull(),
+    baseServings: integer("base_servings").notNull(),
+    isFavourite: boolean("is_favourite").notNull(),
+    description: text("description"),
+    prepTimeMinutes: integer("prep_time_minutes"),
+    imageRef: text("image_ref"),
+    ingredients: jsonb("ingredients")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    steps: jsonb("steps")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    ...aggregateMetadata(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    index("recipes_tombstone_idx")
+      .on(t.userId, t.deletedAt)
+      .where(sql`deleted_at is not null`),
+  ],
+);
+
+/**
+ * One consumption, self-contained (PRD section 10.2).
+ *
+ * `source_ref` is a plain text column and carries no foreign key onto `foods`
+ * or `recipes`, which is the storage half of "autoportante": a line whose food
+ * has never been synchronised is still a complete row, and it renders from its
+ * own snapshot. The same is true of `from_plan`.
+ */
+export const foodLogEntries = mueApp.table(
+  "food_log_entries",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    id: text("id").notNull(),
+    consumedOn: date("consumed_on", { mode: "string" }).notNull(),
+    /** Local wall time as Room holds it. A `time` column would rewrite 20:15 as 20:15:00. */
+    consumedAt: text("consumed_at").notNull(),
+    slot: text("slot").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    estimation: text("estimation").notNull(),
+    weighedCooked: boolean("weighed_cooked").notNull(),
+    energyMilliKcal: integer("energy_milli_kcal"),
+    proteinMilligrams: integer("protein_milligrams"),
+    carbsMilligrams: integer("carbs_milligrams"),
+    fatMilligrams: integer("fat_milligrams"),
+    fibreMilligrams: integer("fibre_milligrams"),
+    sourceRef: text("source_ref"),
+    amountLabel: text("amount_label"),
+    quantityThousandths: integer("quantity_thousandths"),
+    quantityUnit: text("quantity_unit"),
+    portionsThousandths: integer("portions_thousandths"),
+    fromPlan: text("from_plan"),
+    ...aggregateMetadata(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.id] }),
+    // Keyset pagination for `list_food_logs` and `get_daily_nutrition`: the id
+    // breaks ties so a page boundary inside one day cannot repeat or skip a line.
+    index("food_log_entries_day_idx").on(t.userId, t.consumedOn, t.consumedAt, t.id),
+    index("food_log_entries_tombstone_idx")
+      .on(t.userId, t.deletedAt)
+      .where(sql`deleted_at is not null`),
+  ],
+);
+
+/**
+ * One proposal per date and moment (PRD_FOOD 21.3).
+ *
+ * The primary key is the business key -- `(user_id, planned_on, slot)` -- for
+ * the same reason `measurements` is keyed by its date: convergence has to be
+ * structural. Two devices planning the same evening address one row, and "une
+ * proposition maximum par date et moment" is a constraint the table cannot
+ * violate rather than a rule a handler remembers.
+ *
+ * The wire identifier `<planned_on>:<slot>` is therefore derived from these two
+ * columns and stored nowhere. There is no second place for it to be wrong, and
+ * no column to migrate the day its spelling changes again.
+ */
+export const mealPlanEntries = mueApp.table(
+  "meal_plan_entries",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    plannedOn: date("planned_on", { mode: "string" }).notNull(),
+    slot: text("slot").notNull(),
+    recipeId: text("recipe_id").notNull(),
+    plannedServingsThousandths: integer("planned_servings_thousandths").notNull(),
+    consumedLogEntryId: text("consumed_log_entry_id"),
+    ...aggregateMetadata(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.plannedOn, t.slot] }),
+    index("meal_plan_entries_tombstone_idx")
       .on(t.userId, t.deletedAt)
       .where(sql`deleted_at is not null`),
   ],

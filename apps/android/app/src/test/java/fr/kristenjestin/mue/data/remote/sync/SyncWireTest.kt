@@ -9,6 +9,7 @@ import kotlinx.serialization.SerializationException
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -159,28 +160,45 @@ class SyncWireTest {
     }
 
     /**
-     * Still deferred: PRD 10.1 synchronises the food journal, `SyncOutbox` writes a row at every
-     * meal, and `AGGREGATE_TYPES` has no branch for it. Null means "keep it, do not send it" —
-     * the engine leaves the row `pending` rather than refusing a change the user made.
+     * Nothing is deferred any more, and this is what changed.
+     *
+     * The food journal used to map to null here — PRD 10.1 synchronised it, `SyncOutbox` wrote a
+     * row at every meal, and `AGGREGATE_TYPES` had no branch for it, so the row stayed `pending`
+     * for ever. It goes out now, and an activity session, which was not even journalled, goes out
+     * with it.
+     *
+     * What still maps to null is an aggregate name no contract has ever carried. That branch is
+     * the one that keeps a *future* aggregate journalled ahead of its wire shape from being
+     * refused rather than held, so it is asserted rather than deleted.
      */
     @Test
     fun anAggregateTypeTheContractHasNoBranchForMapsToNothing() {
-        assertNull(
+        assertNotNull(
             SyncWire.toEnvelope(
                 row(
                     aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
-                    payload = """{"consumedOn":"2026-08-25","grams":120}""",
+                    payload = """
+                        {"id":"3d60ba59-8e12-4f41-8690-7b2c5d8e3f16","consumedOn":"2026-08-25",
+                         "consumedAt":"12:30","slot":"lunch","kind":"quick","title":"Riz",
+                         "estimation":"measured","weighedCooked":false}
+                    """.trimIndent(),
                 ),
                 origin,
             ),
         )
-        assertNull(
+        assertNotNull(
             SyncWire.toEnvelope(
                 row(
                     aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
                     op = SyncMutationEntity.OP_DELETE,
                     payload = null,
                 ),
+                origin,
+            ),
+        )
+        assertNull(
+            SyncWire.toEnvelope(
+                row(aggregateType = "sleepSession", payload = """{"hours":7}"""),
                 origin,
             ),
         )
@@ -274,7 +292,27 @@ class SyncWireTest {
             SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
             SyncWire.localAggregateType(WIRE_AGGREGATE_HEALTH_PROFILE),
         )
-        assertNull(SyncWire.localAggregateType("recipe"))
+        assertEquals(
+            SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+            SyncWire.localAggregateType(WIRE_AGGREGATE_ACTIVITY_SESSION),
+        )
+        assertEquals(
+            SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE,
+            SyncWire.localAggregateType(WIRE_AGGREGATE_CUSTOM_EXERCISE),
+        )
+        assertEquals(FoodAggregates.TYPE_FOOD, SyncWire.localAggregateType(WIRE_AGGREGATE_FOOD))
+        assertEquals(FoodAggregates.TYPE_RECIPE, SyncWire.localAggregateType(WIRE_AGGREGATE_RECIPE))
+        assertEquals(
+            FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+            SyncWire.localAggregateType(WIRE_AGGREGATE_FOOD_LOG_ENTRY),
+        )
+        assertEquals(
+            FoodAggregates.TYPE_MEAL_PLAN_ENTRY,
+            SyncWire.localAggregateType(WIRE_AGGREGATE_MEAL_PLAN_ENTRY),
+        )
+        // `recipe` used to be the example of a type with no local home. It has one now, so the
+        // example has to be a type nothing has ever synchronised.
+        assertNull(SyncWire.localAggregateType("sleepSession"))
     }
 
     /**

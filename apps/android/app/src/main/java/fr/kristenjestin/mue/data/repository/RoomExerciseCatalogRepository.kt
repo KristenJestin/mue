@@ -3,6 +3,7 @@ package fr.kristenjestin.mue.data.repository
 import fr.kristenjestin.mue.data.local.database.ExerciseCatalogDao
 import fr.kristenjestin.mue.data.local.database.toDomain
 import fr.kristenjestin.mue.data.local.database.toEntity
+import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.model.EquipmentType
 import fr.kristenjestin.mue.domain.model.ExerciseDefinition
 import fr.kristenjestin.mue.domain.model.ExerciseDefinitionId
@@ -24,6 +25,7 @@ import kotlinx.coroutines.withContext
  */
 class RoomExerciseCatalogRepository(
     private val dao: ExerciseCatalogDao,
+    private val outbox: SyncOutbox = SyncOutbox(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val newId: () -> ExerciseDefinitionId = ExerciseDefinitionId::random,
 ) : ExerciseCatalogRepository {
@@ -45,6 +47,17 @@ class RoomExerciseCatalogRepository(
      * The candidate is built before the lookup and thrown away when the name is already taken:
      * PRD 9.2 reuses the existing definition whatever its case or padding, so a second
      * `  bench press ` is the catalogue's `Bench press` and keeps its tracking mode.
+     *
+     * The outbox row follows the same condition, and only that condition. PRD 10.1 synchronises a
+     * *personal* definition and explicitly does not synchronise the seventeen Mue ships, so
+     * journalling on every call would push a shipped exercise the moment the user picked one from
+     * the list — and would mint a mutation per selection for a definition the server already
+     * holds. `ExerciseCatalogDao.findOrCreateWithMutation` takes the mint as a function and
+     * evaluates it only on the branch that really inserted a row, inside the transaction that
+     * inserted it (FR-SYNC-001).
+     *
+     * There is no delete and no rename here, because PRD 9.2 gives the V1 neither; that is also
+     * why this aggregate has no tombstone anywhere in the system.
      */
     override suspend fun findOrCreate(
         name: String,
@@ -58,6 +71,8 @@ class RoomExerciseCatalogRepository(
             equipment = equipment,
             isCustom = true,
         )
-        dao.findOrCreate(candidate.toEntity()).toDomain()
+        dao.findOrCreateWithMutation(candidate.toEntity()) { stored ->
+            outbox.customExerciseUpsert(stored.toDomain())
+        }.toDomain()
     }
 }

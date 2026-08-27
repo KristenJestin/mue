@@ -135,25 +135,31 @@ object SyncFixtures {
     )
 
     /**
-     * An aggregate this build really does journal and really cannot send: PRD 10.1 synchronises
-     * the food journal, `SyncOutbox.foodLogUpsert` writes a row at every meal, and
-     * `AGGREGATE_TYPES` has no branch for it.
+     * A row of an aggregate type this build journals and cannot send.
      *
-     * It replaced the health profile in every "deferred" test here, which is the point of
-     * naming it: those tests are about the *queue*, not about which aggregate happens to be
-     * stuck in it, and an aggregate that graduated should move the tests along rather than
-     * delete them.
+     * There is no such aggregate today, and that is the third value this fixture has held. It was
+     * the health profile; then the food journal, when the profile graduated; and now neither,
+     * because all eight of PRD 10.1's aggregates are on the wire. The tests that use it are about
+     * the *queue* — that an undeliverable row is kept rather than refused, and that a window full
+     * of them cannot stall a measurement behind them — and that mechanism has to keep working for
+     * the next aggregate journalled ahead of its contract, which is how each of the last two got
+     * here.
+     *
+     * So the type is one nothing has ever synchronised, and the fixture is now a *hypothetical*
+     * rather than a report. Deleting it instead would delete the only tests that describe what
+     * happens the next time somebody writes a `SyncOutbox` mint before its Zod schema — which,
+     * on the evidence, is a thing that happens.
      */
     fun deferredUpsert(
         mutationId: String,
         createdAt: Long = 1_770_000_000_000L,
     ): SyncMutationEntity = SyncMutationEntity(
         mutationId = mutationId,
-        aggregateType = FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+        aggregateType = "sleepSession",
         aggregateId = "b7c1e2f0-0000-7000-8000-000000000001",
         op = SyncMutationEntity.OP_UPSERT,
         baseRevision = null,
-        payload = """{"consumedOn":"2026-08-25","grams":120}""",
+        payload = """{"startedOn":"2026-08-25","hours":7}""",
         payloadSchemaVersion = PAYLOAD_SCHEMA_VERSION,
         createdAt = createdAt,
         state = SyncMutationEntity.STATE_PENDING,

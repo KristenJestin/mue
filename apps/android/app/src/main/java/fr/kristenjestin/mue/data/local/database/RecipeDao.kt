@@ -104,6 +104,26 @@ interface RecipeDao : SyncJournalDao {
      * agrégat entier", so a stored list that outlived its own recipe would be a row nobody
      * intended to keep.
      */
+    /**
+     * A recipe and its ingredients, written together and journalling **nothing**.
+     *
+     * This is the receive side. A change that arrived from the server has already been journalled
+     * *there* — it is a journal entry, that is what a pull returns — and minting an outbox row for
+     * it would push it straight back, take a second revision, and return as another change. One
+     * recipe would fill an outbox on its own.
+     *
+     * The ingredients are deleted and reinserted rather than merged, because PRD_FOOD 21.3 says
+     * so: *"les ingrédients ne sont pas fusionnés ligne à ligne"*. The recipe is one aggregate and
+     * this writes all of it.
+     */
+    @Transaction
+    suspend fun saveDetail(recipe: RecipeEntity, ingredients: List<RecipeIngredientEntity>) {
+        val createdAt = findCreatedAt(recipe.id) ?: recipe.createdAt
+        deleteIngredientsOf(recipe.id)
+        upsertRecipe(recipe.copy(createdAt = createdAt))
+        insertIngredients(ingredients)
+    }
+
     @Transaction
     suspend fun saveDetailWithMutation(
         recipe: RecipeEntity,

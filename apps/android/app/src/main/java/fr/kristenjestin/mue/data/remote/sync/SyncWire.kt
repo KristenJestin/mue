@@ -1,13 +1,32 @@
 package fr.kristenjestin.mue.data.remote.sync
 
+import fr.kristenjestin.mue.data.local.database.ActivityMetricEntity
+import fr.kristenjestin.mue.data.local.database.ActivitySessionEntity
+import fr.kristenjestin.mue.data.local.database.ExerciseDefinitionEntity
+import fr.kristenjestin.mue.data.local.database.FoodEntity
+import fr.kristenjestin.mue.data.local.database.FoodLogEntryEntity
 import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
+import fr.kristenjestin.mue.data.local.database.MealPlanEntryEntity
+import fr.kristenjestin.mue.data.local.database.NutrientColumns
+import fr.kristenjestin.mue.data.local.database.RecipeEntity
+import fr.kristenjestin.mue.data.local.database.RecipeIngredientEntity
+import fr.kristenjestin.mue.data.local.database.SessionEquipmentEntity
+import fr.kristenjestin.mue.data.local.database.StrengthExerciseEntity
+import fr.kristenjestin.mue.data.local.database.StrengthSetEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
+import fr.kristenjestin.mue.data.local.database.encodeSteps
 import fr.kristenjestin.mue.data.sync.HealthProfilePayload
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
+import fr.kristenjestin.mue.domain.model.ExerciseDefinition
+import fr.kristenjestin.mue.domain.model.Food
+import fr.kristenjestin.mue.domain.model.FoodAggregates
+import fr.kristenjestin.mue.domain.model.MealPlanKey
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import java.time.DateTimeException
 import java.time.Instant
+import java.util.Locale
 
 /**
  * The seam between `sync_mutations` and the wire, and the one place either shape is converted.
@@ -20,27 +39,26 @@ import java.time.Instant
  * le même résultat métier sans répéter son effet" is a property of *where the identifier comes
  * from*, and it survives only as long as nothing downstream is allowed to generate one.
  *
- * ## Aggregate types this build cannot express
+ * ## Every aggregate of PRD 10.1 is here now
  *
- * [toEnvelope] returns null rather than throwing when the outbox holds an aggregate type that
- * `packages/contracts` has no wire shape for. That is not hypothetical: `AGGREGATE_TYPES` in
- * `primitives.ts` names two of PRD 10.1's aggregates, while `SyncOutbox` already journals the
- * four `FoodAggregates` types — `food`, `recipe`, `foodLogEntry` and `mealPlanEntry` — at every
- * save. Journalling those changes is what FR-SYNC-001 requires today; sending them is what a
- * later contract revision will allow. A null here means "keep it, do not send it, do not fail
- * it" — the row stays `pending`, loses nothing, and goes out unchanged the day the server
- * understands it.
+ * [toEnvelope] still returns null rather than throwing for a row it has no wire shape for, and
+ * the branch is still reachable — a `healthProfile` or `customExerciseDefinition` delete, which
+ * nothing mints and the server refuses — but it is no longer the ordinary case. It was: two
+ * aggregates journalled every save into rows that could never be sent, and four more that were
+ * never journalled at all, while the matrix marked all six `Synchronisé: Oui`.
  *
- * [SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION] and
- * [SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE] are a step behind those: PRD 10.1
- * synchronises them, the local type names exist, and nothing journals one yet — so they are not
- * even in the queue.
+ * What that looked like from the outside is worth keeping, because it is what a defect of this
+ * kind looks like next time: `Data & sync` showed a number of changes waiting that could not
+ * fall, and a counter that never moves is indistinguishable from a fault. The fix was never on
+ * this side of the wire. It was `AGGREGATE_TYPES`.
  *
- * `healthProfile` was in exactly that state and is not any more, which is worth recording
- * because of how it read from the outside: PRD 13.4 called the profile synchronised, the outbox
- * journalled every save, and `Data & sync` showed `1 change waiting` that could never fall —
- * a counter that never moves is indistinguishable from a fault. The fix was not on this side of
- * the wire. It was `AGGREGATE_TYPES`.
+ * ## The one value this file rewrites
+ *
+ * `mealPlanEntry` identifiers and the `fromPlan` of a journalled food-log payload were written
+ * with a `/`, which `aggregateIdSchema` has never accepted. Both are normalised here, on the way
+ * out, through `MealPlanKey` — which parses either spelling and writes only the canonical one. A
+ * stored payload is never edited to achieve that: `MealPlanIdRepair` moves the *identifier*
+ * column, and a payload keeps whatever the user's own save put in it.
  */
 object SyncWire {
 
@@ -51,10 +69,20 @@ object SyncWire {
      * It is derived from [PAYLOAD_SCHEMA_VERSION], the constant the outbox stamps its rows with,
      * so the versions the client claims to understand and the versions it actually writes cannot
      * drift apart in a refactor.
+     *
+     * All eight are declared. A type the client omits is one the server treats as unsupported, so
+     * a missing entry here would answer `upgrade_required` for a change this build can apply
+     * perfectly well and stop the cursor dead.
      */
     val SUPPORTED_SCHEMA_VERSIONS: Map<String, List<Int>> = mapOf(
+        WIRE_AGGREGATE_ACTIVITY_SESSION to listOf(PAYLOAD_SCHEMA_VERSION),
+        WIRE_AGGREGATE_CUSTOM_EXERCISE to listOf(PAYLOAD_SCHEMA_VERSION),
+        WIRE_AGGREGATE_FOOD to listOf(PAYLOAD_SCHEMA_VERSION),
+        WIRE_AGGREGATE_FOOD_LOG_ENTRY to listOf(PAYLOAD_SCHEMA_VERSION),
         WIRE_AGGREGATE_HEALTH_PROFILE to listOf(PAYLOAD_SCHEMA_VERSION),
+        WIRE_AGGREGATE_MEAL_PLAN_ENTRY to listOf(PAYLOAD_SCHEMA_VERSION),
         WIRE_AGGREGATE_MEASUREMENT to listOf(PAYLOAD_SCHEMA_VERSION),
+        WIRE_AGGREGATE_RECIPE to listOf(PAYLOAD_SCHEMA_VERSION),
     )
 
     /**
@@ -63,23 +91,26 @@ object SyncWire {
      *
      * Filtering the queue on this list is not an optimisation, it is what keeps FR-SYNC-007's
      * "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes" true of a
-     * queue that still contains rows nothing can send. `SyncOutbox` journals the four food
-     * aggregates of PRD_FOOD 21.2 at every save (FR-SYNC-001), and `AGGREGATE_TYPES` in
-     * `packages/contracts` has no branch for any of them, so those rows stay `pending` for as
-     * long as the contract lacks it — they never drain. A send that simply took the oldest
-     * `WIRE_PUSH_MAX_MUTATIONS` rows would therefore, once that many food entries had
-     * accumulated, return a window containing nothing sendable, and every measurement queued
-     * behind them would stop going out **permanently**, with no error anywhere. Selecting by
-     * type makes that impossible however many undeliverable rows pile up.
+     * queue that still contains rows nothing can send. The four food aggregates were journalled
+     * at every save and had no branch here for as long as `AGGREGATE_TYPES` lacked one; a send
+     * that simply took the oldest `WIRE_PUSH_MAX_MUTATIONS` rows would therefore, once that many
+     * food entries had accumulated, return a window containing nothing sendable, and every
+     * measurement queued behind them would stop going out **permanently**, with no error
+     * anywhere. Selecting by type makes that impossible however many undeliverable rows pile up.
      *
-     * [toEnvelope] still answers null for a row of a sendable type it cannot shape — a
-     * `healthProfile` delete, which the outbox never mints and the server refuses — so the two
-     * guards are not redundant: this one bounds what the queue can hide, that one bounds what
-     * the wire can be handed.
+     * The list holds every aggregate today, so the guard protects nothing at this moment — which
+     * is exactly when it is worth keeping, because the next aggregate to be journalled ahead of
+     * its contract will find it already in place.
      */
     val SENDABLE_LOCAL_AGGREGATE_TYPES: List<String> = listOf(
+        SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+        SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE,
         SyncAggregateStateEntity.TYPE_HEALTH_PROFILE,
         SyncAggregateStateEntity.TYPE_MEASUREMENT,
+        FoodAggregates.TYPE_FOOD,
+        FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+        FoodAggregates.TYPE_MEAL_PLAN_ENTRY,
+        FoodAggregates.TYPE_RECIPE,
     )
 
     /**
@@ -102,10 +133,35 @@ object SyncWire {
                 // the wire union accepts the enum rather than a literal. It is still gated on
                 // the type: a delete of an aggregate the server cannot name is refused there
                 // just as an upsert would be, and refusing it here keeps the outbox quiet.
-                SyncAggregateStateEntity.TYPE_MEASUREMENT -> DeleteMutationDto(
+                //
+                // `healthProfile` and `customExerciseDefinition` are deliberately absent. Neither
+                // has a deletion — PRD 13.4 describes fields that empty rather than a profile
+                // that ceases to exist, and PRD_ACTIVITIES 9.2 keeps a definition for ever — and
+                // the server refuses one for both. Nothing mints one either; this is the second
+                // of the two guards.
+                SyncAggregateStateEntity.TYPE_MEASUREMENT,
+                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                FoodAggregates.TYPE_FOOD,
+                FoodAggregates.TYPE_RECIPE,
+                FoodAggregates.TYPE_FOOD_LOG_ENTRY,
+                -> DeleteMutationDto(
                     mutationId = mutation.mutationId,
-                    aggregateType = WIRE_AGGREGATE_MEASUREMENT,
+                    aggregateType = mutation.aggregateType,
                     aggregateId = mutation.aggregateId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                // The identifier is normalised on the way out, so a row journalled before the
+                // separator changed goes out correctly whether or not `MealPlanIdRepair` has
+                // reached it yet. Belt and braces: the repair moves the column, this makes the
+                // wire independent of whether it has.
+                FoodAggregates.TYPE_MEAL_PLAN_ENTRY -> DeleteMutationDto(
+                    mutationId = mutation.mutationId,
+                    aggregateType = mutation.aggregateType,
+                    aggregateId = canonicalMealPlanId(mutation.aggregateId),
                     baseRevision = baseRevision,
                     payloadSchemaVersion = mutation.payloadSchemaVersion,
                     origin = origin,
@@ -122,13 +178,7 @@ object SyncWire {
                     aggregateId = mutation.aggregateId,
                     baseRevision = baseRevision,
                     payloadSchemaVersion = mutation.payloadSchemaVersion,
-                    payload = SyncJson.instance.decodeFromString(
-                        MeasurementPayloadV1Dto.serializer(),
-                        mutation.payload
-                            ?: throw SerializationException(
-                                "an upsert of ${mutation.aggregateId} carries no payload",
-                            ),
-                    ),
+                    payload = decode(MeasurementPayloadV1Dto.serializer(), mutation),
                     origin = origin,
                     clientOccurredAt = clientOccurredAt,
                 )
@@ -149,16 +199,95 @@ object SyncWire {
                     mutationId = mutation.mutationId,
                     baseRevision = baseRevision,
                     payloadSchemaVersion = mutation.payloadSchemaVersion,
-                    payload = SyncJson.instance.decodeFromString(
-                        HealthProfilePayloadV1Dto.serializer(),
-                        mutation.payload
-                            ?: throw SerializationException(
-                                "an upsert of ${mutation.aggregateId} carries no payload",
-                            ),
-                    ),
+                    payload = decode(HealthProfilePayloadV1Dto.serializer(), mutation),
                     origin = origin,
                     clientOccurredAt = clientOccurredAt,
                 )
+
+                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION -> ActivitySessionUpsertMutationDto(
+                    mutationId = mutation.mutationId,
+                    aggregateId = mutation.aggregateId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    payload = decode(ActivitySessionPayloadV1Dto.serializer(), mutation),
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE -> CustomExerciseUpsertMutationDto(
+                    mutationId = mutation.mutationId,
+                    aggregateId = mutation.aggregateId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    payload = decode(CustomExerciseDefinitionPayloadV1Dto.serializer(), mutation),
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                FoodAggregates.TYPE_FOOD -> FoodUpsertMutationDto(
+                    mutationId = mutation.mutationId,
+                    aggregateId = mutation.aggregateId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    payload = decode(FoodPayloadV1Dto.serializer(), mutation),
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                FoodAggregates.TYPE_RECIPE -> RecipeUpsertMutationDto(
+                    mutationId = mutation.mutationId,
+                    aggregateId = mutation.aggregateId,
+                    baseRevision = baseRevision,
+                    payloadSchemaVersion = mutation.payloadSchemaVersion,
+                    payload = decode(RecipePayloadV1Dto.serializer(), mutation),
+                    origin = origin,
+                    clientOccurredAt = clientOccurredAt,
+                )
+
+                /*
+                 * `fromPlan` is normalised rather than repaired.
+                 *
+                 * A line logged from a proposal carries that proposal's identifier, and every one
+                 * written before the separator changed spells it with a `/`. Rewriting it here
+                 * costs one parse and leaves the stored payload — the user's own record of what
+                 * they ate — exactly as it was written, which is the line FR-SYNC-007 draws around
+                 * repairing local data to fix a protocol problem.
+                 */
+                FoodAggregates.TYPE_FOOD_LOG_ENTRY -> {
+                    val payload = decode(FoodLogEntryPayloadV1Dto.serializer(), mutation)
+                    FoodLogEntryUpsertMutationDto(
+                        mutationId = mutation.mutationId,
+                        aggregateId = mutation.aggregateId,
+                        baseRevision = baseRevision,
+                        payloadSchemaVersion = mutation.payloadSchemaVersion,
+                        payload = payload.copy(
+                            fromPlan = payload.fromPlan?.let(::canonicalMealPlanId),
+                        ),
+                        origin = origin,
+                        clientOccurredAt = clientOccurredAt,
+                    )
+                }
+
+                /*
+                 * The identifier is rebuilt from the payload rather than copied from the row.
+                 *
+                 * The server refuses a mutation whose `aggregateId` does not equal
+                 * `<payload.plannedOn>:<payload.slot>`, so deriving it is the only way the two can
+                 * never disagree — and it makes this branch correct for a row the repair pass has
+                 * not reached, which is what a phone upgrading mid-queue actually has.
+                 */
+                FoodAggregates.TYPE_MEAL_PLAN_ENTRY -> {
+                    val payload = decode(MealPlanEntryPayloadV1Dto.serializer(), mutation)
+                    MealPlanEntryUpsertMutationDto(
+                        mutationId = mutation.mutationId,
+                        aggregateId = "${payload.plannedOn}${MealPlanKey.SEPARATOR}${payload.slot}",
+                        baseRevision = baseRevision,
+                        payloadSchemaVersion = mutation.payloadSchemaVersion,
+                        payload = payload,
+                        origin = origin,
+                        clientOccurredAt = clientOccurredAt,
+                    )
+                }
 
                 else -> null
             }
@@ -166,6 +295,31 @@ object SyncWire {
             else -> null
         }
     }
+
+    /**
+     * A stored payload, read back through the wire DTO that will carry it.
+     *
+     * The message names the aggregate rather than the column, because that is what the caller
+     * turns into a `Sync issue` a person reads.
+     */
+    private fun <T> decode(serializer: KSerializer<T>, mutation: SyncMutationEntity): T =
+        SyncJson.instance.decodeFromString(
+            serializer,
+            mutation.payload
+                ?: throw SerializationException(
+                    "an upsert of ${mutation.aggregateId} carries no payload",
+                ),
+        )
+
+    /**
+     * A meal plan identifier as the contract spells it, from either spelling.
+     *
+     * An identifier that parses as neither is returned unchanged: it will be refused by the
+     * server with a message naming it, which is more useful than this file silently inventing a
+     * value for a row it does not understand.
+     */
+    fun canonicalMealPlanId(stored: String): String =
+        MealPlanKey.parseOrNull(stored)?.aggregateId ?: stored
 
     /**
      * A canonical decimal counter as a [Long], or null when it does not fit.
@@ -202,13 +356,20 @@ object SyncWire {
      * The `sync_aggregate_state.aggregate_type` a wire aggregate type is stored under, or null
      * when this build has no local home for it.
      *
-     * The two vocabularies happen to agree today — `"measurement"` on both sides — and they are
-     * translated anyway, because they are owned by different repositories and a change to
-     * `AGGREGATE_TYPES` must not be able to silently repoint a Room column.
+     * The two vocabularies happen to agree today — `"measurement"` on both sides, and the same
+     * for the other seven — and they are translated anyway, because they are owned by different
+     * repositories and a change to `AGGREGATE_TYPES` must not be able to silently repoint a Room
+     * column.
      */
     fun localAggregateType(wireType: String): String? = when (wireType) {
         WIRE_AGGREGATE_MEASUREMENT -> SyncAggregateStateEntity.TYPE_MEASUREMENT
         WIRE_AGGREGATE_HEALTH_PROFILE -> SyncAggregateStateEntity.TYPE_HEALTH_PROFILE
+        WIRE_AGGREGATE_ACTIVITY_SESSION -> SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION
+        WIRE_AGGREGATE_CUSTOM_EXERCISE -> SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE
+        WIRE_AGGREGATE_FOOD -> FoodAggregates.TYPE_FOOD
+        WIRE_AGGREGATE_RECIPE -> FoodAggregates.TYPE_RECIPE
+        WIRE_AGGREGATE_FOOD_LOG_ENTRY -> FoodAggregates.TYPE_FOOD_LOG_ENTRY
+        WIRE_AGGREGATE_MEAL_PLAN_ENTRY -> FoodAggregates.TYPE_MEAL_PLAN_ENTRY
         else -> null
     }
 
@@ -240,6 +401,241 @@ object SyncWire {
         id = HealthProfileEntity.ROW_ID,
         heightCm = payload.heightCm,
         birthDate = payload.birthDate,
+    )
+
+    // --- the local rows a received change becomes ------------------------------------------
+
+    /**
+     * `created_at` and `updated_at` are the *local* audit stamps of a row, not business values.
+     *
+     * PRD_ACTIVITIES 8.2 is explicit that they are "métadonnées d'audit portées par le seul
+     * stockage" which no display rule reads, and the server's own instants for the aggregate live
+     * in `sync_aggregate_state` where a reader can find them. So a received row is stamped with
+     * the moment it was applied here, and the DAOs that preserve an existing `created_at` on an
+     * update keep the first one.
+     */
+    fun activitySessionEntity(
+        payload: ActivitySessionPayloadV1Dto,
+        at: Long,
+    ): ActivitySessionEntity = ActivitySessionEntity(
+        id = payload.id,
+        movement = payload.movement,
+        customMovementName = payload.customMovementName,
+        environment = payload.environment,
+        startedOn = payload.startedOn,
+        startedAtTime = payload.startedAtTime,
+        durationSeconds = payload.durationSeconds,
+        perceivedEffort = payload.perceivedEffort,
+        notes = payload.notes,
+        source = payload.source,
+        createdAt = at,
+        updatedAt = at,
+    )
+
+    fun activityMetricEntities(
+        payload: ActivitySessionPayloadV1Dto,
+    ): List<ActivityMetricEntity> = payload.metrics.map { metric ->
+        ActivityMetricEntity(
+            sessionId = payload.id,
+            kind = metric.kind,
+            value = metric.value,
+            source = metric.source,
+        )
+    }
+
+    /**
+     * The equipment rows, with a fresh identifier per item and the folded name computed here.
+     *
+     * `session_equipment.id` is minted locally on every save — `RoomActivityRepository.save` does
+     * the same — so the payload carries none and this invents one. `custom_name_folded` is the
+     * column the unique index compares and is a function of the name, so it is derived rather than
+     * carried: a payload able to state a fold that did not match its own name would be a payload
+     * able to defeat the index.
+     */
+    fun sessionEquipmentEntities(
+        payload: ActivitySessionPayloadV1Dto,
+        newRowId: () -> String,
+    ): List<SessionEquipmentEntity> = payload.equipment.map { item ->
+        SessionEquipmentEntity(
+            id = newRowId(),
+            sessionId = payload.id,
+            equipmentType = item.equipmentType,
+            customName = item.customName,
+            customNameFolded = item.customName?.trim()?.lowercase(Locale.ROOT).orEmpty(),
+            position = item.position,
+        )
+    }
+
+    /** The definition snapshot inside an exercise, as the row it may have to become. */
+    fun definitionSnapshotEntity(
+        snapshot: ExerciseDefinitionSnapshotDto,
+    ): ExerciseDefinitionEntity = ExerciseDefinitionEntity(
+        id = snapshot.id,
+        name = snapshot.name,
+        nameFolded = ExerciseDefinition.fold(snapshot.name),
+        trackingMode = snapshot.trackingMode,
+        equipment = snapshot.equipment,
+        isCustom = snapshot.isCustom,
+    )
+
+    fun strengthExerciseEntity(
+        sessionId: String,
+        exercise: StrengthExerciseDto,
+        definitionId: String,
+    ): StrengthExerciseEntity = StrengthExerciseEntity(
+        id = exercise.id,
+        sessionId = sessionId,
+        exerciseDefinitionId = definitionId,
+        position = exercise.position,
+        notes = exercise.notes,
+    )
+
+    fun strengthSetEntities(exercise: StrengthExerciseDto): List<StrengthSetEntity> =
+        exercise.sets.map { set ->
+            StrengthSetEntity(
+                id = set.id,
+                strengthExerciseId = exercise.id,
+                position = set.position,
+                setType = set.setType,
+                repetitions = set.repetitions,
+                loadGrams = set.loadGrams,
+                durationSeconds = set.durationSeconds,
+                perceivedEffort = set.perceivedEffort,
+            )
+        }
+
+    /**
+     * A received personal definition.
+     *
+     * `is_custom` is `true` and is not read from the payload, because the payload has no such
+     * field: PRD 10.1 does not synchronise the definitions Mue ships, so this aggregate can only
+     * ever describe a personal one and the flag is a property of the type rather than of the
+     * value. The fold is computed for the reason [definitionSnapshotEntity] gives.
+     */
+    fun customExerciseEntity(
+        payload: CustomExerciseDefinitionPayloadV1Dto,
+    ): ExerciseDefinitionEntity = ExerciseDefinitionEntity(
+        id = payload.id,
+        name = payload.name,
+        nameFolded = ExerciseDefinition.fold(payload.name),
+        trackingMode = payload.trackingMode,
+        equipment = payload.equipment,
+        isCustom = true,
+    )
+
+    /**
+     * A received food.
+     *
+     * The two folded columns are derived, as every fold in this file is. `brand_folded` is null
+     * exactly when the brand is, so an absent brand does not become an empty one a search would
+     * match.
+     */
+    fun foodEntity(payload: FoodPayloadV1Dto, at: Long): FoodEntity = FoodEntity(
+        id = payload.id,
+        name = payload.name,
+        nameFolded = Food.fold(payload.name),
+        source = payload.source,
+        referenceUnit = payload.referenceUnit,
+        per100 = NutrientColumns(
+            energyMilliKcal = payload.energyMilliKcal,
+            proteinMilligrams = payload.proteinMilligrams,
+            carbsMilligrams = payload.carbsMilligrams,
+            fatMilligrams = payload.fatMilligrams,
+            fibreMilligrams = payload.fibreMilligrams,
+        ),
+        brand = payload.brand,
+        brandFolded = payload.brand?.let(Food::fold),
+        barcode = payload.barcode,
+        sourceId = payload.sourceId,
+        sourceVersion = payload.sourceVersion,
+        servingLabel = payload.servingLabel,
+        servingThousandths = payload.servingThousandths,
+        cookedRatioThousandths = payload.cookedRatioThousandths,
+        rawLabel = payload.rawLabel,
+        cookedLabel = payload.cookedLabel,
+        imageRef = payload.imageRef,
+        createdAt = at,
+        updatedAt = at,
+    )
+
+    fun recipeEntity(payload: RecipePayloadV1Dto, at: Long): RecipeEntity = RecipeEntity(
+        id = payload.id,
+        name = payload.name,
+        nameFolded = Food.fold(payload.name),
+        type = payload.type,
+        baseServings = payload.baseServings,
+        description = payload.description,
+        prepTimeMinutes = payload.prepTimeMinutes,
+        steps = encodeSteps(payload.steps),
+        imageRef = payload.imageRef,
+        isFavourite = payload.isFavourite,
+        createdAt = at,
+        updatedAt = at,
+    )
+
+    fun recipeIngredientEntities(
+        payload: RecipePayloadV1Dto,
+    ): List<RecipeIngredientEntity> = payload.ingredients.map { ingredient ->
+        RecipeIngredientEntity(
+            id = ingredient.id,
+            recipeId = payload.id,
+            foodId = ingredient.foodId,
+            quantityThousandths = ingredient.quantityThousandths,
+            unit = ingredient.unit,
+            position = ingredient.position,
+            foodName = ingredient.foodName,
+        )
+    }
+
+    /**
+     * A received journal line.
+     *
+     * `fromPlan` is split back into the two columns the table holds — `planned_on` and
+     * `plan_slot` — rather than stored as a composite. That is the same reason the meal plan's
+     * own table is keyed by the pair: a composite identifier is a wire encoding, and keeping one
+     * in a column is what made a separator change a repair pass instead of an edit.
+     */
+    fun foodLogEntryEntity(payload: FoodLogEntryPayloadV1Dto, at: Long): FoodLogEntryEntity {
+        val plan = payload.fromPlan?.let(MealPlanKey::parseOrNull)
+        return FoodLogEntryEntity(
+            id = payload.id,
+            consumedOn = payload.consumedOn,
+            consumedAt = payload.consumedAt,
+            slot = payload.slot,
+            kind = payload.kind,
+            title = payload.title,
+            nutrients = NutrientColumns(
+                energyMilliKcal = payload.energyMilliKcal,
+                proteinMilligrams = payload.proteinMilligrams,
+                carbsMilligrams = payload.carbsMilligrams,
+                fatMilligrams = payload.fatMilligrams,
+                fibreMilligrams = payload.fibreMilligrams,
+            ),
+            estimation = payload.estimation,
+            sourceRef = payload.sourceRef,
+            amountLabel = payload.amountLabel,
+            quantityThousandths = payload.quantityThousandths,
+            quantityUnit = payload.quantityUnit,
+            portionsThousandths = payload.portionsThousandths,
+            weighedCooked = payload.weighedCooked,
+            plannedOn = plan?.plannedOn?.toString(),
+            planSlot = plan?.slot?.id,
+            createdAt = at,
+            updatedAt = at,
+        )
+    }
+
+    fun mealPlanEntryEntity(
+        payload: MealPlanEntryPayloadV1Dto,
+        at: Long,
+    ): MealPlanEntryEntity = MealPlanEntryEntity(
+        plannedOn = payload.plannedOn,
+        slot = payload.slot,
+        recipeId = payload.recipeId,
+        plannedServingsThousandths = payload.plannedServingsThousandths,
+        consumedLogEntryId = payload.consumedLogEntryId,
+        createdAt = at,
+        updatedAt = at,
     )
 
     /** The identity Android stamps its own mutations with (PRD 12.1). */

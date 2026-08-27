@@ -1,0 +1,16 @@
+{
+  "baseServings": 12,
+  "id": "f92cd615-4a7e-4b0d-8256-3d8e1f4a9b72",
+  "ingredients": [
+    {
+      "foodId": "1b4ef837-6c90-4d2f-8478-5f0a3b6c1d94",
+      "id": "0a3de726-5b8f-4c1e-9367-4e9f2a5b0c83",
+      "position": 0,
+      "quantityThousandths": 60000,
+      "unit": "gram"
+    }
+  ],
+  "isFavourite": false,
+  "name": "Oeufs durs",
+  "type": "snack"
+}

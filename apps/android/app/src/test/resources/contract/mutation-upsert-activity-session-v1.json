@@ -1,0 +1,110 @@
+{
+  "aggregateId": "3a0f7b26-9c41-4a5e-8d13-6f2b8e04c751",
+  "aggregateType": "activitySession",
+  "baseRevision": null,
+  "clientOccurredAt": "2026-08-25T19:31:12.480Z",
+  "mutationId": "0198f0a3-5e6f-7081-8b2c-3d4e5f607182",
+  "op": "upsert",
+  "origin": {
+    "id": "device-7f3c1a04",
+    "type": "android"
+  },
+  "payload": {
+    "customMovementName": null,
+    "durationSeconds": 3600,
+    "environment": "indoor",
+    "equipment": [
+      {
+        "customName": null,
+        "equipmentType": "barbell",
+        "position": 0
+      },
+      {
+        "customName": "Home rack",
+        "equipmentType": "other",
+        "position": 1
+      }
+    ],
+    "exercises": [
+      {
+        "definition": {
+          "equipment": "barbell",
+          "id": "8b2b1c9a-3a4f-4b1c-9d5e-7f8a0b1c2d3e",
+          "isCustom": false,
+          "name": "Bench press",
+          "trackingMode": "weight_and_reps"
+        },
+        "id": "1f6a2d70-4c8b-4e15-9f27-3b6d0a4e8c19",
+        "notes": null,
+        "position": 0,
+        "sets": [
+          {
+            "durationSeconds": null,
+            "id": "2c7b3e81-5d9c-4f26-8a38-4c7e1b5f9d20",
+            "loadGrams": 40000,
+            "perceivedEffort": null,
+            "position": 0,
+            "repetitions": 10,
+            "setType": "warmup"
+          },
+          {
+            "durationSeconds": null,
+            "id": "3d8c4f92-6e0d-4a37-9b49-5d8f2c6a0e31",
+            "loadGrams": 82500,
+            "perceivedEffort": null,
+            "position": 1,
+            "repetitions": 5,
+            "setType": "working"
+          }
+        ]
+      },
+      {
+        "definition": {
+          "equipment": "dumbbells",
+          "id": "d41f6c58-7b90-4e2a-8c31-5a6b7c8d9e0f",
+          "isCustom": true,
+          "name": "Bulgarian split squat",
+          "trackingMode": "weight_and_reps"
+        },
+        "id": "4e9d5a03-7f1e-4b48-8c50-6e9a3d7b1f42",
+        "notes": "Left leg lagging.",
+        "position": 1,
+        "sets": [
+          {
+            "durationSeconds": null,
+            "id": "5f0e6b14-8a2f-4c59-9d61-7f0b4e8c2a53",
+            "loadGrams": 20000,
+            "perceivedEffort": null,
+            "position": 0,
+            "repetitions": 8,
+            "setType": "working"
+          },
+          {
+            "durationSeconds": null,
+            "id": "6a1f7c25-9b30-4d6a-8e72-8a1c5f9d3b64",
+            "loadGrams": null,
+            "perceivedEffort": 9,
+            "position": 1,
+            "repetitions": 12,
+            "setType": "drop"
+          }
+        ]
+      }
+    ],
+    "id": "3a0f7b26-9c41-4a5e-8d13-6f2b8e04c751",
+    "metrics": [
+      {
+        "kind": "estimated_energy",
+        "source": "manual",
+        "value": 380
+      }
+    ],
+    "movement": "strength_training",
+    "notes": "Felt strong on the second set.",
+    "perceivedEffort": 7,
+    "source": "manual",
+    "startedAtTime": "18:30",
+    "startedOn": "2026-08-25"
+  },
+  "payloadSchemaVersion": 1
+}

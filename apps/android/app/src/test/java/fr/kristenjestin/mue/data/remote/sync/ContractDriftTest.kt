@@ -35,13 +35,17 @@ class ContractDriftTest {
         val listed = ContractFixtures.manifest().map { it.file }.sorted()
         val onDisk = ContractFixtures.files().filterNot { it == ContractFixtures.MANIFEST }
 
-        // Nineteen files: eighteen instances, each parsed through its Kotlin DTO below, and
+        // Thirty-three files: thirty-two instances, each parsed through its Kotlin DTO below, and
         // the manifest, parsed by `ContractFixtures.manifest`. Every file the contracts package
         // emits has a reader here — which is exactly what they did not have when they landed.
+        //
+        // It was nineteen until six aggregates joined the contract at once. The number is written
+        // out rather than derived from the directory listing on purpose: deriving it would make
+        // this assertion true of any directory, including one a failed emit left half written.
         assertEquals(
-            19,
+            33,
             ContractFixtures.files().size,
-            "the contracts package emits nineteen files and every one of them is read here",
+            "the contracts package emits thirty-three files and every one of them is read here",
         )
 
         assertEquals(
@@ -71,7 +75,7 @@ class ContractDriftTest {
     @Test
     fun everyFixtureRoundTripsThroughItsKotlinDto() {
         val entries = ContractFixtures.manifest()
-        assertEquals(18, entries.size, "the manifest lost or gained a fixture")
+        assertEquals(32, entries.size, "the manifest lost or gained a fixture")
 
         val drift = entries.flatMap { entry ->
             ContractDrift.check(
@@ -106,7 +110,7 @@ class ContractDriftTest {
         assertIs<PullUpgradeRequiredDto>(upgrade)
 
         // The only member of the hierarchy that has a cursor at all.
-        assertEquals("eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk1In0", page.nextCursor)
+        assertEquals("eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk3In0", page.nextCursor)
         assertEquals(false, page.hasMore)
         assertEquals(SyncErrorCodes.SYNC_UPGRADE_REQUIRED, upgrade.error.code)
         assertEquals(null, upgrade.lastAndroidSyncAt)
@@ -322,8 +326,14 @@ class ContractDriftTest {
     fun theDeclaredSchemaVersionsAreTheOnesTheOutboxWrites() {
         assertEquals(
             mapOf(
+                WIRE_AGGREGATE_ACTIVITY_SESSION to listOf(WIRE_ACTIVITY_SESSION_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_CUSTOM_EXERCISE to listOf(WIRE_CUSTOM_EXERCISE_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_FOOD to listOf(WIRE_FOOD_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_FOOD_LOG_ENTRY to listOf(WIRE_FOOD_LOG_ENTRY_PAYLOAD_VERSION),
                 WIRE_AGGREGATE_HEALTH_PROFILE to listOf(WIRE_HEALTH_PROFILE_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_MEAL_PLAN_ENTRY to listOf(WIRE_MEAL_PLAN_ENTRY_PAYLOAD_VERSION),
                 WIRE_AGGREGATE_MEASUREMENT to listOf(WIRE_MEASUREMENT_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_RECIPE to listOf(WIRE_RECIPE_PAYLOAD_VERSION),
             ),
             SyncWire.SUPPORTED_SCHEMA_VERSIONS,
         )

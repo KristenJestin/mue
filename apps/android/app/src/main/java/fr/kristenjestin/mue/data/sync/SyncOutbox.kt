@@ -3,6 +3,9 @@ package fr.kristenjestin.mue.data.sync
 import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
+import fr.kristenjestin.mue.domain.model.ActivityId
+import fr.kristenjestin.mue.domain.model.ActivitySessionDetail
+import fr.kristenjestin.mue.domain.model.ExerciseDefinition
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodAggregates
 import fr.kristenjestin.mue.domain.model.FoodId
@@ -44,10 +47,10 @@ import java.time.LocalDate
  * PRD 9.4 lists the moments at which a synchronisation is attempted and *a local change is not
  * one of them*, which is why a birth date typed in the foreground sat at `Changes pending` until
  * the app was backgrounded or the hourly worker came round. [minted] closes that gap. This class
- * is the single place that knows a row was created â for a measurement, for the health profile
- * and for the four Food aggregates alike â so one announcement here covers every write path
- * there is, and a tenth repository added next month is covered by construction rather than by
- * somebody remembering.
+ * is the single place that knows a row was created - for a measurement, for the health profile,
+ * for a finished session, for a personal exercise definition and for the four Food aggregates
+ * alike - so one announcement here covers every write path there is, and a tenth repository added
+ * next month is covered by construction rather than by somebody remembering.
  *
  * It *announces*; it does not schedule. Scheduling means WorkManager, WorkManager means a
  * `Context`, and a `Context` here would cost this class the JVM tests that assert on the exact
@@ -109,6 +112,54 @@ class SyncOutbox(
         aggregateId = date.toString(),
         op = SyncMutationEntity.OP_DELETE,
         payload = null,
+    )
+
+    /**
+     * A finished session, whole (PRD 10.2).
+     *
+     * One row for the session **and** its metrics, its equipment, its exercises and their sets,
+     * because the aggregate is one thing: *"une activité ne peut jamais apparaître sans ses
+     * enfants obligatoires à cause d'une synchronisation partielle"*. Five outbox rows would be
+     * five chances for four of them to arrive.
+     *
+     * `ActivityDao.saveDetailWithMutation` writes this row in the same transaction as the five
+     * business tables, so FR-SYNC-001 holds for the aggregate rather than for its pieces.
+     */
+    fun activitySessionUpsert(detail: ActivitySessionDetail): SyncMutationEntity = mutation(
+        aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+        aggregateId = detail.session.id.value,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(ActivitySessionPayload.serializer(), detail.toPayload()),
+    )
+
+    fun activitySessionDelete(id: ActivityId): SyncMutationEntity = mutation(
+        aggregateType = SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+        aggregateId = id.value,
+        op = SyncMutationEntity.OP_DELETE,
+        payload = null,
+    )
+
+    /**
+     * A personal exercise definition (PRD 10.1).
+     *
+     * There is no delete counterpart, and the server refuses one. PRD_ACTIVITIES 9.2 keeps a
+     * definition for ever — *"y compris lorsqu'aucune séance ne l'utilise plus"* — the V1 offers
+     * no screen that could remove one, and `strength_exercises` holds a `RESTRICT` foreign key
+     * onto it, so a tombstone would be a change no client could apply.
+     *
+     * Only a definition the user created is minted: the seventeen Mue ships are reference data
+     * every phone already holds under the same identifiers, which PRD 10.1 marks `Synchronisé:
+     * Non`. `ExerciseCatalogDao.findOrCreateWithMutation` is the one caller, and it mints only on
+     * the branch that actually creates one.
+     */
+    fun customExerciseUpsert(definition: ExerciseDefinition): SyncMutationEntity = mutation(
+        aggregateType = SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE,
+        aggregateId = definition.id.value,
+        op = SyncMutationEntity.OP_UPSERT,
+        payload = Json.encodeToString(
+            CustomExerciseDefinitionPayload.serializer(),
+            definition.toPayload(),
+        ),
     )
 
     /**
@@ -269,11 +320,12 @@ data class MeasurementPayload(
  * server merge the two fields separately when they were not modified concurrently, and it can
  * only do that if it can tell "cleared" from "not mentioned".
  *
- * `packages/contracts` has no `healthProfile` member in `AGGREGATE_TYPES` yet, so a mutation
- * carrying this payload has no envelope to travel in and is held back by
- * `SyncWire.toEnvelope`. It is journalled all the same, which is the point: FR-SYNC-001 is
- * about not losing the change, and a change kept in the outbox is a change that goes out
- * unaltered the day the contract grows the branch for it.
+ * This payload spent the whole life of the feature with no envelope to travel in:
+ * `AGGREGATE_TYPES` in `packages/contracts` did not name `healthProfile`, so `SyncWire.toEnvelope`
+ * held every row back and `Data & sync` counted a change that could not fall. It was journalled
+ * throughout, which is what made the fix a contract edit rather than a recovery — FR-SYNC-001 is
+ * about not losing the change, and a change kept in the outbox goes out unaltered the day the
+ * contract grows the branch for it. Six more aggregates have since made the same journey.
  */
 @Serializable
 data class HealthProfilePayload(

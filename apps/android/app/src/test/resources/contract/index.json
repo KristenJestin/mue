@@ -25,6 +25,90 @@
       "schema": "HealthProfilePayloadV1"
     },
     {
+      "description": "A strength session with two exercises, four sets, a metric and its gear.",
+      "file": "activity-session-v1-valid.json",
+      "kind": "valid",
+      "schema": "ActivitySessionPayloadV1"
+    },
+    {
+      "description": "A forty-second timed session on `other`, below the manual form's own floor.",
+      "file": "activity-session-v1-edge.json",
+      "kind": "edge",
+      "schema": "ActivitySessionPayloadV1"
+    },
+    {
+      "description": "A personal exercise definition with its tracking mode and equipment.",
+      "file": "custom-exercise-definition-v1-valid.json",
+      "kind": "valid",
+      "schema": "CustomExerciseDefinitionPayloadV1"
+    },
+    {
+      "description": "The longest name allowed, and no equipment at all.",
+      "file": "custom-exercise-definition-v1-edge.json",
+      "kind": "edge",
+      "schema": "CustomExerciseDefinitionPayloadV1"
+    },
+    {
+      "description": "A copied Open Food Facts product with brand, barcode and usual serving.",
+      "file": "food-v1-valid.json",
+      "kind": "valid",
+      "schema": "FoodPayloadV1"
+    },
+    {
+      "description": "A measured zero energy beside four macros that are absent, not zero.",
+      "file": "food-v1-edge.json",
+      "kind": "edge",
+      "schema": "FoodPayloadV1"
+    },
+    {
+      "description": "A recipe with two ingredients, their food-name snapshots, and its steps.",
+      "file": "recipe-v1-valid.json",
+      "kind": "valid",
+      "schema": "RecipePayloadV1"
+    },
+    {
+      "description": "One ingredient, twelve base servings, and no `steps` key at all.",
+      "file": "recipe-v1-edge.json",
+      "kind": "edge",
+      "schema": "RecipePayloadV1"
+    },
+    {
+      "description": "A line logged from a proposal, on the serving scale, naming a colon-joined id.",
+      "file": "food-log-entry-v1-valid.json",
+      "kind": "valid",
+      "schema": "FoodLogEntryPayloadV1"
+    },
+    {
+      "description": "A quick add: no food, no recipe, no quantity and no unit.",
+      "file": "food-log-entry-v1-edge.json",
+      "kind": "edge",
+      "schema": "FoodLogEntryPayloadV1"
+    },
+    {
+      "description": "A dinner planned at one and a half servings.",
+      "file": "meal-plan-entry-v1-valid.json",
+      "kind": "valid",
+      "schema": "MealPlanEntryPayloadV1"
+    },
+    {
+      "description": "The quarter serving at the floor of the scale, already consumed.",
+      "file": "meal-plan-entry-v1-edge.json",
+      "kind": "edge",
+      "schema": "MealPlanEntryPayloadV1"
+    },
+    {
+      "description": "The whole session in one envelope, children and all.",
+      "file": "mutation-upsert-activity-session-v1.json",
+      "kind": "valid",
+      "schema": "MutationEnvelope"
+    },
+    {
+      "description": "The identifier that used to carry a `/`: `2026-09-01:dinner`.",
+      "file": "mutation-upsert-meal-plan-entry-v1.json",
+      "kind": "edge",
+      "schema": "MutationEnvelope"
+    },
+    {
       "description": "The upsert the phone could not send, with its constant aggregate id.",
       "file": "mutation-upsert-health-profile-v1.json",
       "kind": "valid",
