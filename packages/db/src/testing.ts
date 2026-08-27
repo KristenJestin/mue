@@ -22,6 +22,43 @@ function assertLoopback(url: string): void {
   }
 }
 
+/**
+ * Databases these helpers may empty.
+ *
+ * Loopback was the only guard, and it is the wrong question. The development
+ * cluster *is* on loopback: it is the one the owner's phone pairs with and the
+ * one Adminer reads. A bare `bun test` at the repository root therefore dropped
+ * every table in `mue_app` and `mue_auth` — accounts, sessions and all — which
+ * is exactly what happened on 27 August. Nothing warned, because from
+ * `assertLoopback`'s point of view nothing was wrong.
+ *
+ * What has to be asked is not *where* the database is but *whether anyone is
+ * using it*. So a name is required, and the development database's name is
+ * deliberately not on the list. A test run that wants a clean cluster points
+ * `DATABASE_URL` at one of these, or sets the escape hatch below and owns the
+ * consequence.
+ */
+const DISPOSABLE_DATABASES: readonly string[] = ["mue_test", "postgres"];
+
+/** The escape hatch, spelled out so it cannot be set by accident. */
+const OVERRIDE = "MUE_ALLOW_DESTRUCTIVE_TESTS";
+
+function assertDisposable(url: string): void {
+  assertLoopback(url);
+
+  const name = new URL(url).pathname.replace(/^\//, "");
+  if (DISPOSABLE_DATABASES.includes(name)) return;
+  if (process.env[OVERRIDE] === "yes-destroy-it") return;
+
+  throw new Error(
+    `refusing to drop every table in "${name}": it is not a disposable database.\n` +
+      `Disposable names are ${DISPOSABLE_DATABASES.join(", ")}. ` +
+      `"${name}" is likely the development cluster a phone pairs with.\n` +
+      `Point DATABASE_URL at a throwaway database, or set ${OVERRIDE}=yes-destroy-it ` +
+      "if you truly mean to empty this one.",
+  );
+}
+
 export function createTestDatabase(): DatabaseHandle {
   const config = readDatabaseConfig();
   assertLoopback(config.url);
@@ -35,7 +72,7 @@ export function createTestDatabase(): DatabaseHandle {
  * without destroying the Docker volume.
  */
 export async function resetSchemas(handle: DatabaseHandle): Promise<void> {
-  assertLoopback(handle.config.url);
+  assertDisposable(handle.config.url);
   const { sql } = handle;
   const tables = await sql<{ schemaname: string; tablename: string }[]>`
     select schemaname, tablename from pg_tables
