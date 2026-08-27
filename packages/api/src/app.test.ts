@@ -58,6 +58,15 @@ beforeAll(async () => {
   await migrate(database);
   await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
 
+  // The line `mcp/mcp.integration.test.ts` already carries, for the same reason
+  // the comment on `config.secret` above gives: the signing key in
+  // `mue_auth.jwks` is encrypted with whichever secret minted it, and the
+  // development cluster is shared with every other process that boots Better
+  // Auth -- including a platform server running from `.env`. A key this suite
+  // cannot decrypt makes `getSession` throw, which arrives here as a 401 on
+  // every authenticated route rather than as anything that names the cause.
+  await database.sql`delete from mue_auth.jwks`;
+
   authHandle = createAuth({ config, database });
   app = createApiApp({ auth: authHandle.auth, database }) as unknown as Hono;
 
