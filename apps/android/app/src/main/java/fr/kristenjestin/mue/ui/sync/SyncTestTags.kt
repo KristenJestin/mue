@@ -35,6 +35,16 @@ internal object SyncTestTags {
     const val EMAIL_FIELD: String = "sync:emailField"
     const val PASSWORD_FIELD: String = "sync:passwordField"
     const val CONNECT_BUTTON: String = "sync:connectButton"
+
+    /**
+     * `Sign in`, on a phone that is already paired.
+     *
+     * Its own tag rather than a second use of [CONNECT_BUTTON], because the two are different
+     * promises and a test must not be able to pass by finding the wrong one: [CONNECT_BUTTON]
+     * adopts whichever account is typed into the form, and this one signs in as the account
+     * `sync_state` already holds and no other (PRD 9.3).
+     */
+    const val SIGN_IN_BUTTON: String = "sync:signInButton"
     const val DISCONNECT_BUTTON: String = "sync:disconnectButton"
 
     /** The named failure of a pairing attempt. Never absent when an attempt has failed. */

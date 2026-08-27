@@ -5,6 +5,7 @@ import fr.kristenjestin.mue.data.sync.SyncOutcome
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -389,6 +390,199 @@ class ServerPairingTest {
 
         assertEquals(DisconnectResult.Revoked("mue.home.arpa"), result)
         assertTrue(api.revoked.isEmpty())
+    }
+
+    // --- signing in again, without giving the pairing up ---------------------------------------
+
+    /**
+     * The defect this section was written for.
+     *
+     * An account recreated on the server leaves `sync_state.last_error_code` at
+     * `auth.unauthenticated` and every later sync refused. The address is right, the account is
+     * right, and only the bearer is stale — so the fix is a password, not a disconnection and a
+     * retyped address, email and password to rebuild a row that was already correct.
+     */
+    @Test
+    fun signingInAgainReplacesTheBearerAndKeepsEverythingElse() = runTest {
+        val store = FakePairingStore(
+            paired().copy(
+                lastErrorCode = "auth.unauthenticated",
+                lastErrorMessage = "Sign in to synchronise.",
+            ),
+        )
+        val tokens = FakeTokenStore("stale-bearer")
+        val pairing = pairing(store, tokens)
+
+        val result = pairing.reauthenticate("https://mue.home.arpa", "correct horse")
+
+        assertIs<PairingResult.Paired>(result)
+        assertEquals("bearer-1", tokens.token)
+
+        val stored = requireNotNull(store.current)
+        assertEquals("https://mue.home.arpa", stored.serverUrl)
+        assertEquals("kris@example.org", stored.accountId)
+        // The phone is the same phone, so the server keeps knowing it as the same device.
+        assertEquals("device-existing", stored.deviceId)
+        assertTrue(stored.profileSeeded)
+        // The refusal is cleared by the thing that fixed it, and not left to the next run.
+        assertNull(stored.lastErrorCode)
+        assertNull(stored.lastErrorMessage)
+    }
+
+    /** The email is never asked for: it is the one this phone's data already belongs to. */
+    @Test
+    fun signingInAgainUsesTheStoredAccountAndNotOneThatWasTyped() = runTest {
+        val api = FakePairingApi()
+
+        pairing(FakePairingStore(paired()), FakeTokenStore("stale"), api)
+            .reauthenticate("https://mue.home.arpa", "correct horse")
+
+        assertEquals(
+            listOf(Triple("https://mue.home.arpa", "kris@example.org", "correct horse")),
+            api.signedIn,
+        )
+    }
+
+    /**
+     * PRD 9.3 forbids merging another account's data; it does not forbid a server moving.
+     *
+     * A home router hands out a new address and the development certificate is issued for an IP,
+     * so this is the ordinary case — and before there was a sign-in on the paired screen it could
+     * only be reached by disconnecting first.
+     */
+    @Test
+    fun signingInAgainMayMoveTheServerBecauseAnAddressIsNotAnAccount() = runTest {
+        val store = FakePairingStore(paired())
+
+        val result = pairing(store, FakeTokenStore("stale")).reauthenticate(
+            "https://192.168.1.100:3000",
+            "correct horse",
+        )
+
+        assertIs<PairingResult.Paired>(result)
+        val stored = requireNotNull(store.current)
+        assertEquals("https://192.168.1.100:3000", stored.serverUrl)
+        assertEquals("192.168.1.100:3000", stored.serverName)
+        assertEquals("kris@example.org", stored.accountId)
+    }
+
+    /**
+     * PRD 9.3's guard is not bypassed by the shorter path.
+     *
+     * Signing in again has no email parameter, so the only way another account can arrive is a
+     * server answering with a different one — and that is refused before a byte is stored,
+     * exactly as a full pairing refuses it.
+     */
+    @Test
+    fun signingInAgainRefusesAnAddressWhereTheAccountTurnsOutToBeSomebodyElse() = runTest {
+        val store = FakePairingStore(paired())
+        val tokens = FakeTokenStore("stale")
+        val api = FakePairingApi(
+            onAccount = { _, _ ->
+                PairingAccount(id = "user_2", email = "someone@example.org", displayName = null)
+            },
+        )
+
+        val result = pairing(store, tokens, api).reauthenticate("https://elsewhere.arpa", "pw")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertIs<PairingFailure.DifferentAccount>(failed.failure)
+        // Nothing moved: the old address, the old account and even the old, useless bearer.
+        assertEquals("https://mue.home.arpa", store.current?.serverUrl)
+        assertEquals("kris@example.org", store.current?.accountId)
+        assertEquals("stale", tokens.token)
+        // And the session that refusal caused to exist does not outlive it (PRD 15.3).
+        assertEquals(listOf("https://elsewhere.arpa" to "bearer-1"), api.revoked)
+    }
+
+    /** A wrong password is named as a wrong password, and changes nothing. */
+    @Test
+    fun aWrongPasswordLeavesTheSignedOutPairingExactlyAsItWas() = runTest {
+        val store = FakePairingStore(paired())
+        val tokens = FakeTokenStore("stale")
+        val api = FakePairingApi(
+            onSignIn = { _, _, _ -> throw PairingException(PairingFailure.CredentialsRejected) },
+        )
+
+        val result = pairing(store, tokens, api).reauthenticate("https://mue.home.arpa", "wrong")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.CredentialsRejected, failed.failure)
+        assertTrue(store.writes.isEmpty())
+        assertEquals("stale", tokens.token)
+    }
+
+    /**
+     * There is nobody to sign in as, so the screen is told so rather than shown a form it has no
+     * email for. `Disconnect server` is on the same card, which is what the message names.
+     */
+    @Test
+    fun aPairingThatNeverLearnedItsAccountSaysSoRatherThanGuessing() = runTest {
+        val store = FakePairingStore(paired().copy(accountId = "  "))
+        val api = FakePairingApi()
+
+        val result = pairing(store, FakeTokenStore("stale"), api)
+            .reauthenticate("https://mue.home.arpa", "correct horse")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.AccountUnknown, failed.failure)
+        // No password was ever offered to the server, and no probe was made.
+        assertTrue(api.signedIn.isEmpty())
+        assertTrue(api.probed.isEmpty())
+    }
+
+    /** An emptied address field is named, not silently replaced by the one already stored. */
+    @Test
+    fun anEmptyAddressIsRefusedByNameRatherThanFilledInBehindTheUser() = runTest {
+        val result = pairing(FakePairingStore(paired()), FakeTokenStore("stale"))
+            .reauthenticate("   ", "correct horse")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.AddressMissing, failed.failure)
+    }
+
+    /**
+     * The message a screen shows must name a control that screen has.
+     *
+     * Signing in again happens on a card with a server address, a password and nothing else: the
+     * account is `sync_state.account_id` and there is deliberately no field for a second one.
+     * Delegating straight to [ServerPairing.pair] made an empty password answer with
+     * `CredentialsMissing` — "Enter the email address and password of your Mue account" — over a
+     * card with no email box. That is the fault this whole screen was rebuilt to remove,
+     * reintroduced one call deeper, and it is why the check lives in `reauthenticate`.
+     */
+    @Test
+    fun anEmptyPasswordDoesNotTellTheUserToFillInAFieldThatIsNotThere() = runTest {
+        val api = FakePairingApi()
+
+        val result = pairing(FakePairingStore(paired()), FakeTokenStore("stale"), api)
+            .reauthenticate("https://mue.home.arpa", "")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.PasswordMissing, failed.failure)
+        assertFalse(failed.failure.message.contains("email", ignoreCase = true))
+        // And nothing was attempted: no probe, no sign-in, no token touched.
+        assertTrue(api.probed.isEmpty())
+        assertTrue(api.signedIn.isEmpty())
+    }
+
+    /** The full form still names both, because it still has both fields. */
+    @Test
+    fun theUnpairedFormStillNamesBothCredentialsBecauseItHasBothFields() = runTest {
+        val result = pairing().pair("https://mue.home.arpa", "kris@example.org", "")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.CredentialsMissing, failed.failure)
+    }
+
+    /** An empty address outranks an empty password, as it does on the pairing form. */
+    @Test
+    fun anEmptyAddressIsNamedBeforeAnEmptyPassword() = runTest {
+        val result = pairing(FakePairingStore(paired()), FakeTokenStore("stale"))
+            .reauthenticate("", "")
+
+        val failed = assertIs<PairingResult.Failed>(result)
+        assertEquals(PairingFailure.AddressMissing, failed.failure)
     }
 
     // --- helpers ------------------------------------------------------------------------------------

@@ -76,6 +76,52 @@ class ServerPairing(
         }
     }
 
+    /**
+     * PRD 9.3's "se reconnecter au même compte reprend la synchronisation", as a call of its own.
+     *
+     * ## Why this is not `pair` with a remembered email
+     *
+     * It is [pair], with the email taken from `sync_state.account_id` instead of from a form —
+     * and that difference is the whole point. A rejected session is not an unpaired phone: the
+     * address is right, the account is right, and the only stale thing is the bearer. Signing in
+     * again is therefore a *smaller* act than pairing, and it is made smaller here by removing
+     * the parameter that could turn it into a bigger one. **There is no `email` argument, so no
+     * caller of this function can change which account this phone's data belongs to** — PRD 9.3's
+     * rule stops being something a screen remembers to enforce and becomes a signature.
+     *
+     * A different account is still reachable, deliberately, through `Disconnect server` and the
+     * full form — where [accountGuard] meets it and refuses it by name, exactly as before.
+     *
+     * ## The address is a parameter, and that is not the same door
+     *
+     * A home router hands out a new address; the certificate in `certs/` is issued for an IP.
+     * Moving a server is a frequent, legitimate thing that PRD 9.3 does not forbid, and today it
+     * can only be done by disconnecting — which turns a deliberate exit into a mandatory
+     * detour. So the address travels with the sign-in. Changing *where* the same account lives is
+     * not changing *whose* data this is, and only the second is the merge PRD 9.3 names.
+     *
+     * Everything else is [pair]'s own behaviour, unchanged and for its own reasons: the bearer is
+     * proved before it is stored, `device_id` and `profile_seeded` are carried over, the outbox
+     * is untouched — so the change that was waiting when the session died goes out on the first
+     * synchronisation after it is restored — and the cursor is dropped. The dropped cursor
+     * matters most here: the case that brought this about is an account recreated on the server,
+     * whose journal the old cursor indexes nothing of.
+     */
+    suspend fun reauthenticate(address: String, password: String): PairingResult {
+        val known = store.state()?.accountId?.trim()?.takeUnless(String::isEmpty)
+            ?: return PairingResult.Failed(PairingFailure.AccountUnknown)
+        // The address before the password, which is [pair]'s order and so the order of the two
+        // fields on the card. An empty form then names the box the eye reaches first.
+        val parsed = ServerAddresses.parse(address)
+        if (parsed is ServerAddressResult.Invalid) return PairingResult.Failed(parsed.failure)
+        // Checked here rather than left to [pair], whose `CredentialsMissing` names an email
+        // address. This card has no email field — that is the point of it — so being told to
+        // fill one in would be an instruction with no control behind it, on the very screen
+        // rebuilt to stop doing that.
+        if (password.isEmpty()) return PairingResult.Failed(PairingFailure.PasswordMissing)
+        return pair(address, known, password)
+    }
+
     private suspend fun pairChecked(
         address: ServerAddress,
         email: String,

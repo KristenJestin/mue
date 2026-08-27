@@ -150,13 +150,45 @@ class SyncViewModel(
      */
     fun connect() {
         val current = formState.value
-        if (current.busy) return
+        attempt { pairing.pair(current.address, current.email, current.password) }
+    }
+
+    /**
+     * PRD 9.3's "se reconnecter au même compte reprend la synchronisation", from a phone that is
+     * still paired.
+     *
+     * Two situations reach it and they are the same operation. A bearer the server has stopped
+     * accepting — a recreated account, a revoked session — leaves a pairing whose address and
+     * account are both still right, and until this existed the only control on the screen was
+     * `Disconnect server`, which threw all of it away to rebuild the same row by hand. And a
+     * server that changed address is the same account somewhere else, which had no path at all.
+     *
+     * Note what is *not* passed: the email. It is read from `sync_state.account_id` inside
+     * [fr.kristenjestin.mue.data.pairing.ServerPairing.reauthenticate], so this view model cannot
+     * change which account this phone belongs to even if a future screen grew a field for it.
+     */
+    fun signInAgain() {
+        val current = formState.value
+        attempt { pairing.reauthenticate(current.address, current.password) }
+    }
+
+    /**
+     * One attempt at obtaining a session, whichever button asked for it.
+     *
+     * `Connect` and `Sign in` differ in exactly one way — where the email comes from — and every
+     * other rule is the same one: the form freezes, the password is gone on the way out whatever
+     * happened, a failure keeps the address, and the initial synchronisation's own outcome is
+     * reported rather than swallowed. Written once so the second button cannot quietly acquire
+     * a different answer to "is the password kept".
+     */
+    private fun attempt(action: suspend () -> PairingResult) {
+        if (formState.value.busy) return
         formState.update { it.copy(connecting = true, failure = null, success = null) }
         transient.update { it.copy(syncing = true, note = null) }
 
         viewModelScope.launch {
             val result = try {
-                pairing.pair(current.address, current.email, current.password)
+                action()
             } catch (cancellation: CancellationException) {
                 formState.update { it.copy(connecting = false, password = "") }
                 transient.update { it.copy(syncing = false) }
@@ -172,11 +204,13 @@ class SyncViewModel(
                 }
 
                 is PairingResult.Paired -> {
-                    // A fresh form: address, email and password all gone, because the screen is
-                    // about to show the paired server instead of the form.
+                    // A fresh form: email and password gone, and the address put back from the
+                    // row that was just written — normalised, so what the paired card shows is
+                    // the origin every later request will use rather than what was typed.
                     formState.value = PairingFormState(
                         success = "Connected to ${result.serverName} as ${result.account}.",
                     )
+                    seedAddress()
                     transient.update {
                         it.copy(syncing = false, note = SyncMessages.describe(result.firstSync))
                     }
@@ -224,6 +258,23 @@ class SyncViewModel(
     /** Clears the one-line result once it has been read. */
     fun dismissNote() {
         transient.update { it.copy(note = null) }
+    }
+
+    /**
+     * Fills the address in from `sync_state` when this phone is paired.
+     *
+     * Read straight from the DAO rather than from [state], which is a `WhileSubscribed` flow and
+     * may still be holding its initial empty value at the moment the screen is composed. A
+     * paired phone that showed an empty address box would make `Sign in` unusable until the
+     * server was retyped from memory, correctly, which is the retyping this whole change removes.
+     */
+    fun onEnterSettings() {
+        viewModelScope.launch { seedAddress() }
+    }
+
+    private suspend fun seedAddress() {
+        val stored = syncDao.syncState()?.serverUrl?.takeUnless(String::isBlank) ?: return
+        formState.update { it.copy(address = stored) }
     }
 
     /** The password never outlives the screen that collected it. */

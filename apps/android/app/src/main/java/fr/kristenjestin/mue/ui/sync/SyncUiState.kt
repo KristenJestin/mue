@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.sync
 
 import androidx.compose.runtime.Immutable
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
+import fr.kristenjestin.mue.data.remote.sync.SyncErrorCodes
 
 /**
  * The four words sync PRD 9.1 allows `Data & sync` to say, and no fifth.
@@ -59,6 +60,19 @@ data class DataSyncUiState(
     val undeliverableChanges: Int = 0,
     /** The message the engine last recorded, verbatim (FR-SYNC-008). */
     val lastErrorMessage: String? = null,
+    /**
+     * The last exchange failed because the server would not accept this phone's bearer.
+     *
+     * It is told apart from every other [SyncStatus.SYNC_ISSUE] because it is the only one the
+     * person holding the phone can *do* something about from this screen, and because the server
+     * answers it with the sentence `Sign in to synchronise.` — an instruction that, until the
+     * `Server settings` screen grew a sign-in of its own, named an action with no control behind
+     * it anywhere in the app.
+     *
+     * A recreated account, a session revoked from the server, a bearer expired: three causes,
+     * one remedy, and it is not `Disconnect server`.
+     */
+    val sessionRejected: Boolean = false,
     /** A synchronisation is running right now, started from this screen. */
     val syncing: Boolean = false,
     /** What the last `Sync now` reported. Transient; never a stored state. */
@@ -82,6 +96,12 @@ data class SyncNote(val message: String, val isProblem: Boolean)
  * a password that cannot be recovered from a crash dump.
  *
  * [password] is cleared the instant a pairing succeeds or the screen is left.
+ *
+ * The same three fields serve both halves of the screen, because they are the same three facts.
+ * Unpaired, all of them are typed. Paired, [address] arrives already filled in from
+ * `sync_state.server_url` and [email] is not asked at all: signing in again happens as the
+ * account this phone's data already belongs to, and PRD 9.3's refusal to merge two accounts is
+ * kept by there being no field to type a second one into.
  */
 @Immutable
 data class PairingFormState(
@@ -162,6 +182,10 @@ object SyncStatuses {
         refusedChanges = failed,
         undeliverableChanges = undeliverable,
         lastErrorMessage = state?.lastErrorMessage?.takeUnless(String::isBlank),
+        // Read from the code and never from the message: `last_error_message` is whatever the
+        // server wrote, in the server's words, and a screen that decided what to offer by
+        // matching an English sentence would stop offering it the day that sentence changed.
+        sessionRejected = state?.lastErrorCode == SyncErrorCodes.AUTH_UNAUTHENTICATED,
         syncing = syncing,
         syncNote = note,
     )

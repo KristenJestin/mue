@@ -64,6 +64,46 @@ object SyncMessages {
 
     const val PAIRED_TITLE: String = "Connected server"
     const val ACCOUNT_LABEL: String = "Signed in as"
+
+    // --- signing in again, without giving the pairing up ---------------------------------------
+
+    /**
+     * PRD 9.3's "se reconnecter au même compte reprend la synchronisation", as words on a screen.
+     *
+     * Until this existed, a phone whose bearer the server had stopped accepting was shown
+     * `Sync issue`, the server's own `Sign in to synchronise.`, and one button: `Disconnect
+     * server`. The only way to obey the instruction was to throw away a pairing that was correct
+     * in every respect but its token, and retype an address, an email and a password to rebuild
+     * the same row. That is not a recovery, it is a dead end with a long way round.
+     */
+    const val SIGN_IN_AGAIN_TITLE: String = "Sign in again"
+    const val SIGN_IN_ACTION: String = "Sign in"
+    const val SIGNING_IN: String = "Signing in…"
+
+    /**
+     * Said when the pairing is healthy, where it reads as what it is: the way to move a server,
+     * not a fault report. A home router reassigns an address and the certificate in `certs/` is
+     * issued for one; before this, changing it meant `Disconnect server` first.
+     */
+    const val SIGN_IN_AGAIN_BODY: String =
+        "Renew this phone's session, or point it at a new address if your server has moved. " +
+            "Your password is used once, as it was the first time, and is never stored."
+
+    /** Said when the server has refused this phone's session, in the card that can restore it. */
+    const val SESSION_REJECTED_BODY: String =
+        "The server refused this phone's session, so nothing is being sent or received. Sign in " +
+            "again to restore it: the server, the account, the queue and everything recorded " +
+            "here are kept."
+
+    /**
+     * PRD 9.3's rule, stated on the one screen that could otherwise be mistaken for a way around
+     * it — and it names `Disconnect server` because that control is right underneath.
+     */
+    fun boundToAccount(account: String): String =
+        "Mue signs in here as $account, because that is the account this phone's data belongs " +
+            "to. To use a different one, disconnect this server first — connecting another " +
+            "account never merges it with what is already here."
+
     const val DISCONNECT_ACTION: String = "Disconnect server"
     const val DISCONNECT_TITLE: String = "Disconnect this server?"
     const val DISCONNECT_BODY: String =

@@ -99,6 +99,21 @@ sealed interface PairingFailure {
     }
 
     /**
+     * [CredentialsMissing]'s sibling for the card that has no email field.
+     *
+     * `Server settings`, once paired, asks for a password and nothing else: the account comes
+     * from `sync_state.account_id` and there is deliberately no box to type another one into
+     * (PRD 9.3). Answering an empty password there with [CredentialsMissing] would print
+     * "Enter the email address and password of your Mue account" over a card containing one
+     * field — an instruction naming a control the screen does not have, which is the exact fault
+     * this screen was rebuilt to remove. So the message names only what is actually missing.
+     */
+    data object PasswordMissing : PairingFailure {
+        override val message: String =
+            "Enter the password of your Mue account to sign in again."
+    }
+
+    /**
      * The server rejected the pair. Deliberately says nothing about *which* of the two was
      * wrong, because the server does not say either (PRD 15.3: a refused attempt reveals no
      * data).
@@ -177,6 +192,23 @@ sealed interface PairingFailure {
             "The data on this phone is already synchronised with $storedAccount. Signing in as " +
                 "$offeredAccount would mix two accounts together, so nothing was connected. " +
                 "Sign in as $storedAccount to carry on."
+    }
+
+    /**
+     * [ServerPairing.reauthenticate] was asked to sign in again and this phone does not know as
+     * whom.
+     *
+     * `account_id` is written by every pairing and survives a disconnect, so in practice this is
+     * a row from a server that reported no email address at all. There is no way to renew a
+     * session for an account nobody can name, and inventing one — reading the email off a form,
+     * say — is the exact hole PRD 9.3 closes. So the message names the one path that is safe,
+     * and it is a control on the same screen.
+     */
+    data object AccountUnknown : PairingFailure {
+        override val message: String =
+            "This phone does not know which Mue account its data belongs to, so it cannot sign " +
+                "in again on its own. Disconnect the server, then connect with your email " +
+                "address and password. Nothing recorded here is deleted either way."
     }
 
     // --- the phone itself ---------------------------------------------------------------------

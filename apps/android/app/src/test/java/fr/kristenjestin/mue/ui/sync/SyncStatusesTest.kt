@@ -3,7 +3,9 @@ package fr.kristenjestin.mue.ui.sync
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The four states of sync PRD 9.1, and the rule that decides between them.
@@ -174,5 +176,66 @@ class SyncStatusesTest {
 
         assertEquals(SyncStatus.NOT_CONNECTED, state.status)
         assertEquals("kris@example.org", state.account)
+    }
+
+    // --- the one `Sync issue` the person holding the phone can fix -------------------------------
+
+    /**
+     * An account recreated on the server, a session revoked, a bearer expired: the server answers
+     * `401` with `auth.unauthenticated`, the engine records it, and `Data & sync` reads
+     * `Sync issue` with the server's own sentence beneath it — `Sign in to synchronise.`
+     *
+     * That sentence named an action the app had no control for. It has one now, and this flag is
+     * what decides whether the screen leads with it.
+     */
+    @Test
+    fun aRefusedBearerIsToldApartFromEveryOtherSyncIssue() {
+        val refused = SyncStatuses.from(
+            state = paired.copy(
+                lastErrorCode = "auth.unauthenticated",
+                lastErrorMessage = "Sign in to synchronise.",
+            ),
+            pending = 1,
+            failed = 0,
+            undeliverable = 0,
+            serverName = "mue.home.arpa",
+        )
+
+        assertEquals(SyncStatus.SYNC_ISSUE, refused.status)
+        assertTrue(refused.sessionRejected)
+        assertEquals("Sign in to synchronise.", refused.lastErrorMessage)
+    }
+
+    /** A server that could not be reached is not a session that was refused. */
+    @Test
+    fun anUnreachableServerIsNotARefusedSession() {
+        val unreachable = SyncStatuses.from(
+            state = paired.copy(
+                lastErrorCode = "client.unreachable",
+                lastErrorMessage = "The server could not be reached.",
+            ),
+            pending = 0,
+            failed = 0,
+            undeliverable = 0,
+            serverName = "mue.home.arpa",
+        )
+
+        assertEquals(SyncStatus.SYNC_ISSUE, unreachable.status)
+        assertFalse(unreachable.sessionRejected)
+    }
+
+    /** `recordSuccess` clears the code, so a session that works never reads as refused. */
+    @Test
+    fun aHealthyPairingNeverReadsAsRefused() {
+        val healthy = SyncStatuses.from(
+            state = paired,
+            pending = 0,
+            failed = 0,
+            undeliverable = 0,
+            serverName = "mue.home.arpa",
+        )
+
+        assertEquals(SyncStatus.SYNCED, healthy.status)
+        assertFalse(healthy.sessionRejected)
     }
 }
