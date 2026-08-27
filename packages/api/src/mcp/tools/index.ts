@@ -16,9 +16,13 @@ import {
 } from "./custom-exercise";
 import { createFoodTool, deleteFoodTool, updateFoodTool } from "./food";
 import { createFoodLogTool, deleteFoodLogTool, updateFoodLogTool } from "./food-log";
+import { getDailyNutritionTool, listFoodLogsTool } from "./food-log-reads";
+import { searchFoodsTool } from "./food-reads";
 import { getHealthProfileTool, updateHealthProfileTool } from "./health-profile";
 import { listWeightMeasurementsTool } from "./list-weight-measurements";
+import { listMealPlanTool, planMealTool, unplanMealTool } from "./meal-plan";
 import { createRecipeTool, deleteRecipeTool, updateRecipeTool } from "./recipe";
+import { getRecipeTool, listRecipesTool } from "./recipe-reads";
 import { getSyncStatusTool } from "./status";
 import type { MueTool } from "./types";
 import {
@@ -64,13 +68,20 @@ export {
  * asks for it -- *"les capacités de création complète, modification et suppression sont
  * obligatoires"* -- and PRD_FOOD 21.5 names it outright.
  *
- * ## What is deliberately absent
+ * ## The food reads, and the scope they finally make reachable
  *
- * PRD_FOOD 21.5 also names six food *read* tools and a `plan_meal`/`unplan_meal` pair for meal
- * proposals. Section 14.2's read list predates the food model and carries none of them, and
- * section 14 itself names no meal-plan tool anywhere; the only route to them is section 17's
- * delegation to PRD_FOOD 21. They are a coherent increment of their own -- the reads are what
- * would let an agent find the identifier a food write needs -- and they are not this one.
+ * PRD_FOOD 21.5's six read tools and its `plan_meal`/`unplan_meal` pair are the fourth group.
+ * Section 14.2's read list predates the food model and carries none of them, and section 14
+ * names no meal-plan tool anywhere; the only route to them is section 17's delegation to
+ * PRD_FOOD 21, which is why they are grouped by that section rather than folded into
+ * [READ_TOOLS].
+ *
+ * Their arrival closes a hole that was visible in the authorization flow rather than in the
+ * catalogue. `nutrition:read` is one of section 15.2's nine scopes and, until these six, *no
+ * tool declared it* -- so the server's 401 challenge never offered it, Better Auth refused to
+ * grant a scope that had not been requested, and there was no way for a person to consent to
+ * an agent reading their food. Every read tool below declares it, and the challenge now
+ * carries it because the challenge is computed from what the tools declare.
  */
 
 /** Section 14.2, in the order the section lists them. */
@@ -114,13 +125,34 @@ const FOOD_TOOLS: readonly MueTool[] = [
 ];
 
 /**
+ * PRD_FOOD 21.5's own two lists: its six reads, in the order the section names them, then the
+ * two writes section 14.3 has no entry for.
+ */
+const FOOD_READ_TOOLS: readonly MueTool[] = [
+  listFoodLogsTool,
+  getDailyNutritionTool,
+  searchFoodsTool,
+  getRecipeTool,
+  listRecipesTool,
+  listMealPlanTool,
+];
+
+const MEAL_PLAN_WRITE_TOOLS: readonly MueTool[] = [planMealTool, unplanMealTool];
+
+/**
  * Every tool this build exposes.
  *
  * Nothing in this list takes a query, a table name, a path or a command. That is what makes
  * sections 14.1 and 16 -- never expose the tables, raw SQL, the file system or the process -- a
  * property of the catalogue rather than a rule someone has to remember.
  */
-export const MUE_TOOLS: readonly MueTool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...FOOD_TOOLS];
+export const MUE_TOOLS: readonly MueTool[] = [
+  ...READ_TOOLS,
+  ...WRITE_TOOLS,
+  ...FOOD_TOOLS,
+  ...FOOD_READ_TOOLS,
+  ...MEAL_PLAN_WRITE_TOOLS,
+];
 
 /** True when the caller holds every scope the tool declares. */
 export function isToolPermitted(tool: MueTool, granted: ReadonlySet<MueScope>): boolean {

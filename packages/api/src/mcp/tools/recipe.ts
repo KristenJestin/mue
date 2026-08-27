@@ -101,7 +101,8 @@ const ingredientViewSchema = z.object({
     ),
 });
 
-const recipeViewSchema = z.object({
+/** Exported so `recipe-reads.ts` describes a recipe with this shape and not a second one. */
+export const recipeViewSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   type: z.string().describe("`breakfast`, `main` or `snack`."),
@@ -114,7 +115,7 @@ const recipeViewSchema = z.object({
   ...metadataShape,
 });
 
-function recipeView(stored: StoredAggregate<RecipePayloadV1>): Record<string, unknown> {
+export function recipeView(stored: StoredAggregate<RecipePayloadV1>): Record<string, unknown> {
   const { payload, meta } = stored;
   return {
     id: payload.id,

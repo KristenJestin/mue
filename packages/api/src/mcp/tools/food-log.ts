@@ -86,7 +86,8 @@ const MAX_QUANTITY = INGREDIENT_QUANTITY_MAX_THOUSANDTHS / 1000;
 
 // --- shapes ---------------------------------------------------------------------------
 
-const lineViewSchema = z.object({
+/** Exported so the journal reads describe a line with this shape and not a second one. */
+export const lineViewSchema = z.object({
   id: z.uuid().describe("The line's stable identifier."),
   consumedOn: localDateSchema.describe("The day it was eaten."),
   consumedAt: z.string().describe("The local time it was eaten, HH:MM."),
@@ -114,7 +115,7 @@ const lineViewSchema = z.object({
 const thousandthsOrNull = (value: number | undefined): number | null =>
   value === undefined ? null : value / 1000;
 
-function lineView(stored: StoredAggregate<FoodLogEntryPayloadV1>): Record<string, unknown> {
+export function lineView(stored: StoredAggregate<FoodLogEntryPayloadV1>): Record<string, unknown> {
   const { payload, meta } = stored;
   return {
     id: payload.id,

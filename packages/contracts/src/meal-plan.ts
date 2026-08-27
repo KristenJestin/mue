@@ -40,6 +40,22 @@ export const MEAL_SLOTS = ["breakfast", "lunch", "snack", "dinner"] as const;
 /** `MealPlanKey.SEPARATOR`. In `aggregateIdSchema`'s alphabet, which `/` is not. */
 export const MEAL_PLAN_ID_SEPARATOR = ":";
 
+/**
+ * `MealPlanEntry.MAX_DAYS_AHEAD`, which PRD_FOOD 15 states as *"Date proposée : aujourd'hui ou
+ * dans le futur, dans les 60 jours"*.
+ *
+ * It is here rather than in the MCP tool that enforces it because it is the mirror image of a
+ * rule the journal already carries — a line is never in the future, a proposal is never in the
+ * past — and the two halves of one rule drift when they live in two packages. `plan_meal` reads
+ * it; so would any screen or route that ever offers the same window.
+ *
+ * The bound is *not* in [mealPlanEntryPayloadV1Schema]. A payload is judged by what can have
+ * been stored, and a proposal written fifty-nine days ago for a date that has since passed is a
+ * stored row whose date is now behind today — refusing it on the wire would strand it. The
+ * window is a rule about *making* a proposal, so it is checked where one is made.
+ */
+export const MEAL_PLAN_MAX_DAYS_AHEAD = 60;
+
 /** `Servings.CONSUMED_RANGE` and `CONSUMED_STEP_THOUSANDTHS`: 0.25 to 10, in quarters. */
 export const SERVINGS_MIN_THOUSANDTHS = 250;
 export const SERVINGS_MAX_THOUSANDTHS = 10_000;
@@ -77,11 +93,21 @@ export const servingsThousandthsSchema = z
  * It is a pattern of its own rather than a plain `aggregateIdSchema`, so that the generated
  * specification says what the identifier of *this* aggregate looks like instead of leaving an
  * author to infer it — and so that a client cannot invent a third spelling of the same pair.
+ *
+ * The moment half is built from [MEAL_SLOTS] rather than written out. It used to be spelled
+ * `(?:breakfast|lunch|snack|dinner)` by hand, which is a second copy of the enum — and a copy
+ * that fails in the worst available way: `MEAL_SLOTS` is expected to grow, and a moment added
+ * to the enum but not to this line would be accepted by `mealSlotSchema`, accepted by
+ * `mealPlanEntryPayloadV1Schema`, and then refused at the envelope because the identifier
+ * derived from it does not match. The row would be journalled by a phone and rejected by the
+ * server, which is exactly the failure the `/` separator already caused once.
  */
+const MEAL_SLOT_ALTERNATION = MEAL_SLOTS.join("|");
+
 export const mealPlanAggregateIdSchema = z
   .string()
   .regex(
-    /^\d{4}-\d{2}-\d{2}:(?:breakfast|lunch|snack|dinner)$/,
+    new RegExp(`^\\d{4}-\\d{2}-\\d{2}:(?:${MEAL_SLOT_ALTERNATION})$`),
     "expected a meal plan identifier such as 2026-09-01:dinner",
   )
   .meta({

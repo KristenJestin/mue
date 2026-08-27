@@ -5,6 +5,7 @@ import type {
   FoodLogEntryPayloadV1,
   FoodPayloadV1,
   HealthProfilePayloadV1,
+  MealPlanEntryPayloadV1,
   MueError,
   MutationOp,
   OriginType,
@@ -164,6 +165,93 @@ export interface ListCustomExercisesResult {
   readonly hasMore: boolean;
 }
 
+// --- PRD_FOOD 21.5, the food reads ---------------------------------------------------
+
+/**
+ * The journal over a period, filterable by moment (PRD_FOOD 21.5's `list_food_logs`).
+ *
+ * `slot` is a plain string and not a union, for the reason `meal-slot-clock.ts` gives:
+ * `MealSlot` is expected to grow, and a query type that enumerated the moments would be a
+ * second copy of the enum. The tool validates it against `mealSlotSchema`; by the time it
+ * reaches here it is a moment the contract accepted.
+ */
+export interface ListFoodLogEntriesQuery {
+  readonly userId: string;
+  readonly from: string | null;
+  readonly to: string | null;
+  readonly slot: string | null;
+  /** Keyset: the `consumedOn`, `consumedAt` and `id` of the last row of the previous page. */
+  readonly afterKey: string | null;
+  readonly limit: number;
+  readonly includeDeleted: boolean;
+}
+
+export interface ListFoodLogEntriesResult {
+  readonly entries: readonly StoredAggregate<FoodLogEntryPayloadV1>[];
+  readonly hasMore: boolean;
+}
+
+/**
+ * Foods this account can reach, matched on what a person would type.
+ *
+ * `text` folds the way the rest of this server folds a name — case, and case alone, as
+ * `foldExerciseName` does. PRD_FOOD 9.4 also asks for accent-insensitivity, and that is a
+ * capability of the *phone's* offline search: the server holds no folded column for a food
+ * and inventing one fold here would be a second, drifting definition of what two names
+ * being "the same" means. Recorded rather than silently half-done.
+ */
+export interface SearchFoodsQuery {
+  readonly userId: string;
+  /** A fragment of a name or a brand. Null lists the catalogue in name order. */
+  readonly text: string | null;
+  readonly barcode: string | null;
+  /** PRD_FOOD 9.4: *"Un filtre restreint à une source."* Null means both. */
+  readonly source: string | null;
+  /** Keyset: the `name` and `id` of the last row of the previous page. */
+  readonly afterKey: string | null;
+  readonly limit: number;
+  readonly includeDeleted: boolean;
+}
+
+export interface SearchFoodsResult {
+  readonly foods: readonly StoredAggregate<FoodPayloadV1>[];
+  readonly hasMore: boolean;
+}
+
+/** Saved recipes, filterable by type and by favourite (PRD_FOOD 21.5's `list_recipes`). */
+export interface ListRecipesQuery {
+  readonly userId: string;
+  readonly type: string | null;
+  readonly favouritesOnly: boolean;
+  /** A fragment of the name. PRD_FOOD 11: a recipe is searchable by name. */
+  readonly text: string | null;
+  /** Keyset: the `name` and `id` of the last row of the previous page. */
+  readonly afterKey: string | null;
+  readonly limit: number;
+  readonly includeDeleted: boolean;
+}
+
+export interface ListRecipesResult {
+  readonly recipes: readonly StoredAggregate<RecipePayloadV1>[];
+  readonly hasMore: boolean;
+}
+
+/** Proposals over a period (PRD_FOOD 21.5's `list_meal_plan`). */
+export interface ListMealPlanQuery {
+  readonly userId: string;
+  readonly from: string | null;
+  readonly to: string | null;
+  /** Keyset: the `plannedOn` and `slot` of the last row of the previous page. */
+  readonly afterKey: string | null;
+  readonly limit: number;
+  readonly includeDeleted: boolean;
+}
+
+export interface ListMealPlanResult {
+  readonly entries: readonly StoredAggregate<MealPlanEntryPayloadV1>[];
+  readonly hasMore: boolean;
+}
+
 /**
  * FR-SYNC-008 and section 12.3, as one answer.
  *
@@ -307,6 +395,48 @@ export interface MueMcpServices {
     userId: string,
     id: string,
   ): Promise<StoredAggregate<FoodLogEntryPayloadV1> | null>;
+
+  getMealPlanEntry(
+    userId: string,
+    plannedOn: string,
+    slot: string,
+  ): Promise<StoredAggregate<MealPlanEntryPayloadV1> | null>;
+
+  // --- PRD_FOOD 21.5, the food reads --------------------------------------------------
+
+  listFoodLogEntries(query: ListFoodLogEntriesQuery): Promise<ListFoodLogEntriesResult>;
+
+  /**
+   * Every live line of one day, oldest first.
+   *
+   * Unpaged, and deliberately so: `get_daily_nutrition` returns a *total*, and a total of
+   * a page is not a total of a day. A day of a personal journal is a handful of rows, so
+   * the whole day is read and summed at once rather than assembled across calls an agent
+   * could stop making halfway.
+   *
+   * Ordered by the clock, which is PRD_FOOD 22's *"Les lignes d'un moment sont ordonnées
+   * par heure"*.
+   */
+  foodLogEntriesOn(
+    userId: string,
+    date: string,
+  ): Promise<readonly StoredAggregate<FoodLogEntryPayloadV1>[]>;
+
+  searchFoods(query: SearchFoodsQuery): Promise<SearchFoodsResult>;
+
+  listRecipes(query: ListRecipesQuery): Promise<ListRecipesResult>;
+
+  /**
+   * The live foods behind a set of identifiers, in one query.
+   *
+   * PRD_FOOD 13.1 derives a recipe's values from its ingredients' foods, so rendering a
+   * page of recipes needs every food they name. One `in` beats one query per ingredient,
+   * and a food that is absent is absent from the map — which [recipeTotal] reads as
+   * unknown rather than as zero.
+   */
+  foodsByIds(userId: string, ids: readonly string[]): Promise<ReadonlyMap<string, FoodPayloadV1>>;
+
+  listMealPlan(query: ListMealPlanQuery): Promise<ListMealPlanResult>;
 
   // --- sections 14.3 and 14.6, writes -------------------------------------------------
 

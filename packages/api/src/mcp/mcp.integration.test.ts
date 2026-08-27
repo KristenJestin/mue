@@ -9,7 +9,7 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMcpApp, createOAuthDiscoveryApp, MUE_TOOLS } from "./index";
 import { MUE_MCP_PROTOCOL_VERSION, PRD_REQUESTED_PROTOCOL_VERSION } from "./protocol";
@@ -200,10 +200,10 @@ async function newAgent(name: string, grantedScopes: string): Promise<Agent> {
  * so a hand-written list that named a scope no tool declares would fail the authorization,
  * not the assertion, and the failure would look like a broken OAuth flow.
  *
- * `nutrition:read` is the one member of `MUE_SCOPES` that does not appear here, and its
- * absence is the read gap this build leaves open: PRD_FOOD 21.5's six food *read* tools are
- * not shipped, so nothing declares the scope and nothing can ask for it. When they land, this
- * constant picks them up on its own.
+ * Every member of `MUE_SCOPES` now appears here, including `nutrition:read`. It used not to:
+ * PRD_FOOD 21.5's six food *read* tools were unshipped, nothing declared the scope, and so
+ * nothing could ask for it — a scope that was not merely unused but unreachable. The six
+ * declare it, and this constant picked them up on its own the moment they landed.
  */
 const CATALOGUE_SCOPES = [
   "offline_access",
@@ -845,9 +845,26 @@ describe("the whole section 14 catalogue", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual(
       MUE_TOOLS.map((tool) => tool.name).sort(),
     );
-    expect(tools).toHaveLength(28);
+    // Twenty-eight from section 14.3 and its food list, plus PRD_FOOD 21.5's six reads and
+    // its `plan_meal`/`unplan_meal` pair.
+    expect(tools).toHaveLength(36);
 
-    // Section 14.1's four annotations, on all twenty-eight, and section 14.6's rule that a
+    // Every tool PRD_FOOD 21.5 names, checked against the section rather than against a
+    // count: a number can be made to match by deleting the wrong tool.
+    for (const name of [
+      "mue.list_food_logs",
+      "mue.get_daily_nutrition",
+      "mue.search_foods",
+      "mue.get_recipe",
+      "mue.list_recipes",
+      "mue.list_meal_plan",
+      "mue.plan_meal",
+      "mue.unplan_meal",
+    ]) {
+      expect(tools.map((tool) => tool.name)).toContain(name);
+    }
+
+    // Section 14.1's four annotations, on all thirty-six, and section 14.6's rule that a
     // deletion is annotated destructive.
     for (const tool of tools) {
       expect(tool.annotations).toBeDefined();
@@ -859,27 +876,56 @@ describe("the whole section 14 catalogue", () => {
         });
       }
     }
+
+    // `unplan_meal` is a deletion whose name does not say so, which is exactly why the rule
+    // above cannot be left to a name pattern.
+    const unplan = tools.find((tool) => tool.name === "mue.unplan_meal");
+    expect(unplan?.annotations?.destructiveHint).toBe(true);
   });
 
-  test("declares every section 15.2 scope except the one the read gap leaves unused", async () => {
-    // Section 15.2 lists nine scopes and `scopes.ts` declares all nine. Eight of them are
-    // reachable: some tool asks for them, so the 401 challenge offers them and an agent can
-    // consent to them. `nutrition:read` is the ninth, and nothing declares it because
-    // PRD_FOOD 21.5's food *read* tools are not in this build. Asserted rather than left as
-    // a surprise in an OAuth error the day someone tries to grant it.
+  test("declares every section 15.2 scope, including the one the food reads finally reach", async () => {
+    // Section 15.2 lists nine scopes and `scopes.ts` declares all nine. Until PRD_FOOD 21.5's
+    // read tools landed, eight were reachable and `nutrition:read` was not: nothing declared
+    // it, so the 401 challenge never offered it, Better Auth refused to grant a scope that
+    // had not been requested, and nobody could consent to an agent reading their food. This
+    // test asserted that gap; it now asserts that there is none.
     const declared = new Set(MUE_TOOLS.flatMap((tool) => tool.scopes));
     const unused = MUE_SCOPES.filter((scope) => !declared.has(scope));
-    expect(unused).toEqual(["nutrition:read"]);
+    expect(unused).toEqual([]);
 
+    // And the scope is genuinely granted, not merely declared: `CATALOGUE_SCOPES` is derived
+    // from the tools, so this agent asked for `nutrition:read` and the server issued it.
+    expect(agent.tokens.scope).toContain("nutrition:read");
     expect(agent.tokens.scope).toContain("data:delete");
     expect(agent.tokens.scope).toContain("nutrition:write");
+
+    // Every food read declares it, and no food read asks for a write.
+    for (const tool of MUE_TOOLS.filter((candidate) =>
+      [
+        "mue.list_food_logs",
+        "mue.get_daily_nutrition",
+        "mue.search_foods",
+        "mue.get_recipe",
+        "mue.list_recipes",
+        "mue.list_meal_plan",
+      ].includes(candidate.name),
+    )) {
+      expect({ name: tool.name, scopes: [...tool.scopes] }).toEqual({
+        name: tool.name,
+        scopes: ["nutrition:read"],
+      });
+    }
   });
 
   test("a name no tool has is refused, which is what each of these looked like yesterday", async () => {
-    // Every tool in this file failed exactly like this before it existed. Two names are used:
-    // one that never will exist, and one that PRD_FOOD 21.5 names and this build deliberately
-    // does not ship, so the gap is asserted rather than remembered.
-    for (const name of ["mue.definitely_not_a_tool", "mue.list_food_logs"]) {
+    // Every tool in this file failed exactly like this before it existed, and the eight named
+    // above were seen to fail exactly like this on `main` before they were written -- the same
+    // assertion, run against the same client, over the same nine names.
+    //
+    // Only the name that will never exist is left here. The second slot used to hold
+    // `mue.list_food_logs`, asserting the read gap; the gap is closed, and asserting it now
+    // would mean deleting a tool to keep a test green.
+    for (const name of ["mue.definitely_not_a_tool"]) {
       const result = await client.callTool({ name, arguments: {} });
       expect({ name, errored: result.isError }).toEqual({ name, errored: true });
       expect(JSON.stringify(result.content)).toContain(name);
@@ -1630,6 +1676,761 @@ describe("the whole section 14 catalogue", () => {
     expect(cleared.entry.energyKcal).toBeNull();
   });
 
+  // --- PRD_FOOD 21.5, the six reads and the meal plan -------------------------------------------
+
+  /**
+   * The day these tests total, kept apart from the dates the write tests use, so that adding
+   * a line over there cannot silently change a total asserted over here.
+   */
+  const READ_DAY = "2026-05-20";
+  /** A day nothing was ever written on. */
+  const EMPTY_DAY = "2026-05-25";
+
+  /** The lines `get_daily_nutrition` is asserted against, by identifier. */
+  let breakfastLineId = "";
+  let unmeasuredLineId = "";
+  let dinnerLineId = "";
+
+  /**
+   * A local calendar day, offset from today, computed as the server computes its own.
+   *
+   * `plan_meal`'s window moves with the clock, so these dates cannot be literals the way the
+   * journal's can: a test that hardcoded a plannable date would pass until sixty days after
+   * it was written and then fail for a reason having nothing to do with the code.
+   */
+  function localDatePlus(days: number): string {
+    const now = new Date();
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+    const month = String(day.getMonth() + 1).padStart(2, "0");
+    return `${day.getFullYear()}-${month}-${String(day.getDate()).padStart(2, "0")}`;
+  }
+
+  /** One computed nutrient, as `nutrition-view.ts` puts it on the wire. */
+  interface ComputedEnergy {
+    known: boolean;
+    milliKcal: number | null;
+    kcal: number | null;
+    display: string;
+    unknownFrom: string[];
+  }
+  interface ComputedMacro {
+    known: boolean;
+    milligrams: number | null;
+    grams: number | null;
+    display: string;
+    unknownFrom: string[];
+  }
+  interface ComputedNutrients {
+    energy: ComputedEnergy;
+    protein: ComputedMacro;
+    carbs: ComputedMacro;
+    fat: ComputedMacro;
+    fibre: ComputedMacro;
+  }
+
+  test("list_food_logs reads back what was written, and filters by moment", async () => {
+    const breakfast = (await callOk(client, "mue.create_food_log", {
+      consumedOn: READ_DAY,
+      consumedAt: "08:00",
+      title: "Porridge",
+      energyKcal: 310,
+      proteinGrams: 9,
+    })) as { entry: { id: string } };
+    breakfastLineId = breakfast.entry.id;
+
+    const lunch = (await callOk(client, "mue.create_food_log", {
+      consumedOn: READ_DAY,
+      consumedAt: "12:30",
+      title: "Soupe du traiteur",
+      energyKcal: 180,
+      // No protein: the traiteur does not say and the person did not weigh it. This is the
+      // line the whole "unknown is not zero" case below turns on.
+    })) as { entry: { id: string } };
+    unmeasuredLineId = lunch.entry.id;
+
+    const dinner = (await callOk(client, "mue.create_food_log", {
+      consumedOn: READ_DAY,
+      consumedAt: "19:00",
+      title: "Riz et poulet",
+      energyKcal: 400,
+      proteinGrams: 8,
+    })) as { entry: { id: string } };
+    dinnerLineId = dinner.entry.id;
+
+    const day = (await callOk(client, "mue.list_food_logs", {
+      from: READ_DAY,
+      to: READ_DAY,
+    })) as { entries: { id: string }[]; hasMore: boolean };
+
+    // Newest first, which is the order the tool advertises.
+    expect(day.entries.map((entry) => entry.id)).toEqual([
+      dinnerLineId,
+      unmeasuredLineId,
+      breakfastLineId,
+    ]);
+    expect(day.hasMore).toBe(false);
+
+    // Asserted against the rows and not against the envelope: the tool is only correct if
+    // what it returned is what PostgreSQL holds.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.foodLogEntries)
+      .where(
+        and(
+          eq(schema.foodLogEntries.userId, userId),
+          eq(schema.foodLogEntries.consumedOn, READ_DAY),
+        ),
+      );
+    expect(rows).toHaveLength(3);
+    const stored = new Map(rows.map((row) => [row.id, row]));
+    expect(stored.get(breakfastLineId)!.energyMilliKcal).toBe(310_000);
+    expect(stored.get(breakfastLineId)!.proteinMilligrams).toBe(9_000);
+    // PRD_FOOD 13.1: the protein nobody stated is NULL in the column, not 0.
+    expect(stored.get(unmeasuredLineId)!.proteinMilligrams).toBeNull();
+    expect(stored.get(unmeasuredLineId)!.energyMilliKcal).toBe(180_000);
+
+    // And the moment filter selects on the moment the server deduced from the clock.
+    const lunchOnly = (await callOk(client, "mue.list_food_logs", {
+      from: READ_DAY,
+      to: READ_DAY,
+      slot: "lunch",
+    })) as { entries: { id: string }[] };
+    expect(lunchOnly.entries.map((entry) => entry.id)).toEqual([unmeasuredLineId]);
+  });
+
+  test("list_food_logs pages by day, clock and identifier without repeating a line", async () => {
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const data = (await callOk(client, "mue.list_food_logs", {
+        from: READ_DAY,
+        to: READ_DAY,
+        limit: 1,
+        ...(cursor === undefined ? {} : { cursor }),
+      })) as { entries: { id: string }[]; nextCursor: string | null; hasMore: boolean };
+      seen.push(...data.entries.map((entry) => entry.id));
+      if (!data.hasMore) break;
+      cursor = data.nextCursor as string;
+    }
+    // Three lines, one per page, each once. A keyset on the day alone would have returned the
+    // same line three times over.
+    expect(seen).toEqual([dinnerLineId, unmeasuredLineId, breakfastLineId]);
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  test("get_daily_nutrition reads a day whose protein nobody measured as unknown, not as zero", async () => {
+    const data = (await callOk(client, "mue.get_daily_nutrition", { date: READ_DAY })) as {
+      isRecorded: boolean;
+      entryCount: number;
+      totals: ComputedNutrients;
+      slots: { slot: string; entryCount: number; totals: ComputedNutrients }[];
+      entries: { id: string }[];
+      provenance: {
+        computedBy: string;
+        method: string;
+        rule: string;
+        approximate: boolean;
+        contributionCount: number;
+      };
+    };
+
+    expect(data.isRecorded).toBe(true);
+    expect(data.entryCount).toBe(3);
+
+    // The energy is known, because all three lines carry one: 310 + 180 + 400.
+    expect(data.totals.energy.known).toBe(true);
+    expect(data.totals.energy.milliKcal).toBe(890_000);
+    expect(data.totals.energy.display).toBe("≈ 890 kcal");
+    expect(data.totals.energy.unknownFrom).toEqual([]);
+
+    // The protein is not. One line of three has none, so PRD_FOOD 13.1 makes the day's
+    // protein unknown -- and this is the assertion the whole module rests on: the value is
+    // null, and it is *not* 17 000, which dropping the unknown term would have given.
+    expect(data.totals.protein.known).toBe(false);
+    expect(data.totals.protein.milligrams).toBeNull();
+    expect(data.totals.protein.grams).toBeNull();
+    expect(data.totals.protein.milligrams).not.toBe(0);
+    expect(data.totals.protein.milligrams).not.toBe(17_000);
+    // PRD_FOOD 13.2: an unknown value is a dash, never a zero.
+    expect(data.totals.protein.display).toBe("—");
+    // And the day says which line left it unknown, so a person can be told what to complete.
+    expect(data.totals.protein.unknownFrom).toEqual([unmeasuredLineId]);
+
+    // Metric by metric: a known energy coexists with unknown protein, carbs, fat and fibre.
+    for (const metric of ["carbs", "fat", "fibre"] as const) {
+      expect({ metric, known: data.totals[metric].known }).toEqual({ metric, known: false });
+      expect({ metric, value: data.totals[metric].milligrams }).toEqual({ metric, value: null });
+      expect({ metric, display: data.totals[metric].display }).toEqual({ metric, display: "—" });
+    }
+
+    // Only the moments that hold a line, in the contract's own order.
+    expect(data.slots.map((slot) => slot.slot)).toEqual(["breakfast", "lunch", "dinner"]);
+    const lunch = data.slots.find((slot) => slot.slot === "lunch")!;
+    expect(lunch.totals.energy.milliKcal).toBe(180_000);
+    expect(lunch.totals.protein.known).toBe(false);
+    const breakfast = data.slots.find((slot) => slot.slot === "breakfast")!;
+    // A moment whose lines are all measured keeps a known total, unaffected by the lunch.
+    expect(breakfast.totals.protein.known).toBe(true);
+    expect(breakfast.totals.protein.milligrams).toBe(9_000);
+    expect(breakfast.totals.protein.display).toBe("≈ 9.0 g");
+
+    // Every line it added up, ordered by the clock (PRD_FOOD 22).
+    expect(data.entries.map((entry) => entry.id)).toEqual([
+      breakfastLineId,
+      unmeasuredLineId,
+      dinnerLineId,
+    ]);
+
+    // PRD_FOOD 21.5: a computed value keeps its provenance and its method.
+    expect(data.provenance.computedBy).toBe("server");
+    expect(data.provenance.method).toBe("strictSum");
+    expect(data.provenance.rule).toBe("PRD_FOOD 13.1");
+    expect(data.provenance.approximate).toBe(true);
+    expect(data.provenance.contributionCount).toBe(3);
+  });
+
+  test("get_daily_nutrition on a day nobody wrote on says so rather than reporting a zero", async () => {
+    const data = (await callOk(client, "mue.get_daily_nutrition", { date: EMPTY_DAY })) as {
+      isRecorded: boolean;
+      entryCount: number;
+      totals: ComputedNutrients;
+      slots: unknown[];
+      provenance: { contributionCount: number };
+    };
+
+    // The strict sum of no lines is a *known* zero -- `Nutrients.ZERO`, exactly what Android
+    // computes. What stops it being read as "they ate nothing" is not the total: it is these
+    // three fields, and PRD_FOOD 10.4 is why they are here.
+    expect(data.isRecorded).toBe(false);
+    expect(data.entryCount).toBe(0);
+    expect(data.provenance.contributionCount).toBe(0);
+    expect(data.slots).toEqual([]);
+    expect(data.totals.energy.known).toBe(true);
+    expect(data.totals.energy.milliKcal).toBe(0);
+
+    // The tool's own description carries the instruction, because this distinction is one an
+    // agent has to be told in words rather than left to infer from a boolean.
+    const { tools } = await client.listTools();
+    const daily = tools.find((tool) => tool.name === "mue.get_daily_nutrition")!;
+    expect(daily.description).toContain("nothing was written down, not that nothing was eaten");
+  });
+
+  test("get_daily_nutrition refuses to assume today, and names the field", async () => {
+    const error = await callError(client, "mue.get_daily_nutrition", {});
+    expect(error.code).toBe("sync.missing_required_field");
+    expect(error.field).toBe("date");
+  });
+
+  test("search_foods finds a food by name, brand and barcode, and says what it did not search", async () => {
+    const created = (await callOk(client, "mue.create_food", {
+      name: "Galettes de sarrasin",
+      brand: "Paysan Breton",
+      barcode: "3256540000117",
+      energyKcalPer100: 0,
+    })) as { food: { id: string } };
+    const galetteId = created.food.id;
+
+    const byName = (await callOk(client, "mue.search_foods", { search: "SARRASIN" })) as {
+      foods: { id: string; fatGramsPer100: number | null; energyKcalPer100: number | null }[];
+      catalogue: { ciqualSearchable: boolean; searched: string[] };
+    };
+    // Case is folded; the accent question is answered by `matchedOn` rather than pretended at.
+    expect(byName.foods.map((food) => food.id)).toContain(galetteId);
+    // PRD_FOOD 21.1: the Ciqual catalogue is not on this server, and the tool says so rather
+    // than letting an empty result be read as "the person has no such food".
+    expect(byName.catalogue.ciqualSearchable).toBe(false);
+    expect(byName.catalogue.searched).toEqual(["custom", "open_food_facts"]);
+
+    const byBrand = (await callOk(client, "mue.search_foods", { search: "paysan" })) as {
+      foods: { id: string }[];
+    };
+    expect(byBrand.foods.map((food) => food.id)).toContain(galetteId);
+
+    const byBarcode = (await callOk(client, "mue.search_foods", {
+      barcode: "3256540000117",
+    })) as { foods: { id: string }[] };
+    expect(byBarcode.foods).toHaveLength(1);
+    expect(byBarcode.foods[0]!.id).toBe(galetteId);
+
+    // The stored row is what the search returned, and its unknown nutrients are still NULL.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.foods)
+      .where(and(eq(schema.foods.userId, userId), eq(schema.foods.id, galetteId)));
+    expect(rows[0]!.barcode).toBe("3256540000117");
+    expect(rows[0]!.brand).toBe("Paysan Breton");
+    // A *stated* zero energy is stored as a zero and a never-stated fat as NULL. The read
+    // hands back the same distinction: 0 and null, and never both as 0.
+    expect(rows[0]!.energyMilliKcal).toBe(0);
+    expect(rows[0]!.fatMilligrams).toBeNull();
+    const found = byName.foods.find((food) => food.id === galetteId)!;
+    expect(found.energyKcalPer100).toBe(0);
+    expect(found.fatGramsPer100).toBeNull();
+  });
+
+  test("search_foods with a source filter searches only that source", async () => {
+    const off = (await callOk(client, "mue.search_foods", { source: "open_food_facts" })) as {
+      foods: unknown[];
+      catalogue: { searched: string[] };
+    };
+    expect(off.catalogue.searched).toEqual(["open_food_facts"]);
+    // Every food an agent can create is `custom`, so this genuinely holds nothing.
+    expect(off.foods).toEqual([]);
+  });
+
+  test("search_foods refuses a blank search rather than matching everything", async () => {
+    const error = await callError(client, "mue.search_foods", { search: "   " });
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("search");
+  });
+
+  test("get_recipe computes per-serving values from the ingredients, with their provenance", async () => {
+    const data = (await callOk(client, "mue.get_recipe", { id: recipeId })) as {
+      recipe: { id: string; name: string; baseServings: number };
+      nutrition: {
+        perServing: ComputedNutrients;
+        wholeRecipe: ComputedNutrients;
+        unresolvedIngredientIds: string[];
+        provenance: {
+          method: string;
+          rule: string;
+          approximate: boolean;
+          contributionCount: number;
+        };
+      };
+    };
+
+    expect(data.recipe.id).toBe(recipeId);
+    expect(data.recipe.name).toBe("Skyr bowl");
+    expect(data.recipe.baseServings).toBe(4);
+
+    // PRD_FOOD 13.1, worked through by hand: 250 g of a food at 63 kcal and 10.5 g of protein
+    // per 100 g. Whole recipe: 63.000 x 2.5 = 157.500 kcal, 10.500 x 2.5 = 26.250 g.
+    expect(data.nutrition.wholeRecipe.energy.milliKcal).toBe(157_500);
+    expect(data.nutrition.wholeRecipe.protein.milligrams).toBe(26_250);
+    // Per serving, for four: 157 500 / 4 = 39 375, and 26 250 / 4 = 6 562.5 rounded half-up.
+    expect(data.nutrition.perServing.energy.milliKcal).toBe(39_375);
+    expect(data.nutrition.perServing.protein.milligrams).toBe(6_563);
+    // PRD_FOOD 13.2's rounding and its marker, in one string.
+    expect(data.nutrition.perServing.energy.display).toBe("≈ 39 kcal");
+    expect(data.nutrition.perServing.protein.display).toBe("≈ 6.6 g");
+
+    // The food states no carbohydrate, so the recipe's is unknown -- not zero, and not left
+    // out of the answer.
+    expect(data.nutrition.perServing.carbs.known).toBe(false);
+    expect(data.nutrition.perServing.carbs.milligrams).toBeNull();
+    expect(data.nutrition.perServing.carbs.display).toBe("—");
+
+    expect(data.nutrition.unresolvedIngredientIds).toEqual([]);
+    expect(data.nutrition.provenance.method).toBe("strictSum");
+    expect(data.nutrition.provenance.rule).toBe("PRD_FOOD 13.1");
+    expect(data.nutrition.provenance.approximate).toBe(true);
+    expect(data.nutrition.provenance.contributionCount).toBe(1);
+
+    // Nothing was stored: PRD_FOOD 13.1 derives a recipe's values every time it is read.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.recipes)
+      .where(and(eq(schema.recipes.userId, userId), eq(schema.recipes.id, recipeId)));
+    expect(Object.keys(rows[0]!)).not.toContain("energyMilliKcal");
+  });
+
+  test("get_recipe reports a recipe whose food is gone as unknown, never as lighter", async () => {
+    const doomed = (await callOk(client, "mue.create_food", {
+      name: "Farine de chataigne",
+      energyKcalPer100: 370,
+    })) as { food: { id: string } };
+    const orphan = (await callOk(client, "mue.create_recipe", {
+      name: "Galette de chataigne",
+      type: "snack",
+      baseServings: 2,
+      ingredients: [{ foodId: doomed.food.id, quantity: 100 }],
+    })) as { recipe: { id: string; ingredients: { id: string }[] } };
+
+    const before = (await callOk(client, "mue.get_recipe", { id: orphan.recipe.id })) as {
+      nutrition: { wholeRecipe: ComputedNutrients };
+    };
+    expect(before.nutrition.wholeRecipe.energy.milliKcal).toBe(370_000);
+
+    await callOk(client, "mue.delete_food", { id: doomed.food.id });
+
+    const after = (await callOk(client, "mue.get_recipe", { id: orphan.recipe.id })) as {
+      nutrition: {
+        wholeRecipe: ComputedNutrients;
+        perServing: ComputedNutrients;
+        unresolvedIngredientIds: string[];
+      };
+    };
+    // The worst available answer would be 0; the second worst would be to drop the ingredient
+    // and report a lighter recipe. It is neither: it is unknown, and the ingredient
+    // responsible is named.
+    expect(after.nutrition.wholeRecipe.energy.known).toBe(false);
+    expect(after.nutrition.wholeRecipe.energy.milliKcal).toBeNull();
+    expect(after.nutrition.wholeRecipe.energy.display).toBe("—");
+    expect(after.nutrition.perServing.energy.known).toBe(false);
+    expect(after.nutrition.unresolvedIngredientIds).toEqual([orphan.recipe.ingredients[0]!.id]);
+    expect(after.nutrition.wholeRecipe.energy.unknownFrom).toEqual([
+      orphan.recipe.ingredients[0]!.id,
+    ]);
+  });
+
+  test("get_recipe refuses an identifier this account does not hold", async () => {
+    const missing = crypto.randomUUID();
+    const error = await callError(client, "mue.get_recipe", { id: missing });
+    expect(error.code).toBe("http.not_found");
+    expect(error.aggregateType).toBe("recipe");
+    expect(error.aggregateId).toBe(missing);
+  });
+
+  test("list_recipes filters by type and by favourite, and carries the computed values", async () => {
+    const breakfasts = (await callOk(client, "mue.list_recipes", { type: "breakfast" })) as {
+      recipes: {
+        recipe: { id: string; type: string };
+        nutrition: { perServing: ComputedNutrients };
+      }[];
+    };
+    expect(breakfasts.recipes.map((entry) => entry.recipe.id)).toContain(recipeId);
+    for (const entry of breakfasts.recipes) expect(entry.recipe.type).toBe("breakfast");
+    const skyr = breakfasts.recipes.find((entry) => entry.recipe.id === recipeId)!;
+    // The same arithmetic as `get_recipe`, because it is the same function.
+    expect(skyr.nutrition.perServing.energy.milliKcal).toBe(39_375);
+
+    const favourites = (await callOk(client, "mue.list_recipes", { favouritesOnly: true })) as {
+      recipes: unknown[];
+    };
+    expect(favourites.recipes).toEqual([]);
+
+    await callOk(client, "mue.update_recipe", { id: recipeId, isFavourite: true });
+    const nowFavourite = (await callOk(client, "mue.list_recipes", { favouritesOnly: true })) as {
+      recipes: { recipe: { id: string } }[];
+    };
+    expect(nowFavourite.recipes.map((entry) => entry.recipe.id)).toEqual([recipeId]);
+
+    // And the flag really moved in the row, not only in the answer.
+    const rows = await handle.database.db
+      .select({ isFavourite: schema.recipes.isFavourite })
+      .from(schema.recipes)
+      .where(and(eq(schema.recipes.userId, userId), eq(schema.recipes.id, recipeId)));
+    expect(rows[0]!.isFavourite).toBe(true);
+  });
+
+  test("plan_meal writes a proposal at its (date, moment) identity", async () => {
+    const plannedOn = localDatePlus(3);
+    const data = (await callOk(client, "mue.plan_meal", {
+      plannedOn,
+      slot: "dinner",
+      recipeId,
+      servings: 1.5,
+    })) as {
+      entry: { aggregateId: string; recipeName: string; plannedServingsThousandths: number };
+      created: boolean;
+      replaced: boolean;
+    };
+
+    expect(data.created).toBe(true);
+    expect(data.replaced).toBe(false);
+    // The separator is a colon: `aggregateIdSchema`'s alphabet has no `/`.
+    expect(data.entry.aggregateId).toBe(`${plannedOn}:dinner`);
+    expect(data.entry.recipeName).toBe("Skyr bowl");
+    expect(data.entry.plannedServingsThousandths).toBe(1_500);
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(
+          eq(schema.mealPlanEntries.userId, userId),
+          eq(schema.mealPlanEntries.plannedOn, plannedOn),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.slot).toBe("dinner");
+    expect(rows[0]!.recipeId).toBe(recipeId);
+    // Thousandths of a serving, the integer the domain stores. Never a float.
+    expect(rows[0]!.plannedServingsThousandths).toBe(1_500);
+    expect(rows[0]!.consumedLogEntryId).toBeNull();
+    expect(rows[0]!.originType).toBe("agent");
+  });
+
+  test("replaying plan_meal with one key produces one row and one journal entry, not two", async () => {
+    const plannedOn = localDatePlus(5);
+    const aggregateId = `${plannedOn}:lunch`;
+    const args = {
+      plannedOn,
+      slot: "lunch",
+      recipeId,
+      servings: 1,
+      idempotencyKey: crypto.randomUUID(),
+    };
+
+    const first = (await callOk(client, "mue.plan_meal", args)) as {
+      created: boolean;
+      mutationId: string;
+      entry: { revision: string };
+    };
+    const second = (await callOk(client, "mue.plan_meal", args)) as {
+      created: boolean;
+      mutationId: string;
+      entry: { revision: string };
+    };
+
+    expect(first.created).toBe(true);
+    // The replay is recognised, not repeated.
+    expect(second.created).toBe(false);
+    expect(second.mutationId).toBe(first.mutationId);
+    // The revision did not move, which is the part a row count cannot prove: this aggregate
+    // is keyed by (date, moment), so a second *distinct* mutation would also have left one
+    // row -- it would simply have overwritten it, and taken a revision doing so.
+    expect(second.entry.revision).toBe(first.entry.revision);
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(
+          eq(schema.mealPlanEntries.userId, userId),
+          eq(schema.mealPlanEntries.plannedOn, plannedOn),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.lastMutationId).toBe(first.mutationId);
+
+    // One change reached the journal, so one change reaches the phone.
+    const journal = await handle.database.db
+      .select({ sequence: schema.syncJournal.sequence })
+      .from(schema.syncJournal)
+      .where(
+        and(
+          eq(schema.syncJournal.userId, userId),
+          eq(schema.syncJournal.aggregateType, "mealPlanEntry"),
+          eq(schema.syncJournal.aggregateId, aggregateId),
+        ),
+      );
+    expect(journal).toHaveLength(1);
+
+    // Both calls are nevertheless audited: section 14.7 records what an agent asked for, and
+    // a replay is something it asked for.
+    const audit = await handle.database.db
+      .select()
+      .from(schema.agentAudit)
+      .where(
+        and(
+          eq(schema.agentAudit.agentId, agent.clientId),
+          eq(schema.agentAudit.toolName, "mue.plan_meal"),
+          eq(schema.agentAudit.mutationId, first.mutationId),
+        ),
+      );
+    expect(audit).toHaveLength(2);
+    for (const row of audit) expect(row.result).toBe("ok");
+  });
+
+  test("plan_meal refuses a date in the past and one beyond sixty days, naming the field", async () => {
+    const past = await callError(client, "mue.plan_meal", {
+      plannedOn: localDatePlus(-1),
+      slot: "dinner",
+      recipeId,
+      servings: 1,
+    });
+    expect(past.code).toBe("sync.invalid_payload");
+    expect(past.field).toBe("plannedOn");
+
+    // PRD_FOOD 15: "aujourd'hui ou dans le futur, dans les 60 jours". Sixty is inside.
+    const edge = (await callOk(client, "mue.plan_meal", {
+      plannedOn: localDatePlus(60),
+      slot: "breakfast",
+      recipeId,
+      servings: 1,
+    })) as { created: boolean };
+    expect(edge.created).toBe(true);
+
+    const beyond = await callError(client, "mue.plan_meal", {
+      plannedOn: localDatePlus(61),
+      slot: "breakfast",
+      recipeId,
+      servings: 1,
+    });
+    expect(beyond.code).toBe("sync.invalid_payload");
+    expect(beyond.field).toBe("plannedOn");
+    // Section 16: the message names the field, never the value.
+    expect(beyond.message).not.toContain(localDatePlus(61));
+
+    // And nothing was written for the day that was refused.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(
+          eq(schema.mealPlanEntries.userId, userId),
+          eq(schema.mealPlanEntries.plannedOn, localDatePlus(61)),
+        ),
+      );
+    expect(rows).toEqual([]);
+  });
+
+  test("plan_meal refuses a serving count off its quarter step and an unknown recipe", async () => {
+    const stepped = await callError(client, "mue.plan_meal", {
+      plannedOn: localDatePlus(7),
+      slot: "dinner",
+      recipeId,
+      servings: 1.3,
+    });
+    expect(stepped.field).toBe("servings");
+
+    const missing = await callError(client, "mue.plan_meal", {
+      plannedOn: localDatePlus(7),
+      slot: "dinner",
+      recipeId: crypto.randomUUID(),
+      servings: 1,
+    });
+    expect(missing.code).toBe("http.not_found");
+    expect(missing.aggregateType).toBe("recipe");
+
+    // A refusal is audited too, with no aggregate and no revision.
+    const audit = await handle.database.db
+      .select()
+      .from(schema.agentAudit)
+      .where(
+        and(
+          eq(schema.agentAudit.agentId, agent.clientId),
+          eq(schema.agentAudit.toolName, "mue.plan_meal"),
+          eq(schema.agentAudit.result, "error"),
+        ),
+      );
+    expect(audit.length).toBeGreaterThanOrEqual(2);
+    for (const row of audit) {
+      expect(row.aggregates).toEqual([]);
+      expect(row.revision).toBeNull();
+    }
+  });
+
+  test("plan_meal a second time on one moment replaces the proposal rather than duplicating it", async () => {
+    const plannedOn = localDatePlus(9);
+    const other = (await callOk(client, "mue.create_recipe", {
+      name: "Soupe de courge",
+      type: "main",
+      baseServings: 2,
+      ingredients: [{ foodId, quantity: 200 }],
+    })) as { recipe: { id: string } };
+
+    await callOk(client, "mue.plan_meal", { plannedOn, slot: "dinner", recipeId, servings: 1 });
+    const swapped = (await callOk(client, "mue.plan_meal", {
+      plannedOn,
+      slot: "dinner",
+      recipeId: other.recipe.id,
+      servings: 2,
+    })) as { replaced: boolean; replacedRecipeId: string | null; entry: { recipeId: string } };
+
+    // PRD_FOOD 21.3: "la precedente est remplacee, jamais dupliquee".
+    expect(swapped.replaced).toBe(true);
+    expect(swapped.replacedRecipeId).toBe(recipeId);
+    expect(swapped.entry.recipeId).toBe(other.recipe.id);
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(
+          eq(schema.mealPlanEntries.userId, userId),
+          eq(schema.mealPlanEntries.plannedOn, plannedOn),
+        ),
+      );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.recipeId).toBe(other.recipe.id);
+    expect(rows[0]!.plannedServingsThousandths).toBe(2_000);
+  });
+
+  test("list_meal_plan reads the proposals back over a period, with their recipe names", async () => {
+    const data = (await callOk(client, "mue.list_meal_plan", {
+      from: localDatePlus(0),
+      to: localDatePlus(60),
+    })) as {
+      entries: {
+        aggregateId: string;
+        plannedOn: string;
+        recipeName: string | null;
+        plannedServings: number;
+        isConsumed: boolean;
+      }[];
+    };
+
+    const byId = new Map(data.entries.map((entry) => [entry.aggregateId, entry]));
+    const dinner = byId.get(`${localDatePlus(3)}:dinner`)!;
+    expect(dinner.recipeName).toBe("Skyr bowl");
+    expect(dinner.plannedServings).toBe(1.5);
+    // PRD_FOOD 12: a proposal enters no total until it has been confirmed.
+    expect(dinner.isConsumed).toBe(false);
+
+    // Earliest first, which is how a plan is read.
+    const dates = data.entries.map((entry) => entry.plannedOn);
+    expect([...dates].sort()).toEqual(dates);
+
+    // And the answer is exactly the live rows PostgreSQL holds.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(eq(schema.mealPlanEntries.userId, userId), isNull(schema.mealPlanEntries.deletedAt)),
+      );
+    expect(data.entries).toHaveLength(rows.length);
+  });
+
+  test("unplan_meal tombstones the proposal and touches neither the recipe nor the journal", async () => {
+    const plannedOn = localDatePlus(3);
+    const linesBefore = await handle.database.db
+      .select({ id: schema.foodLogEntries.id })
+      .from(schema.foodLogEntries)
+      .where(eq(schema.foodLogEntries.userId, userId));
+
+    const data = (await callOk(client, "mue.unplan_meal", { plannedOn, slot: "dinner" })) as {
+      aggregateId: string;
+      deleted: boolean;
+    };
+    expect(data.aggregateId).toBe(`${plannedOn}:dinner`);
+    expect(data.deleted).toBe(true);
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.mealPlanEntries)
+      .where(
+        and(
+          eq(schema.mealPlanEntries.userId, userId),
+          eq(schema.mealPlanEntries.plannedOn, plannedOn),
+        ),
+      );
+    // A tombstone, not an erasure: FR-SYNC-005 needs the row to stay so the deletion travels.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.deletedAt).not.toBeNull();
+
+    // And it is gone from the read.
+    const listed = (await callOk(client, "mue.list_meal_plan", {
+      from: plannedOn,
+      to: plannedOn,
+    })) as { entries: unknown[] };
+    expect(listed.entries).toEqual([]);
+
+    // PRD_FOOD 12: "ne touche ni la recette ni le journal".
+    const recipeRows = await handle.database.db
+      .select({ deletedAt: schema.recipes.deletedAt })
+      .from(schema.recipes)
+      .where(and(eq(schema.recipes.userId, userId), eq(schema.recipes.id, recipeId)));
+    expect(recipeRows[0]!.deletedAt).toBeNull();
+    const linesAfter = await handle.database.db
+      .select({ id: schema.foodLogEntries.id })
+      .from(schema.foodLogEntries)
+      .where(eq(schema.foodLogEntries.userId, userId));
+    expect(linesAfter).toHaveLength(linesBefore.length);
+  });
+
+  test("unplan_meal refuses a moment that holds no proposal, naming the record", async () => {
+    const error = await callError(client, "mue.unplan_meal", {
+      plannedOn: localDatePlus(11),
+      slot: "snack",
+    });
+    expect(error.code).toBe("http.not_found");
+    expect(error.aggregateType).toBe("mealPlanEntry");
+    expect(error.aggregateId).toBe(`${localDatePlus(11)}:snack`);
+  });
+
   test("delete_food_log, delete_recipe and delete_food all leave tombstones", async () => {
     const line = (await callOk(client, "mue.create_food_log", {
       consumedOn: "2026-06-14",
@@ -1773,7 +2574,17 @@ describe("the deletion permission of section 15.2", () => {
       const names = tools.map((tool) => tool.name);
       expect(names).toContain("mue.upsert_weight_measurement");
       expect(names).toContain("mue.create_food_log");
+      expect(names).toContain("mue.plan_meal");
       for (const name of names) expect(name).not.toContain(".delete_");
+
+      // `mue.unplan_meal` is the case a name pattern would have missed. It removes a
+      // proposal, so PRD_FOOD 21.5 makes it destructive and it declares `data:delete` --
+      // and its name contains no `delete_` at all. Checked by name, not by pattern.
+      expect(names).not.toContain("mue.unplan_meal");
+      // Every read this agent was granted is still there: the deletion permission narrows
+      // the writes, not the reads.
+      expect(names).toContain("mue.list_meal_plan");
+      expect(names).toContain("mue.get_daily_nutrition");
 
       await client.callTool({
         name: "mue.upsert_weight_measurement",
@@ -1794,6 +2605,43 @@ describe("the deletion permission of section 15.2", () => {
           and(eq(schema.measurements.userId, userId), eq(schema.measurements.date, "2026-07-20")),
         );
       expect(rows[0]!.deletedAt).toBeNull();
+
+      // The same, for a proposal: this agent can create one and cannot remove it. Calling
+      // the tool it cannot see is refused by the server rather than by the catalogue, which
+      // is the half that matters -- a client may hold a catalogue from a wider grant.
+      // A day inside `plan_meal`'s own window, computed rather than written: unlike a journal
+      // date, a plannable one moves with the clock, and a literal here would have started
+      // failing sixty days after it was typed.
+      const soon = new Date();
+      soon.setDate(soon.getDate() + 15);
+      const plannedOn = `${soon.getFullYear()}-${String(soon.getMonth() + 1).padStart(2, "0")}-${String(soon.getDate()).padStart(2, "0")}`;
+      const recipes = await handle.database.db
+        .select({ id: schema.recipes.id })
+        .from(schema.recipes)
+        .where(and(eq(schema.recipes.userId, userId), isNull(schema.recipes.deletedAt)));
+      const planned = await client.callTool({
+        name: "mue.plan_meal",
+        arguments: { plannedOn, slot: "dinner", recipeId: recipes[0]!.id, servings: 1 },
+      });
+      expect(planned.isError).not.toBe(true);
+
+      const refusedPlan = await client.callTool({
+        name: "mue.unplan_meal",
+        arguments: { plannedOn, slot: "dinner" },
+      });
+      expect(refusedPlan.isError).toBe(true);
+      expect(JSON.stringify(refusedPlan.content)).toContain("mue.unplan_meal");
+
+      const planRows = await handle.database.db
+        .select()
+        .from(schema.mealPlanEntries)
+        .where(
+          and(
+            eq(schema.mealPlanEntries.userId, userId),
+            eq(schema.mealPlanEntries.plannedOn, plannedOn),
+          ),
+        );
+      expect(planRows[0]!.deletedAt).toBeNull();
 
       await client.close();
     },

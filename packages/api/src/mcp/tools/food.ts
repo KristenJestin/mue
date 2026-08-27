@@ -101,12 +101,13 @@ const foodViewShape = {
   ...metadataShape,
 };
 
-const foodViewSchema = z.object(foodViewShape);
+/** Exported so `food-reads.ts` describes a food with this shape and not a second one. */
+export const foodViewSchema = z.object(foodViewShape);
 
 const nullableThousandths = (value: number | undefined): number | null =>
   value === undefined ? null : value / 1000;
 
-function foodView(stored: StoredAggregate<FoodPayloadV1>): Record<string, unknown> {
+export function foodView(stored: StoredAggregate<FoodPayloadV1>): Record<string, unknown> {
   const { payload, meta } = stored;
   return {
     id: payload.id,

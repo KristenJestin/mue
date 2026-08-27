@@ -1,15 +1,34 @@
-import type {
-  ActivitySessionPayloadV1,
-  CustomExerciseDefinitionPayloadV1,
-  FoodLogEntryPayloadV1,
-  FoodPayloadV1,
-  HealthProfilePayloadV1,
-  OriginType,
-  RecipePayloadV1,
+import {
+  MEAL_SLOTS,
+  type ActivitySessionPayloadV1,
+  type CustomExerciseDefinitionPayloadV1,
+  type FoodLogEntryPayloadV1,
+  type FoodPayloadV1,
+  type HealthProfilePayloadV1,
+  type MealPlanEntryPayloadV1,
+  type OriginType,
+  type RecipePayloadV1,
 } from "@mue/contracts";
 import type { DatabaseHandle } from "@mue/db";
 import { schema } from "@mue/db";
-import { and, asc, count, desc, eq, gt, gte, isNull, lt, lte, max, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  max,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { ActivitySessionView } from "./activity";
 import { decodePairKey } from "./cursor";
 import { createActivitySessionService, createAgentMutationService } from "./domain-bridge";
@@ -25,10 +44,18 @@ import type {
   ListActivitiesResult,
   ListCustomExercisesQuery,
   ListCustomExercisesResult,
+  ListFoodLogEntriesQuery,
+  ListFoodLogEntriesResult,
+  ListMealPlanQuery,
+  ListMealPlanResult,
+  ListRecipesQuery,
+  ListRecipesResult,
   ListWeightMeasurementsQuery,
   ListWeightMeasurementsResult,
   MovementTotal,
   MueMcpServices,
+  SearchFoodsQuery,
+  SearchFoodsResult,
   StoredAggregate,
   SyncStatus,
   WeightMeasurementView,
@@ -91,6 +118,42 @@ function ifPresent<K extends string, T>(
   return state.present ? ({ [key]: state.value } as Record<K, T>) : {};
 }
 
+/**
+ * A fragment a person typed, turned into a `like` pattern that matches it literally.
+ *
+ * `%` and `_` are wildcards to PostgreSQL and ordinary characters to the person who typed
+ * them. Without this, searching for `100_g` would match anything with `100` and a `g` two
+ * characters later, which is not wrong so much as inexplicable. The backslash is escaped
+ * first, or escaping the other two would double-escape it.
+ *
+ * This is quoting, not sanitising: the pattern is still bound as a parameter, so nothing
+ * here stands between a value and SQL injection. Drizzle already does that.
+ */
+function likeFragment(text: string): string {
+  return `%${text.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+}
+
+/**
+ * Where a moment falls in the day, as the contract orders them.
+ *
+ * Built from `MEAL_SLOTS` rather than written out, for the reason every other list in this
+ * work is: the enum is growing to a fuller set of moments, and a hand-written `case` would
+ * still compile, still run, and quietly sort the two new ones last.
+ *
+ * A slot the enum does not hold sorts after every one it does, which is the only ordering
+ * that is defensible for a value this build has never been told about.
+ */
+function mealSlotRank(column: SQL | typeof schema.mealPlanEntries.slot): SQL<number> {
+  const whens = MEAL_SLOTS.map((slot, index) => sql`when ${slot} then ${index}`);
+  return sql<number>`case ${column} ${sql.join(whens, sql` `)} else ${MEAL_SLOTS.length} end`;
+}
+
+/** The same rank, for a slot already in hand -- a cursor's, for instance. */
+function mealSlotRankOf(slot: string): number {
+  const index = (MEAL_SLOTS as readonly string[]).indexOf(slot);
+  return index === -1 ? MEAL_SLOTS.length : index;
+}
+
 export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
   const createActivity = createActivitySessionService();
   const applyMutation = createAgentMutationService();
@@ -101,6 +164,7 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
     foodLogEntries,
     foods,
     healthProfile,
+    mealPlanEntries,
     measurements,
     recipes,
     syncJournal,
@@ -457,28 +521,7 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
         .where(and(eq(foods.userId, userId), eq(foods.id, id)));
       const row = rows[0];
       if (row === undefined) return null;
-      const payload: FoodPayloadV1 = {
-        id: row.id,
-        name: row.name,
-        source: row.source as FoodPayloadV1["source"],
-        referenceUnit: row.referenceUnit as FoodPayloadV1["referenceUnit"],
-        rawLabel: row.rawLabel,
-        cookedLabel: row.cookedLabel,
-        ...ifPresent("energyMilliKcal", row.energyMilliKcal),
-        ...ifPresent("proteinMilligrams", row.proteinMilligrams),
-        ...ifPresent("carbsMilligrams", row.carbsMilligrams),
-        ...ifPresent("fatMilligrams", row.fatMilligrams),
-        ...ifPresent("fibreMilligrams", row.fibreMilligrams),
-        ...ifPresent("brand", row.brand),
-        ...ifPresent("barcode", row.barcode),
-        ...ifPresent("sourceId", row.sourceId),
-        ...ifPresent("sourceVersion", row.sourceVersion),
-        ...ifPresent("servingLabel", row.servingLabel),
-        ...ifPresent("servingThousandths", row.servingThousandths),
-        ...ifPresent("cookedRatioThousandths", row.cookedRatioThousandths),
-        ...ifPresent("imageRef", row.imageRef),
-      };
-      return { payload, meta: metaOf(row) };
+      return { payload: foodPayloadOf(row), meta: metaOf(row) };
     },
 
     async getRecipe(userId: string, id: string): Promise<StoredAggregate<RecipePayloadV1> | null> {
@@ -488,22 +531,7 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
         .where(and(eq(recipes.userId, userId), eq(recipes.id, id)));
       const row = rows[0];
       if (row === undefined) return null;
-      const steps = row.steps as string[];
-      const payload: RecipePayloadV1 = {
-        id: row.id,
-        name: row.name,
-        type: row.type as RecipePayloadV1["type"],
-        baseServings: row.baseServings,
-        isFavourite: row.isFavourite,
-        ingredients: row.ingredients as RecipePayloadV1["ingredients"],
-        ...ifPresent("description", row.description),
-        ...ifPresent("prepTimeMinutes", row.prepTimeMinutes),
-        // An empty list is the *absence* of steps, which is the shape the phone journals:
-        // `RecipePayload.steps` defaults to the empty list and the encoder omits defaults.
-        ...ifPresent("steps", steps.length === 0 ? null : steps),
-        ...ifPresent("imageRef", row.imageRef),
-      };
-      return { payload, meta: metaOf(row) };
+      return { payload: recipePayloadOf(row), meta: metaOf(row) };
     },
 
     async getFoodLogEntry(
@@ -516,28 +544,202 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
         .where(and(eq(foodLogEntries.userId, userId), eq(foodLogEntries.id, id)));
       const row = rows[0];
       if (row === undefined) return null;
-      const payload: FoodLogEntryPayloadV1 = {
-        id: row.id,
-        consumedOn: row.consumedOn,
-        consumedAt: row.consumedAt,
-        slot: row.slot as FoodLogEntryPayloadV1["slot"],
-        kind: row.kind as FoodLogEntryPayloadV1["kind"],
-        title: row.title,
-        estimation: row.estimation as FoodLogEntryPayloadV1["estimation"],
-        weighedCooked: row.weighedCooked,
-        ...ifPresent("energyMilliKcal", row.energyMilliKcal),
-        ...ifPresent("proteinMilligrams", row.proteinMilligrams),
-        ...ifPresent("carbsMilligrams", row.carbsMilligrams),
-        ...ifPresent("fatMilligrams", row.fatMilligrams),
-        ...ifPresent("fibreMilligrams", row.fibreMilligrams),
-        ...ifPresent("sourceRef", row.sourceRef),
-        ...ifPresent("amountLabel", row.amountLabel),
-        ...ifPresent("quantityThousandths", row.quantityThousandths),
-        ...ifPresent("quantityUnit", row.quantityUnit as FoodLogEntryPayloadV1["quantityUnit"]),
-        ...ifPresent("portionsThousandths", row.portionsThousandths),
-        ...ifPresent("fromPlan", row.fromPlan),
+      return { payload: linePayloadOf(row), meta: metaOf(row) };
+    },
+
+    async getMealPlanEntry(
+      userId: string,
+      plannedOn: string,
+      slot: string,
+    ): Promise<StoredAggregate<MealPlanEntryPayloadV1> | null> {
+      const rows = await database.db
+        .select()
+        .from(mealPlanEntries)
+        .where(
+          and(
+            eq(mealPlanEntries.userId, userId),
+            eq(mealPlanEntries.plannedOn, plannedOn),
+            eq(mealPlanEntries.slot, slot),
+          ),
+        );
+      const row = rows[0];
+      if (row === undefined) return null;
+      return { payload: planPayloadOf(row), meta: metaOf(row) };
+    },
+
+    // --- PRD_FOOD 21.5, the food reads ------------------------------------------------
+
+    async listFoodLogEntries(query: ListFoodLogEntriesQuery): Promise<ListFoodLogEntriesResult> {
+      const filters = [eq(foodLogEntries.userId, query.userId)];
+      if (query.from !== null) filters.push(gte(foodLogEntries.consumedOn, query.from));
+      if (query.to !== null) filters.push(lte(foodLogEntries.consumedOn, query.to));
+      if (query.slot !== null) filters.push(eq(foodLogEntries.slot, query.slot));
+      if (!query.includeDeleted) filters.push(isNull(foodLogEntries.deletedAt));
+      if (query.afterKey !== null) {
+        // A day holds several lines and a *minute* can hold two, so the keyset is the whole
+        // of `food_log_entries_day_idx`: day, then clock, then identifier. A cursor on the
+        // day alone would drop every line after the one a page happened to end on.
+        const { first: dayAndTime, second: id } = decodePairKey(query.afterKey);
+        const { first: day, second: time } = decodePairKey(dayAndTime);
+        const after = or(
+          lt(foodLogEntries.consumedOn, day),
+          and(eq(foodLogEntries.consumedOn, day), lt(foodLogEntries.consumedAt, time)),
+          and(
+            eq(foodLogEntries.consumedOn, day),
+            eq(foodLogEntries.consumedAt, time),
+            lt(foodLogEntries.id, id),
+          ),
+        );
+        if (after !== undefined) filters.push(after);
+      }
+
+      const rows = await database.db
+        .select()
+        .from(foodLogEntries)
+        .where(and(...filters))
+        .orderBy(
+          desc(foodLogEntries.consumedOn),
+          desc(foodLogEntries.consumedAt),
+          desc(foodLogEntries.id),
+        )
+        .limit(query.limit + 1);
+
+      const page = rows.slice(0, query.limit);
+      return {
+        entries: page.map((row) => ({ payload: linePayloadOf(row), meta: metaOf(row) })),
+        hasMore: rows.length > query.limit,
       };
-      return { payload, meta: metaOf(row) };
+    },
+
+    async foodLogEntriesOn(
+      userId: string,
+      date: string,
+    ): Promise<readonly StoredAggregate<FoodLogEntryPayloadV1>[]> {
+      const rows = await database.db
+        .select()
+        .from(foodLogEntries)
+        .where(
+          and(
+            eq(foodLogEntries.userId, userId),
+            eq(foodLogEntries.consumedOn, date),
+            // A tombstone is not a consumption. A deleted line must not enter a total, and
+            // there is no `includeDeleted` here for that reason: the caller is asking what
+            // was eaten, and the answer never includes what was taken back.
+            isNull(foodLogEntries.deletedAt),
+          ),
+        )
+        .orderBy(asc(foodLogEntries.consumedAt), asc(foodLogEntries.id));
+      return rows.map((row) => ({ payload: linePayloadOf(row), meta: metaOf(row) }));
+    },
+
+    async searchFoods(query: SearchFoodsQuery): Promise<SearchFoodsResult> {
+      const filters = [eq(foods.userId, query.userId)];
+      if (!query.includeDeleted) filters.push(isNull(foods.deletedAt));
+      if (query.source !== null) filters.push(eq(foods.source, query.source));
+      if (query.barcode !== null) filters.push(eq(foods.barcode, query.barcode));
+      if (query.text !== null) {
+        const pattern = likeFragment(query.text);
+        // The brand is searched with the name because a person looking for `Isey` is looking
+        // for a food, not for a field. `ilike` is the case fold; see `SearchFoodsQuery` for
+        // why the accent fold is not attempted here.
+        const matches = or(ilike(foods.name, pattern), ilike(foods.brand, pattern));
+        if (matches !== undefined) filters.push(matches);
+      }
+      if (query.afterKey !== null) {
+        const { first: name, second: id } = decodePairKey(query.afterKey);
+        const after = or(gt(foods.name, name), and(eq(foods.name, name), gt(foods.id, id)));
+        if (after !== undefined) filters.push(after);
+      }
+
+      const rows = await database.db
+        .select()
+        .from(foods)
+        .where(and(...filters))
+        .orderBy(asc(foods.name), asc(foods.id))
+        .limit(query.limit + 1);
+
+      const page = rows.slice(0, query.limit);
+      return {
+        foods: page.map((row) => ({ payload: foodPayloadOf(row), meta: metaOf(row) })),
+        hasMore: rows.length > query.limit,
+      };
+    },
+
+    async listRecipes(query: ListRecipesQuery): Promise<ListRecipesResult> {
+      const filters = [eq(recipes.userId, query.userId)];
+      if (!query.includeDeleted) filters.push(isNull(recipes.deletedAt));
+      if (query.type !== null) filters.push(eq(recipes.type, query.type));
+      if (query.favouritesOnly) filters.push(eq(recipes.isFavourite, true));
+      if (query.text !== null) filters.push(ilike(recipes.name, likeFragment(query.text)));
+      if (query.afterKey !== null) {
+        const { first: name, second: id } = decodePairKey(query.afterKey);
+        const after = or(gt(recipes.name, name), and(eq(recipes.name, name), gt(recipes.id, id)));
+        if (after !== undefined) filters.push(after);
+      }
+
+      const rows = await database.db
+        .select()
+        .from(recipes)
+        .where(and(...filters))
+        .orderBy(asc(recipes.name), asc(recipes.id))
+        .limit(query.limit + 1);
+
+      const page = rows.slice(0, query.limit);
+      return {
+        recipes: page.map((row) => ({ payload: recipePayloadOf(row), meta: metaOf(row) })),
+        hasMore: rows.length > query.limit,
+      };
+    },
+
+    async foodsByIds(
+      userId: string,
+      ids: readonly string[],
+    ): Promise<ReadonlyMap<string, FoodPayloadV1>> {
+      const found = new Map<string, FoodPayloadV1>();
+      if (ids.length === 0) return found;
+      const rows = await database.db
+        .select()
+        .from(foods)
+        .where(
+          and(
+            eq(foods.userId, userId),
+            inArray(foods.id, [...new Set(ids)]),
+            isNull(foods.deletedAt),
+          ),
+        );
+      for (const row of rows) found.set(row.id, foodPayloadOf(row));
+      return found;
+    },
+
+    async listMealPlan(query: ListMealPlanQuery): Promise<ListMealPlanResult> {
+      const rank = mealSlotRank(mealPlanEntries.slot);
+      const filters = [eq(mealPlanEntries.userId, query.userId)];
+      if (query.from !== null) filters.push(gte(mealPlanEntries.plannedOn, query.from));
+      if (query.to !== null) filters.push(lte(mealPlanEntries.plannedOn, query.to));
+      if (!query.includeDeleted) filters.push(isNull(mealPlanEntries.deletedAt));
+      if (query.afterKey !== null) {
+        // Ordered forwards, unlike the journal: a plan is read towards the future, and the
+        // moment inside a day is ordered by the clock rather than by the spelling of its id.
+        const { first: day, second: slot } = decodePairKey(query.afterKey);
+        const after = or(
+          gt(mealPlanEntries.plannedOn, day),
+          and(eq(mealPlanEntries.plannedOn, day), gt(rank, mealSlotRankOf(slot))),
+        );
+        if (after !== undefined) filters.push(after);
+      }
+
+      const rows = await database.db
+        .select()
+        .from(mealPlanEntries)
+        .where(and(...filters))
+        .orderBy(asc(mealPlanEntries.plannedOn), asc(rank))
+        .limit(query.limit + 1);
+
+      const page = rows.slice(0, query.limit);
+      return {
+        entries: page.map((row) => ({ payload: planPayloadOf(row), meta: metaOf(row) })),
+        hasMore: rows.length > query.limit,
+      };
     },
 
     // --- sections 14.3 and 14.6, writes -----------------------------------------------
@@ -571,6 +773,98 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
 
 function instantOrNull(value: Date | string | null | undefined): string | null {
   return value === null || value === undefined ? null : new Date(value).toISOString();
+}
+
+/*
+ * The four food aggregates, rebuilt from their columns.
+ *
+ * These were inside the three `get*` methods until the read tools arrived and needed the
+ * same transcription for a *page* of rows. Two copies of "which nullable column is which
+ * optional key" is how a `description: null` reaches a schema that requires the key to be
+ * absent -- the failure mode this file's `optional` helper already exists to prevent, and
+ * one that no shape comparison can see. So there is one transcription per aggregate and
+ * every reader goes through it.
+ */
+
+function foodPayloadOf(row: typeof schema.foods.$inferSelect): FoodPayloadV1 {
+  return {
+    id: row.id,
+    name: row.name,
+    source: row.source as FoodPayloadV1["source"],
+    referenceUnit: row.referenceUnit as FoodPayloadV1["referenceUnit"],
+    rawLabel: row.rawLabel,
+    cookedLabel: row.cookedLabel,
+    ...ifPresent("energyMilliKcal", row.energyMilliKcal),
+    ...ifPresent("proteinMilligrams", row.proteinMilligrams),
+    ...ifPresent("carbsMilligrams", row.carbsMilligrams),
+    ...ifPresent("fatMilligrams", row.fatMilligrams),
+    ...ifPresent("fibreMilligrams", row.fibreMilligrams),
+    ...ifPresent("brand", row.brand),
+    ...ifPresent("barcode", row.barcode),
+    ...ifPresent("sourceId", row.sourceId),
+    ...ifPresent("sourceVersion", row.sourceVersion),
+    ...ifPresent("servingLabel", row.servingLabel),
+    ...ifPresent("servingThousandths", row.servingThousandths),
+    ...ifPresent("cookedRatioThousandths", row.cookedRatioThousandths),
+    ...ifPresent("imageRef", row.imageRef),
+  };
+}
+
+function recipePayloadOf(row: typeof schema.recipes.$inferSelect): RecipePayloadV1 {
+  const steps = row.steps as string[];
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type as RecipePayloadV1["type"],
+    baseServings: row.baseServings,
+    isFavourite: row.isFavourite,
+    ingredients: row.ingredients as RecipePayloadV1["ingredients"],
+    ...ifPresent("description", row.description),
+    ...ifPresent("prepTimeMinutes", row.prepTimeMinutes),
+    // An empty list is the *absence* of steps, which is the shape the phone journals:
+    // `RecipePayload.steps` defaults to the empty list and the encoder omits defaults.
+    ...ifPresent("steps", steps.length === 0 ? null : steps),
+    ...ifPresent("imageRef", row.imageRef),
+  };
+}
+
+function linePayloadOf(row: typeof schema.foodLogEntries.$inferSelect): FoodLogEntryPayloadV1 {
+  return {
+    id: row.id,
+    consumedOn: row.consumedOn,
+    consumedAt: row.consumedAt,
+    slot: row.slot as FoodLogEntryPayloadV1["slot"],
+    kind: row.kind as FoodLogEntryPayloadV1["kind"],
+    title: row.title,
+    estimation: row.estimation as FoodLogEntryPayloadV1["estimation"],
+    weighedCooked: row.weighedCooked,
+    ...ifPresent("energyMilliKcal", row.energyMilliKcal),
+    ...ifPresent("proteinMilligrams", row.proteinMilligrams),
+    ...ifPresent("carbsMilligrams", row.carbsMilligrams),
+    ...ifPresent("fatMilligrams", row.fatMilligrams),
+    ...ifPresent("fibreMilligrams", row.fibreMilligrams),
+    ...ifPresent("sourceRef", row.sourceRef),
+    ...ifPresent("amountLabel", row.amountLabel),
+    ...ifPresent("quantityThousandths", row.quantityThousandths),
+    ...ifPresent("quantityUnit", row.quantityUnit as FoodLogEntryPayloadV1["quantityUnit"]),
+    ...ifPresent("portionsThousandths", row.portionsThousandths),
+    ...ifPresent("fromPlan", row.fromPlan),
+  };
+}
+
+/**
+ * A proposal. `plannedOn` and `slot` are the primary key rather than payload columns, and
+ * the wire identifier is derived from them by `mealPlanAggregateId` -- it is stored nowhere,
+ * so there is no second place for its spelling to be wrong.
+ */
+function planPayloadOf(row: typeof schema.mealPlanEntries.$inferSelect): MealPlanEntryPayloadV1 {
+  return {
+    plannedOn: row.plannedOn,
+    slot: row.slot as MealPlanEntryPayloadV1["slot"],
+    recipeId: row.recipeId,
+    plannedServingsThousandths: row.plannedServingsThousandths,
+    ...ifPresent("consumedLogEntryId", row.consumedLogEntryId),
+  };
 }
 
 function customExercisePayloadOf(row: {
