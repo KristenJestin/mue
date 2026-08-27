@@ -28,6 +28,21 @@ class AppContainer(private val applicationContext: Context) {
 
     private val database: MueDatabase by lazy { MueDatabase.build(applicationContext) }
 
+    /**
+     * The Room handle, for the one thing the repositories can no longer be asked to do.
+     *
+     * `RoomActivityRepository` now journals every save, which is the whole point of this change —
+     * and it means the state every phone is *in* has become unreachable through public API: a
+     * session that exists in `activity_sessions` with no outbox row and no `sync_aggregate_state`
+     * row, because it was written by a build that had no outbox at all. `LiveAllAggregatesSyncTest`
+     * has to reproduce that to prove the backfill reaches it, and `ActivityDao.saveDetail` is the
+     * only way left to write a session without journalling one.
+     *
+     * `internal` rather than `val`: the Android Gradle plugin makes the instrumented tests a
+     * friend module of the variant they test, so this is visible to them and to nothing that ships.
+     */
+    internal val roomDatabase: MueDatabase get() = database
+
     val measurementRepository: MeasurementRepository by lazy {
         RoomMeasurementRepository(database.measurementDao(), sync.outbox)
     }

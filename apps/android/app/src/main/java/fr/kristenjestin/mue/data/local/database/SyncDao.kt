@@ -189,6 +189,78 @@ interface SyncDao : SyncJournalDao {
     suspend fun remintMutationId(previousMutationId: String, mutationId: String)
 
     /**
+     * Every finished session this database holds that has **never been journalled**, oldest first.
+     *
+     * `MIGRATION_2_3` created `activity_sessions` in version 3 and `MIGRATION_4_5` created
+     * `sync_mutations` empty in version 5, and until now nothing minted a row for a session at
+     * all — `RoomActivityRepository` took no outbox. So every session ever recorded is here: the
+     * metrics, the equipment, the exercises and the sets of real training, on one phone and
+     * nowhere else. A contract change does nothing for rows already written, and neither does an
+     * outbox added afterwards; this is what reaches back for them.
+     *
+     * ## The predicate is the guard, and there is no flag
+     *
+     * A session qualifies when it has **no `sync_aggregate_state` row and no `sync_mutations`
+     * row**. Both halves are load-bearing and together they make the pass idempotent by
+     * construction rather than by remembering — the same property `OutboxRepair` has, and the
+     * reason neither needs a `sync_state` column or a version bump to hang one on:
+     *
+     * - **no `sync_aggregate_state`** means no server has ever acknowledged this session and no
+     *   pull has ever delivered it. That is what makes minting an upsert safe: a session the
+     *   server already holds — one an agent created, or one another device sent — has a row here,
+     *   so this can never overwrite a remote version with a local one it knows nothing about.
+     * - **no `sync_mutations`** means nothing is already queued for it, in any state. A row
+     *   acknowledged and dropped has left `sync_aggregate_state` behind, so it fails the first
+     *   half; a row `failed` under FR-SYNC-007 is still here, so it fails the second. Neither is
+     *   re-minted, and a session backfilled once is never a candidate again.
+     */
+    @Query(
+        """
+        SELECT s.id FROM activity_sessions s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM sync_aggregate_state a
+            WHERE a.aggregate_type = :aggregateType AND a.aggregate_id = s.id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_mutations m
+            WHERE m.aggregate_type = :aggregateType AND m.aggregate_id = s.id
+        )
+        ORDER BY s.created_at ASC, s.id ASC
+        """
+    )
+    suspend fun unjournalledActivitySessions(aggregateType: String): List<String>
+
+    /**
+     * Every **personal** exercise definition that has never been journalled, oldest name first.
+     *
+     * `is_custom = 1` is the whole filter and it is PRD 10.1's own line: the seventeen definitions
+     * Mue ships are `Synchronisé: Non` — a versioned reference every phone already holds under the
+     * same hardcoded identifiers — so backfilling one would push reference data as personal data
+     * and let a rename of it reach another device.
+     *
+     * The rest of the predicate is [unjournalledActivitySessions]'s, for the same two reasons.
+     */
+    @Query(
+        """
+        SELECT d.id FROM exercise_definitions d
+        WHERE d.is_custom = 1
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_aggregate_state a
+            WHERE a.aggregate_type = :aggregateType AND a.aggregate_id = d.id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_mutations m
+            WHERE m.aggregate_type = :aggregateType AND m.aggregate_id = d.id
+        )
+        ORDER BY d.name_folded ASC
+        """
+    )
+    suspend fun unjournalledCustomExercises(aggregateType: String): List<String>
+
+    @Query("SELECT * FROM exercise_definitions WHERE id = :id")
+    suspend fun exerciseDefinition(id: String): ExerciseDefinitionEntity?
+
+    /**
      * Every outbox row whose **aggregate identifier** a repair pass might have something to say
      * about, as the three columns it decides on.
      *

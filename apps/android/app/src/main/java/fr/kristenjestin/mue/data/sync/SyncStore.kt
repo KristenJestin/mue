@@ -8,6 +8,7 @@ import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.local.database.StrengthExerciseEntity
 import fr.kristenjestin.mue.data.local.database.StrengthSetEntity
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
+import fr.kristenjestin.mue.data.local.database.toDomain
 import fr.kristenjestin.mue.data.remote.sync.ActivitySessionUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.CustomExerciseUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
@@ -19,6 +20,7 @@ import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.RecipeUpsertChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncChangeDto
 import fr.kristenjestin.mue.data.remote.sync.SyncWire
+import fr.kristenjestin.mue.data.repository.toDomain
 import fr.kristenjestin.mue.domain.model.FoodAggregates
 import fr.kristenjestin.mue.domain.model.MealPlanKey
 import java.util.UUID
@@ -44,17 +46,32 @@ interface SyncStore {
     suspend fun requeueInflight(): Int
 
     /**
-     * See [OutboxRepair]. Called at engine start, immediately after [requeueInflight], for the
-     * same reason as [requeueInflight]: a queue can be left in a state that no future run of
-     * this application could leave on its own, and only something that runs before a send can
-     * unstick it.
+     * Everything that has to happen to the outbox before a send, because nothing else ever will.
+     *
+     * Called at engine start, immediately after [requeueInflight], and for the same reason: a
+     * queue can be left in a state that no future run of this application could leave on its own,
+     * and only something that runs before a send can unstick it. There are three such states, and
+     * each was found the same way — a counter in `Data & sync` that would not fall:
+     *
+     * 1. **An identifier no server will read.** `SyncOutbox` minted a UUIDv4 where
+     *    `mutationIdSchema` is `z.uuidv7()`, and the whole batch was refused before its payload
+     *    was looked at. See [OutboxRepair].
+     * 2. **An aggregate identifier a newer build spells differently.** `MealPlanKey` joined its
+     *    pair with a `/`, which `aggregateIdSchema` has never accepted. See [MealPlanIdRepair].
+     * 3. **A row that was never journalled at all.** `RoomActivityRepository` took no outbox, so
+     *    every session ever recorded — with its metrics, its equipment, its exercises and its sets
+     *    — existed on one phone and in no queue. Adding the outbox fixes the next save; the
+     *    backfill reaches back for the ones already written.
      *
      * Second and not first, deliberately. [requeueInflight] moves the rows a killed process left
-     * `inflight` back to `pending`, and this pass never touches an `inflight` row — so running it
-     * afterwards is what lets a stranded row with a legacy identifier be repaired in the same
-     * engine start rather than in the next one.
+     * `inflight` back to `pending`, and none of the three passes touches an `inflight` row — so
+     * running them afterwards is what lets a stranded row be repaired in the same engine start
+     * rather than in the next one.
      *
-     * @return how many rows were given a new identifier, so a caller can log a real number.
+     * The name is narrower than the pass has become and should widen with it; what it must not do
+     * is stay accurate by shedding work that has to run here.
+     *
+     * @return how many rows were repaired or journalled, so a caller can log a real number.
      */
     suspend fun repairUnsendableMutationIds(): Int
 
@@ -131,6 +148,13 @@ interface SyncStore {
 class RoomSyncStore(
     private val database: MueDatabase,
     /**
+     * The same outbox every repository mints through, so a backfilled row is indistinguishable
+     * from one a save wrote — same identifier rule, same payload schema version, same pending
+     * state. It is defaulted because a test that only exercises the engine has no interest in
+     * which instance it is; `SyncContainer` passes its own.
+     */
+    private val outbox: SyncOutbox = SyncOutbox(),
+    /**
      * `session_equipment.id` is minted locally on every write, so a received session needs one per
      * item — the payload carries none, because the identifier is not stable across two saves of
      * the same session and could never be a merge key.
@@ -169,7 +193,75 @@ class RoomSyncStore(
             syncDao.remintMutationId(candidate.mutationId, MutationIds.random())
             repaired++
         }
-        repaired + repairMealPlanIdentifiers()
+        repaired + repairMealPlanIdentifiers() + backfillActivityJournal()
+    }
+
+    /**
+     * The rows that were never journalled at all, journalled now.
+     *
+     * `MIGRATION_4_5` created `sync_mutations` empty and nothing has ever backfilled it. For a
+     * measurement that is a known and separate gap; for a **session** it is the whole history of
+     * the module, because `RoomActivityRepository` took no outbox until this change — every
+     * finished session, with its metrics, its equipment, its exercises and its sets, existed on
+     * one phone and in no queue anywhere. An uninstall took the lot, and unlike a food row there
+     * is no catalogue to re-derive it from.
+     *
+     * Adding the outbox fixes the *next* save. This is what reaches back for the ones already
+     * written, and it is a repair of the same family as the two above: a state no future run of
+     * the application could leave on its own.
+     *
+     * The definitions go first. A session carries a snapshot of every definition it references, so
+     * the order is not required for correctness — it is required for the *audit* to read the way
+     * the data was created, and `SyncJournalDao.sequenced` makes the outbox drain in the order it
+     * was minted.
+     *
+     * ## What else this pass reaches, and why that is right
+     *
+     * A definition materialised from a *received* session's snapshot — `ActivityDao
+     * .resolveDefinition` inserts one when a session arrives referencing a definition this phone
+     * does not hold — is also a candidate: it exists in `exercise_definitions`, it is
+     * `is_custom = 1`, and no server has ever acknowledged it *as an aggregate*. Journalling it is
+     * the correct answer rather than an accident. PRD 10.1 synchronises personal definitions, this
+     * phone now holds one, and pushing it is what makes the two devices agree on the definition
+     * itself rather than only on the sessions that quote it.
+     *
+     * `SyncDao`'s two queries carry the safety argument and the idempotence; nothing is decided
+     * here beyond building the payload.
+     */
+    private suspend fun backfillActivityJournal(): Int {
+        var journalled = 0
+
+        for (id in syncDao.unjournalledCustomExercises(SyncAggregateStateEntity.TYPE_CUSTOM_EXERCISE)) {
+            val definition = syncDao.exerciseDefinition(id) ?: continue
+            enqueueBackfilled(outbox.customExerciseUpsert(definition.toDomain()))
+            journalled++
+        }
+
+        for (id in syncDao.unjournalledActivitySessions(SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION)) {
+            val detail = database.activityDao().findDetailRows(id)?.toDomain() ?: continue
+            enqueueBackfilled(outbox.activitySessionUpsert(detail))
+            journalled++
+        }
+
+        return journalled
+    }
+
+    /**
+     * One backfilled row, written exactly as a save would have written it.
+     *
+     * The same three statements `ActivityDao.saveDetailWithMutation` makes, minus the business
+     * write — there is nothing to write, the row is already there. `markAggregateAlive` matters
+     * even so: it clears a tombstone, and a session that exists in `activity_sessions` is by
+     * definition not deleted.
+     */
+    private suspend fun enqueueBackfilled(mutation: SyncMutationEntity) {
+        val row = syncDao.sequenced(mutation)
+        val baseRevision = syncDao.revisionOf(row.aggregateType, row.aggregateId)
+        syncDao.insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
+        )
+        syncDao.markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        syncDao.enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 
     /**

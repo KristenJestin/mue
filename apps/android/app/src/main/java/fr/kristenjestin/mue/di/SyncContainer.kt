@@ -137,7 +137,7 @@ class SyncContainer(
         )
     }
 
-    val store: SyncStore by lazy { RoomSyncStore(database) }
+    val store: SyncStore by lazy { RoomSyncStore(database, outbox) }
 
     /**
      * Outlives every screen and every worker invocation: the `inflight` recovery started in the

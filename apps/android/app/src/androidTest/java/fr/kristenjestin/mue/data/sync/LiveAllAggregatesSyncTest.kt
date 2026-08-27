@@ -205,7 +205,12 @@ class LiveAllAggregatesSyncTest {
         )
         assertEquals("nothing was held back", 0, completed.deferred)
         assertEquals("nothing was unreadable", 0, completed.unreadable)
-        assertEquals("the legacy meal plan row was not repaired", 1, completed.repaired)
+        // At least the legacy meal plan row. Not an exact count: the three tests in this class
+        // share one database, and a session received by another of them materialises a definition
+        // from its snapshot that this pass then journals as an aggregate of its own. That is
+        // correct — a definition on this phone is a personal definition, and PRD 10.1
+        // synchronises those — but it makes a total a statement about test order.
+        assertTrue("nothing was repaired at all", completed.repaired >= 1)
 
         /*
          * The server issued a revision for every one of them.
@@ -325,6 +330,146 @@ class LiveAllAggregatesSyncTest {
         assertEquals(RecipeId(REMOTE_RECIPE_ID), plan?.recipeId)
 
         Log.i(TAG, "received session=$REMOTE_SESSION_ID definition=$REMOTE_DEFINITION_ID food=$REMOTE_FOOD_ID recipe=$REMOTE_RECIPE_ID line=$REMOTE_LINE_ID plan=$REMOTE_DAY:dinner")
+    }
+
+    /**
+     * The sessions that were already on the phone, reaching the server for the first time.
+     *
+     * Adding an outbox to `RoomActivityRepository` fixes the *next* save. It does nothing for the
+     * ones already written, and there is no other copy of them: `MIGRATION_2_3` created
+     * `activity_sessions` in version 3, `MIGRATION_4_5` created `sync_mutations` empty in version
+     * 5, and nothing has ever journalled a session. Every finished session, with its metrics, its
+     * equipment, its exercises and its sets, existed on one phone and in no queue anywhere.
+     *
+     * So the reproduction writes one the way the old build did — straight through
+     * `ActivityDao.saveDetail`, which mints nothing — asserts that the outbox is genuinely empty,
+     * and then starts an engine. The backfill runs there, before anything is sent, because that is
+     * the only moment it can run at all.
+     */
+    @Test
+    fun aSessionRecordedBeforeTheOutboxExistedIsBackfilledAndSent() {
+        val server = liveServer() ?: return
+        WorkManager.getInstance(application).cancelUniqueWork(SyncScheduler.PERIODIC_WORK)
+
+        val paired = runBlocking {
+            sync.pairing.pair(
+                server,
+                requireNotNull(argument("mueLiveEmail")),
+                requireNotNull(argument("mueLivePassword")),
+            )
+        }
+        assertTrue("pairing refused: $paired", paired is PairingResult.Paired)
+        runBlocking { sync.engine.sync() }
+
+        // A session written the way a build with no outbox wrote one: five tables, no mutation.
+        runBlocking {
+            val definition = container.exerciseCatalogRepository.findOrCreate(
+                name = "Legacy sled push",
+                trackingMode = TrackingMode.DURATION,
+                equipment = EquipmentType.MACHINE,
+            )
+            // Drain the definition's own row, so what remains pending is only what the backfill
+            // finds: a session, and nothing else.
+            runBlocking { sync.engine.sync() }
+
+            application.container.roomDatabase.activityDao().saveDetail(
+                session = fr.kristenjestin.mue.data.local.database.ActivitySessionEntity(
+                    id = LEGACY_SESSION_ID,
+                    movement = Movement.STRENGTH_TRAINING.id,
+                    customMovementName = null,
+                    environment = ActivityEnvironment.INDOOR.id,
+                    startedOn = "2026-08-20",
+                    startedAtTime = "07:00",
+                    durationSeconds = 2_400,
+                    perceivedEffort = null,
+                    notes = "Recorded before the outbox existed.",
+                    source = ActivitySource.MANUAL.id,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                ),
+                metrics = emptyList(),
+                equipment = emptyList(),
+                exercises = listOf(
+                    fr.kristenjestin.mue.data.local.database.StrengthExerciseEntity(
+                        id = "0f5a2b73-4c86-4d19-9e2a-1b7c4d8e0f31",
+                        sessionId = LEGACY_SESSION_ID,
+                        exerciseDefinitionId = definition.id.value,
+                        position = 0,
+                        notes = null,
+                    ),
+                ),
+                sets = listOf(
+                    fr.kristenjestin.mue.data.local.database.StrengthSetEntity(
+                        id = "1a6b3c84-5d97-4e2a-8f3b-2c8d5e9f1a42",
+                        strengthExerciseId = "0f5a2b73-4c86-4d19-9e2a-1b7c4d8e0f31",
+                        position = 0,
+                        setType = SetType.WORKING.id,
+                        repetitions = null,
+                        loadGrams = 60_000,
+                        durationSeconds = 45,
+                        perceivedEffort = null,
+                    ),
+                ),
+            )
+        }
+
+        assertEquals(
+            "the reproduction has to leave the session in no queue at all",
+            0,
+            runBlocking { sync.syncDao.countInState(SyncMutationEntity.STATE_PENDING) },
+        )
+        assertNull(
+            "and with no synchronisation metadata of its own",
+            runBlocking {
+                sync.syncDao.aggregateState(
+                    SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                    LEGACY_SESSION_ID,
+                )
+            }?.revision,
+        )
+
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val outcome = try {
+            runBlocking { SyncEngine(store = sync.store, api = sync.api, scope = scope).sync() }
+        } finally {
+            scope.cancel()
+        }
+
+        val completed = outcome as? SyncOutcome.Completed
+        assertNotNull("the synchronisation did not complete: $outcome", completed)
+        requireNotNull(completed)
+        assertTrue("the session was not backfilled", completed.repaired >= 1)
+        assertTrue("and it was not sent", completed.applied >= 1)
+        assertEquals("something was refused", 0, completed.rejected)
+
+        val state = runBlocking {
+            sync.syncDao.aggregateState(
+                SyncAggregateStateEntity.TYPE_ACTIVITY_SESSION,
+                LEGACY_SESSION_ID,
+            )
+        }
+        assertNotNull("the server issued no revision for the backfilled session", state?.revision)
+
+        /*
+         * And it does not run twice.
+         *
+         * The pass has no flag and needs none: its predicate is "no metadata row and no outbox
+         * row", and journalling the session makes the second false, then acknowledging it makes
+         * the first false too. A second engine start finds nothing.
+         */
+        val second = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val again = try {
+            runBlocking { SyncEngine(store = sync.store, api = sync.api, scope = second).sync() }
+        } finally {
+            second.cancel()
+        }
+        assertEquals(
+            "the backfill is not idempotent",
+            0,
+            (again as SyncOutcome.Completed).repaired,
+        )
+
+        Log.i(TAG, "backfilled $LEGACY_SESSION_ID revision=${state?.revision}")
     }
 
     // --- what this device writes -------------------------------------------------------------
@@ -714,6 +859,9 @@ class LiveAllAggregatesSyncTest {
         const val REMOTE_FOOD_ID = "4b8f2d60-1e35-4a94-8ca7-8d5f1b3e6042"
         const val REMOTE_RECIPE_ID = "5c903e71-2f46-4ba5-9db8-9e602c4f7153"
         const val REMOTE_LINE_ID = "6da14f82-3057-4cb6-8ec9-0f713d508264"
+
+        /** A session written the way a build with no outbox wrote one. */
+        const val LEGACY_SESSION_ID = "7eb25093-4168-4dc7-9fda-10824e619375"
 
         // Fixed UUIDv7s, so a re-run replays FR-SYNC-006 rather than applying twice.
         const val REMOTE_SESSION_MUTATION = "0198f0b0-0001-7000-8000-000000000001"

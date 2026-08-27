@@ -127,7 +127,7 @@ class RoomActivityRepository(
 }
 
 /** The sets arrive for the whole session in one read, so they are grouped once rather than rescanned per exercise. */
-private fun ActivityDetailRows.toDomain(): ActivitySessionDetail {
+internal fun ActivityDetailRows.toDomain(): ActivitySessionDetail {
     val setsByExercise = sets.groupBy { it.strengthExerciseId }
     return ActivitySessionDetail(
         session = session.toDomain(),
