@@ -116,6 +116,22 @@ internal data class FoodAddFoodUiState(
     val description: String,
 )
 
+/**
+ * The recipe a line is being built from (FR-FOOD-004).
+ *
+ * The same two lines a food gets — what it is, and one fact underneath — so the sheet reads the
+ * same whichever way in was taken. [meta] carries what a serving *means* here: the number of
+ * servings the ingredient quantities were written for (PRD_FOOD 8.3), without which "2 servings"
+ * on the field below is a number with no unit behind it.
+ */
+@Immutable
+internal data class FoodAddRecipeUiState(
+    val name: String,
+    val meta: String,
+    val iconName: String,
+    val description: String,
+)
+
 /** One of PRD_FOOD 10.1's four moments as an option (FR-FOOD-007). */
 @Immutable
 internal data class FoodAddSlotUiState(
@@ -344,12 +360,21 @@ internal data class FoodAddUiState(
      */
     val slotTimeNote: String?,
     val food: FoodAddFoodUiState?,
+    /** FR-FOOD-004: the chosen recipe, on [FoodAddStage.SERVINGS] and nowhere else. */
+    val recipe: FoodAddRecipeUiState?,
     val amount: FoodAmountUiState?,
     /** FR-FOOD-003, and null on every stage but [FoodAddStage.SCAN]. */
     val scan: FoodScanUiState?,
     val quick: FoodQuickUiState?,
     val servings: String,
-    /** PRD_FOOD 8.2: what the food is worth per 100, shown before any quantity is typed. */
+    /**
+     * What the source is worth before any quantity is typed.
+     *
+     * Per 100 g or ml for a catalogue food (PRD_FOOD 8.2), per serving for a recipe (PRD_FOOD
+     * 13.1). One field for both because the screen does the same thing with them — draws them
+     * where the contribution will go — and because [FoodNutrientsUiState.header] already says
+     * which of the two basis a reader is looking at.
+     */
     val per100: FoodNutrientsUiState?,
     /** PRD_FOOD 13.1: what this line contributes, once there is a quantity to contribute from. */
     val contribution: FoodNutrientsUiState?,
@@ -418,12 +443,15 @@ internal data class FoodAddUiState(
             /** PRD_FOOD 15: the barcode's refusal appears after an attempt, not while typing. */
             scanAttempted: Boolean = false,
             scanSaveError: String? = null,
+            /** FR-FOOD-004: the recipe the picker handed back, resolved against its catalogue. */
+            recipe: FoodAddRecipe? = null,
             locale: Locale = Locale.getDefault(),
         ): FoodAddUiState {
             val date = draft.date(today)
             val time = draft.time(MealSlot.fromId(draft.slotId).defaultTime)
             val stage = stageOf(draft, food, original)
             val amount = food?.let { amountOf(draft, it) }
+            val chosenRecipe = recipe.takeIf { stage == FoodAddStage.SERVINGS }
 
             return FoodAddUiState(
                 stage = stage,
@@ -451,6 +479,7 @@ internal data class FoodAddUiState(
                 timeLabel = FoodDayFormat.time(time, locale),
                 slotTimeNote = slotTimeNote(draft.slot, time, locale),
                 food = food?.let(::foodOf),
+                recipe = chosenRecipe?.let(::recipeOf),
                 amount = amount,
                 scan = scanOf(draft, scan, scanAttempted, scanSaveError)
                     .takeIf { stage == FoodAddStage.SCAN },
@@ -462,8 +491,10 @@ internal data class FoodAddUiState(
                 servings = draft.servings,
                 per100 = food?.let {
                     FoodNutrientsUiState.of(FoodAddMessages.per100Label(it), it.per100)
+                } ?: chosenRecipe?.let {
+                    FoodNutrientsUiState.of(FoodAddMessages.PER_SERVING_SECTION, it.perServing)
                 },
-                contribution = contributionOf(draft, food, original, stage),
+                contribution = contributionOf(draft, food, original, recipe, stage),
                 errors = errors,
                 saveLabel = if (draft.isEditing) {
                     FoodAddMessages.SAVE_CHANGES
@@ -657,6 +688,22 @@ internal data class FoodAddUiState(
         }
 
         /**
+         * The chosen recipe's card, worded as its row in the recipe picker was.
+         *
+         * The same two facts under the same name, for the reason [foodOf] gives: a second wording
+         * here would make the recipe look like a different one across a single tap.
+         */
+        private fun recipeOf(recipe: FoodAddRecipe): FoodAddRecipeUiState {
+            val meta = FoodAddMessages.serves(recipe.baseServings)
+            return FoodAddRecipeUiState(
+                name = recipe.name,
+                meta = meta,
+                iconName = FoodIcons.CHEF_HAT,
+                description = FoodDayFormat.sentence(recipe.name, meta),
+            )
+        }
+
+        /**
          * The quantity block, with the raw/cooked reading beside it (FR-FOOD-006).
          *
          * The steps of the counter are [Servings]' own — half a portion, between 0.5 and 20 —
@@ -710,6 +757,7 @@ internal data class FoodAddUiState(
             draft: FoodAddDraft,
             food: Food?,
             original: FoodLogEntry?,
+            recipe: FoodAddRecipe?,
             stage: FoodAddStage,
         ): FoodNutrientsUiState? {
             val nutrients = when (stage) {
@@ -722,7 +770,14 @@ internal data class FoodAddUiState(
 
                 FoodAddStage.QUICK -> draft.quickNutrientsOrNull() ?: return null
 
-                FoodAddStage.SERVINGS -> draft.recipeNutrientsOrNull(original) ?: return null
+                /*
+                 * The correction first, and the new line second, in the order `resolve` decides
+                 * them: a stored line rescales the snapshot PRD_FOOD 8.4 froze, and only a line
+                 * that has none is computed from the recipe as it stands.
+                 */
+                FoodAddStage.SERVINGS -> draft.recipeNutrientsOrNull(original)
+                    ?: draft.newRecipeNutrientsOrNull(recipe)
+                    ?: return null
 
                 // Neither stage has a food, a quantity or a line yet; the panel is the figures.
                 FoodAddStage.PATHS, FoodAddStage.SCAN -> return null

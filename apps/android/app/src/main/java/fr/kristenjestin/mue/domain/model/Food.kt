@@ -171,5 +171,36 @@ data class Food(
                 .lowercase(Locale.ROOT)
 
         private val COMBINING_MARKS = Regex("\\p{Mn}+")
+
+        /**
+         * The same folded term written with the other spelling of its ligatures — `bœuf` beside
+         * `boeuf`, `nævus` beside `naevus`.
+         *
+         * [fold] cannot do this itself, and that is a fact about **storage** rather than a
+         * preference. `œ` is not a letter with a combining mark: NFD leaves it whole, so
+         * `Bœuf sauté` folds to `bœuf saute` and a person typing `boeuf` finds nothing. Teaching
+         * [fold] to decompose it would be correct for every row written afterwards and wrong for
+         * every row already written — `name_folded` is stored and indexed (PRD_FOOD 20.2), so the
+         * catalogue would have to be re-folded row by row, which is a migration, and this
+         * database is pinned at version 6.
+         *
+         * So the *query* carries both spellings instead and the table is left exactly as it is:
+         * one extra `LIKE` on a scan that a leading `%` already made a scan, and not one stored
+         * byte rewritten. The direction is decided by what was typed — a term holding a ligature
+         * looks for the expansion, a term without one looks for the ligature — because a term
+         * cannot be spelt both ways at once and two searches would find the same rows twice.
+         *
+         * Returns the term unchanged when it contains neither spelling, which is the ordinary
+         * case: the shipped subset holds no ligature at all.
+         */
+        fun ligatureVariantOf(folded: String): String =
+            if (folded.any { it in LIGATURES }) {
+                folded.replace("œ", "oe").replace("æ", "ae")
+            } else {
+                folded.replace("oe", "œ").replace("ae", "æ")
+            }
+
+        /** The two the French and the Latin alphabets actually use, both already lower-cased. */
+        private const val LIGATURES = "œæ"
     }
 }

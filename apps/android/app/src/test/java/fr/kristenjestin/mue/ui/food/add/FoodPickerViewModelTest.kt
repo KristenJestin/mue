@@ -21,15 +21,19 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/** The name whose fold is `bœuf saute`, which no amount of NFD turns into `boeuf saute`. */
+private const val BEEF_NAME: String = "Bœuf sauté, maison"
 
 /**
  * The one search bar of PRD_FOOD 9.4, and what it asks the catalogue for.
  *
  * The assertions are about the **query**, not only about the rows: which limit, which source, and
- * whether an empty search reads the recently used or the catalogue. Those are what keep the
- * search usable over 1 038 seeded entries, and a test that only looked at the result list would
- * pass just as happily with the whole table pulled into memory.
+ * that an empty search reads the recently used *and* the catalogue rather than one instead of the
+ * other. Those are what keep the search usable over 1 038 seeded entries, and a test that only
+ * looked at the result list would pass just as happily with the whole table pulled into memory.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FoodPickerViewModelTest {
@@ -49,20 +53,68 @@ class FoodPickerViewModelTest {
     // region what an empty search shows (PRD_FOOD 9.4)
 
     @Test
-    fun `an empty search shows what was logged most recently`() = pickerTest { picker ->
+    fun `an empty search puts the recently used at the head of the catalogue`() = pickerTest {
+        picker ->
         val state = state(picker)
 
         assertTrue(state.isRecent)
-        assertEquals(FoodAddMessages.RECENT_SECTION, state.sectionTitle)
-        assertEquals(listOf(FoodAddPreviewData.APPLE_NAME), state.results.map { it.name })
+        assertEquals(FoodAddMessages.RECENT_SECTION, state.recentTitle)
+        assertEquals(listOf(FoodAddPreviewData.APPLE_NAME), state.recent.map { it.name })
         assertEquals(listOf(FoodPickerViewModel.RECENT_LIMIT), picker.foods.recentLimits)
-        assertTrue(picker.foods.searches.isEmpty(), "an empty search queried the catalogue")
+
+        // The catalogue is under it, not instead of it (PRD_FOOD 9.4: "en tête").
+        assertEquals(FoodAddMessages.CATALOGUE_SECTION, state.sectionTitle)
+        assertTrue(state.results.isNotEmpty(), "the catalogue was not read at all")
+        assertEquals(
+            listOf(Triple<String, FoodSource?, Int>("", null, FoodPickerViewModel.SEARCH_LIMIT)),
+            picker.foods.searches,
+        )
     }
 
-    /** PRD_FOOD 17: nothing logged yet is a fact, not an error, and it says where to go next. */
+    /**
+     * The first defect, in one assertion.
+     *
+     * Recency comes from the journal, so a phone that has logged nothing has none — and the
+     * picker used to answer that with `Nothing logged yet` over a catalogue holding 1 038 seeded
+     * entries, while `Foods` two taps away listed them all. An empty head is not an empty list.
+     */
     @Test
-    fun `an empty search with nothing logged says so`() = pickerTest(recent = emptyList()) {
-        picker ->
+    fun `a journal with nothing in it still shows the whole catalogue`() = pickerTest(
+        recent = emptyList(),
+    ) { picker ->
+        val state = state(picker)
+
+        assertTrue(state.recent.isEmpty())
+        assertFalse(state.isEmpty, "a full catalogue was drawn as an empty picker")
+        assertEquals(
+            FoodAddPreviewData.catalogue().map { it.name } + "Own brand oat biscuits",
+            state.results.map { it.name },
+        )
+        assertNull(state.emptyMessage)
+    }
+
+    /** A food eaten yesterday is also in the catalogue; one food is never two cards. */
+    @Test
+    fun `a recently used food is not repeated under the catalogue`() = pickerTest { picker ->
+        val state = state(picker)
+
+        val recentIds = state.recent.map { it.id }
+        assertEquals(listOf(FoodAddPreviewData.apple().id.value), recentIds)
+        assertTrue(
+            state.results.none { it.id in recentIds },
+            "the same food was drawn under both headings",
+        )
+    }
+
+    /**
+     * PRD_FOOD 17: nothing logged yet is a fact, not an error — but it can only be *said* when
+     * there is genuinely nothing to choose, which on a seeded phone never happens.
+     */
+    @Test
+    fun `only an empty catalogue and an empty journal together say nothing is here`() = pickerTest(
+        catalogue = emptyList(),
+        recent = emptyList(),
+    ) { picker ->
         val state = state(picker)
 
         assertTrue(state.isEmpty)
@@ -80,10 +132,11 @@ class FoodPickerViewModelTest {
         val state = state(picker)
         assertFalse(state.isRecent)
         assertEquals(FoodAddMessages.RESULTS_SECTION, state.sectionTitle)
+        assertTrue(state.recent.isEmpty(), "a typed search was still headed by the recents")
         assertEquals(listOf(FoodAddPreviewData.RICE_NAME), state.results.map { it.name })
         assertEquals(
-            listOf(Triple<String, FoodSource?, Int>("rice", null, FoodPickerViewModel.SEARCH_LIMIT)),
-            picker.foods.searches,
+            Triple<String, FoodSource?, Int>("rice", null, FoodPickerViewModel.SEARCH_LIMIT),
+            picker.foods.searches.last(),
         )
     }
 
@@ -101,7 +154,26 @@ class FoodPickerViewModelTest {
         picker.viewModel.onQueryChange("  rice  ")
 
         state(picker)
-        assertEquals(listOf("rice"), picker.foods.searches.map { it.first })
+        assertEquals("rice", picker.foods.searches.last().first)
+    }
+
+    /**
+     * PRD_FOOD 9.4's insensitivity, on the one letter NFD cannot decompose.
+     *
+     * `œ` is a letter in its own right, not an `o` with a mark, so `Bœuf sauté` folds to
+     * `bœuf saute` and `boeuf` misses it. The equivalence is carried by the *query* — see
+     * `Food.ligatureVariantOf` — so nothing stored has to be re-folded, and it works in both
+     * directions: the row here is written with the ligature and is found without one.
+     */
+    @Test
+    fun `a ligature is found by either of its spellings`() = pickerTest(
+        catalogue = listOf(sauteedBeef()),
+    ) { picker ->
+        picker.viewModel.onQueryChange("boeuf")
+        assertEquals(listOf(BEEF_NAME), state(picker).results.map { it.name })
+
+        picker.viewModel.onQueryChange("bœuf")
+        assertEquals(listOf(BEEF_NAME), state(picker).results.map { it.name })
     }
 
     @Test
@@ -130,14 +202,15 @@ class FoodPickerViewModelTest {
     // region the source filter (PRD_FOOD 9.4)
 
     @Test
-    fun `a source filter restricts the search`() = pickerTest { picker ->
+    fun `a source filter restricts the search and silences the head`() = pickerTest { picker ->
         picker.viewModel.onSourceSelected(FoodSource.CUSTOM)
 
         val state = state(picker)
         assertEquals(listOf(FoodAddPreviewData.LONGEST_NAME), state.results.map { it.name })
+        assertTrue(state.recent.isEmpty(), "a filtered list was headed by an unfiltered recent")
         assertEquals(
-            listOf<Triple<String, FoodSource?, Int>>(Triple("", FoodSource.CUSTOM, FoodPickerViewModel.SEARCH_LIMIT)),
-            picker.foods.searches,
+            Triple<String, FoodSource?, Int>("", FoodSource.CUSTOM, FoodPickerViewModel.SEARCH_LIMIT),
+            picker.foods.searches.last(),
         )
         assertTrue(
             picker.foods.recentLimits.size <= 1,
@@ -248,6 +321,14 @@ class FoodPickerViewModelTest {
         advanceUntilIdle()
         return picker.viewModel.uiState.value
     }
+
+    /** A personal food carrying the one ligature the fold cannot decompose. */
+    private fun sauteedBeef(): Food = Food(
+        id = FoodId("preview-beef"),
+        name = BEEF_NAME,
+        source = FoodSource.CUSTOM,
+        per100 = Nutrients.UNKNOWN,
+    )
 
     /** PRD_FOOD 9.2's nominal case: a scanned product whose card states nothing at all. */
     private fun ownBrand(): Food = Food(

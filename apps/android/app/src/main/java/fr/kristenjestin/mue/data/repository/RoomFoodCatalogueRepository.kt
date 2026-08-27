@@ -61,11 +61,22 @@ class RoomFoodCatalogueRepository(
             .map { rows -> rows.map { it.toDomain() } }
             .flowOn(ioDispatcher)
 
+    /**
+     * Two patterns and one term (PRD_FOOD 9.4).
+     *
+     * The second is the ligature's other spelling, so `boeuf` reaches the row `Bœuf sauté` wrote
+     * as `bœuf saute` and `bœuf` reaches a personal food someone typed without the ligature.
+     * `Food.ligatureVariantOf` owns that equivalence and hands the term straight back when it
+     * holds neither spelling, which is every term the shipped subset can be searched with.
+     */
     override fun search(query: String, source: FoodSource?, limit: Int): Flow<List<Food>> {
         val folded = foldForSearch(query)
+        val alternate = Food.ligatureVariantOf(folded)
         return dao.search(
             pattern = "%$folded%",
             prefix = "$folded%",
+            alternate = "%$alternate%",
+            alternatePrefix = "$alternate%",
             source = source?.id,
             limit = limit,
         ).map { rows -> rows.map { it.toDomain() } }.flowOn(ioDispatcher)

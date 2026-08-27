@@ -52,6 +52,12 @@ interface FoodDao : SyncJournalDao {
      * lookup rather than a function SQLite would have to run per row; the caller folds and
      * escapes the term with `Food.fold`, the single definition of the same operation.
      *
+     * [alternate] is the same term with its ligatures written the other way — see
+     * `Food.ligatureVariantOf`. It is a second pattern rather than a second fold of the column
+     * because `name_folded` is *stored*: teaching the fold to decompose `œ` would need every row
+     * re-folded, and this schema is frozen. When the term holds no ligature the caller passes the
+     * pattern back unchanged and the extra clause simply agrees with the first.
+     *
      * A name match outranks a brand match — searching "yaourt" wants yoghurts before every
      * product of a brand that happens to contain the word.
      */
@@ -59,17 +65,30 @@ interface FoodDao : SyncJournalDao {
         """
         SELECT * FROM food
         WHERE (:source IS NULL OR source = :source)
-          AND (name_folded LIKE :pattern ESCAPE '\' OR brand_folded LIKE :pattern ESCAPE '\')
+          AND (
+            name_folded LIKE :pattern ESCAPE '\' OR brand_folded LIKE :pattern ESCAPE '\'
+            OR name_folded LIKE :alternate ESCAPE '\'
+            OR brand_folded LIKE :alternate ESCAPE '\'
+          )
         ORDER BY
-          CASE WHEN name_folded LIKE :prefix ESCAPE '\' THEN 0
-               WHEN name_folded LIKE :pattern ESCAPE '\' THEN 1
+          CASE WHEN name_folded LIKE :prefix ESCAPE '\'
+                 OR name_folded LIKE :alternatePrefix ESCAPE '\' THEN 0
+               WHEN name_folded LIKE :pattern ESCAPE '\'
+                 OR name_folded LIKE :alternate ESCAPE '\' THEN 1
                ELSE 2 END,
           name_folded ASC,
           id ASC
         LIMIT :limit
         """
     )
-    fun search(pattern: String, prefix: String, source: String?, limit: Int): Flow<List<FoodEntity>>
+    fun search(
+        pattern: String,
+        prefix: String,
+        alternate: String,
+        alternatePrefix: String,
+        source: String?,
+        limit: Int,
+    ): Flow<List<FoodEntity>>
 
     /**
      * PRD_FOOD 9.4: "les aliments récemment utilisés apparaissent en tête lorsque la recherche

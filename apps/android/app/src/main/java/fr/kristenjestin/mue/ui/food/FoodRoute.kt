@@ -123,6 +123,22 @@ sealed interface FoodRoute {
         override val key: String = "foodPicker"
     }
 
+    /**
+     * FR-FOOD-004: the recipe a line is being built from, chosen the way a food is.
+     *
+     * A **sheet**, which is the whole point of it. `Use a recipe` used to `select(Recipes)`, and
+     * selecting a view replaces the root and takes the open sheet with it: somebody three taps
+     * into logging dinner was dropped onto the recipe catalogue, with the view switcher and the
+     * bottom bar back and no thread to the meal they were writing. This is pushed over the sheet
+     * exactly as [FoodPicker] is, so leaving it returns to `Add food` with the choice made.
+     *
+     * Parameterless for [FoodPicker]'s reason and with the same answer: what it chose is written
+     * into the add flow's own ViewModel, which both screens share.
+     */
+    data object RecipePicker : FoodRoute {
+        override val key: String = "recipePicker"
+    }
+
     /** FR-CATALOG-003: creating a personal food, or editing one that is not read-only. */
     data class FoodEditor(val foodId: FoodId? = null) : FoodRoute {
         override val key: String
@@ -193,6 +209,7 @@ sealed interface FoodRoute {
             key == Recipes.key -> Recipes
             key == Foods.key -> Foods
             key == FoodPicker.key -> FoodPicker
+            key == RecipePicker.key -> RecipePicker
             key == Preferences.key -> Preferences
 
             key == ADD_FOOD_KEY -> AddFood()

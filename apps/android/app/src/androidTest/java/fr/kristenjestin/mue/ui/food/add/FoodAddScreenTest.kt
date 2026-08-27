@@ -26,6 +26,7 @@ import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.logic.FoodValidation
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -409,6 +410,59 @@ class FoodAddScreenTest {
         compose.onNodeWithTag(FoodTestTags.QUANTITY_FIELD).assertDoesNotExist()
         assertDrawn(nutrient(FoodNutrientsUiState.ENERGY), "≈ 211 kcal")
         assertDrawn(nutrient(FoodNutrientsUiState.CARBS), FoodLabels.UNKNOWN)
+    }
+
+    // endregion
+
+    // region logging a recipe (FR-FOOD-004)
+
+    /**
+     * The recipe is on the sheet, and tapping it goes back to the picker.
+     *
+     * The card's own texts are cleared from the merged tree by `clearAndSetSemantics`, so the
+     * name is read from the **announcement** rather than looked up as a text node — the mistake
+     * eight earlier tests in this module made.
+     */
+    @Test
+    fun aChosenRecipeIsShownOnTheSheetAndLeadsBackToThePicker() {
+        show(previewRecipeServingsState())
+
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE)
+            .assertIsDisplayed()
+            .assertContentDescriptionContains(RecipePreviewData.LONGEST_NAME, substring = true)
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE).performClick()
+
+        assertEquals(1, recipes)
+    }
+
+    /**
+     * FR-FOOD-004: a new recipe line is computed from the recipe, not rescaled from a snapshot.
+     *
+     * The footnote is what says which of the two a reader is looking at, and the figures above it
+     * are `In this entry` once a count has been typed.
+     */
+    @Test
+    fun aNewRecipeLineSaysWhereItsFiguresComeFrom() {
+        show(previewRecipeServingsState())
+
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROM_RECIPE).assertExists()
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROZEN).assertDoesNotExist()
+        /*
+         * The figures' heading is **not a text node**: `FoodSectionCard` clears the semantics of
+         * its title and speaks the whole card through one description, so the merged tree holds
+         * `In this entry` as a `contentDescription` and the text tree does not hold it at all.
+         */
+        compose.onNodeWithContentDescription(FoodAddMessages.CONTRIBUTION_SECTION, substring = true)
+            .assertExists()
+    }
+
+    /** FR-FOOD-008: a correction has no recipe card and says it rescales what was saved. */
+    @Test
+    fun aCorrectedRecipeLineStillRescalesItsFrozenSnapshot() {
+        show(previewServingsState())
+
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE).assertDoesNotExist()
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROZEN).assertExists()
     }
 
     // endregion

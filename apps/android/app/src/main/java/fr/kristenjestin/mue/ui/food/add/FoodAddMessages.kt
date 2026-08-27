@@ -81,6 +81,9 @@ internal object FoodAddMessages {
     // region the food, and how much of it (FR-FOOD-006)
 
     const val CHANGE_FOOD: String = "Choose another food"
+
+    /** FR-FOOD-004: the same gesture on the recipe card, worded the same way. */
+    const val CHANGE_RECIPE: String = "Choose another recipe"
     const val AMOUNT_SECTION: String = "How much?"
     const val PORTIONS_LABEL: String = "Usual portions"
     const val FEWER_PORTIONS: String = "One portion fewer"
@@ -206,9 +209,26 @@ internal object FoodAddMessages {
 
     // endregion
 
-    // region correcting a recipe line (FR-FOOD-008)
+    // region logging and correcting a recipe line (FR-FOOD-004 and 008)
 
     const val SERVINGS_SECTION: String = "How many servings?"
+
+    /** PRD_FOOD 13.1: what one serving of the chosen recipe is worth, before any count is typed. */
+    const val PER_SERVING_SECTION: String = "Per serving"
+
+    /**
+     * PRD_FOOD 8.3: "les quantités des ingrédients sont exprimées pour la recette entière".
+     *
+     * So the number of servings the recipe was written for is what gives the field below its
+     * unit: two servings of a recipe that serves four is half of it.
+     */
+    fun serves(baseServings: Int): String = "Serves $baseServings"
+
+    /** `25 min`, and nothing at all when a recipe states no preparation time. */
+    fun prepTime(minutes: Int): String = "$minutes min"
+
+    /** FR-FOOD-004: a new line is computed from the recipe as it stands right now. */
+    const val SERVINGS_FROM_RECIPE: String = "Computed from this recipe's ingredients"
 
     /**
      * The noun alone: the section above it already asks "how many", and the participle carried an
@@ -278,6 +298,18 @@ internal object FoodAddMessages {
     const val SEARCH_LABEL: String = "Search foods"
     const val CLEAR_SEARCH: String = "Clear the search"
     const val RECENT_SECTION: String = "Recently used"
+
+    /**
+     * What sits under the recently used when nothing has been typed.
+     *
+     * **Not** the `Foods` view's own word for the same rows, which is `Catalogue`, and that is
+     * deliberate: on *this* screen `Catalogue` is already the name of the source chip that
+     * restricts the list to the Ciqual subset. The same word as a heading over the unrestricted
+     * list would read as a filter that had been applied — two controls, one noun, opposite
+     * meanings. `Foods` calls its provenance chip `Generic` and has no such collision.
+     */
+    const val CATALOGUE_SECTION: String = "All foods"
+
     const val RESULTS_SECTION: String = "Results"
     const val SOURCE_FILTER_LABEL: String = "Where a food came from"
     const val SOURCE_ALL: String = "All"
@@ -289,6 +321,26 @@ internal object FoodAddMessages {
     const val NOTHING_RECENT: String = "Nothing logged yet. Search the catalogue above."
     const val NO_RESULTS: String = "No food matches that."
     const val CREATE_FOOD: String = "Create a food"
+
+    // endregion
+
+    // region the recipe picker (FR-FOOD-004)
+
+    /**
+     * `Choose a recipe`, said the way `Choose a food` is said.
+     *
+     * The two pickers are one gesture with two catalogues behind it, and wording them differently
+     * would suggest they behave differently. Neither leaves the sheet: both come back to it.
+     */
+    const val RECIPE_PICKER_TITLE: String = "Choose a recipe"
+    const val RECIPE_SEARCH_PLACEHOLDER: String = "Sheet-pan salmon, porridge…"
+    const val RECIPE_SEARCH_LABEL: String = "Search your recipes"
+    const val RECIPE_RESULTS_SECTION: String = "Your recipes"
+
+    /** PRD_FOOD 17: "aucune recette enregistrée" — an invitation, and no fake recipe. */
+    const val NO_RECIPES: String = "No recipes yet. A recipe is a saved shortcut: these foods, in these quantities."
+    const val NO_RECIPE_MATCHES: String = "No recipe matches that."
+    const val CREATE_RECIPE: String = "Create a recipe"
 
     // endregion
 

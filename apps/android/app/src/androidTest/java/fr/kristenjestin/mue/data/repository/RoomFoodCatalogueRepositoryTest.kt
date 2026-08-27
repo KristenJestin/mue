@@ -380,6 +380,35 @@ class RoomFoodCatalogueRepositoryTest {
         assertEquals(listOf("a"), repository.search("%", null, 10).first().map { it.id.value })
     }
 
+    /**
+     * PRD_FOOD 9.4's insensitivity, on the letter NFD refuses to take apart.
+     *
+     * `œ` is a letter and not an `o` carrying a mark, so `Food.fold` leaves it whole and
+     * `Bœuf sauté` is stored as `bœuf saute` — which `boeuf` used to miss entirely. The
+     * equivalence is carried by the **query**, in a second `LIKE`, precisely so that no stored
+     * `name_folded` has to change and no migration is needed on a schema pinned at version 6.
+     *
+     * Both directions, and both columns: a row written with the ligature is found without one,
+     * and a row written without it is found with one.
+     */
+    @Test
+    fun searchFindsALigatureByEitherOfItsSpellings() = runTest {
+        repository.save(food(id = "a", name = "Bœuf sauté"))
+        repository.save(food(id = "b", name = "Boeuf bourguignon"))
+        repository.save(food(id = "c", name = "Poulet rôti"))
+
+        assertEquals(
+            listOf("b", "a"),
+            repository.search("boeuf", null, 10).first().map { it.id.value },
+        )
+        assertEquals(
+            listOf("b", "a"),
+            repository.search("bœuf", null, 10).first().map { it.id.value },
+        )
+        // And it widens nothing else: a term with no ligature in it still matches only itself.
+        assertEquals(listOf("c"), repository.search("poulet", null, 10).first().map { it.id.value })
+    }
+
     @Test
     fun searchPutsAPrefixMatchFirst() = runTest {
         repository.save(food(id = "a", name = "Yaourt grec"))

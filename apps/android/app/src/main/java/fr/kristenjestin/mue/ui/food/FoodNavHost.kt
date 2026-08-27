@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import fr.kristenjestin.mue.ui.food.add.FoodAddRoute
 import fr.kristenjestin.mue.ui.food.add.FoodPickerRoute
+import fr.kristenjestin.mue.ui.food.add.RecipePickerRoute
 import fr.kristenjestin.mue.ui.food.add.foodAddViewModel
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
@@ -232,10 +233,13 @@ private fun FoodDestination(
         /*
          * PRD_FOOD 7's `Add food`, in both its readings (FR-FOOD-002 to 008).
          *
-         * The three callbacks are the three things the sheet cannot do itself. `Use a recipe`
-         * **selects** the recipes view rather than pushing a sheet: PRD_FOOD 7 makes `Recipes`
-         * one of the four siblings, and FR-FOOD-004 logs a recipe from its own card — so this is
-         * a handover, and `select` takes the sheet with it rather than leaving it underneath.
+         * The four callbacks are the four things the sheet cannot do itself, and every one of
+         * them is a **push**. `Use a recipe` used to be a `select(Recipes)`, which is not a
+         * handover at all: selecting a view replaces the root of the module, so the sheet closed,
+         * the switcher and the bottom bar came back, and the person logging a meal was left on
+         * the recipe catalogue with nothing tying it to what they had been writing. It now opens
+         * `RecipePicker` over the sheet exactly as `Search a food` opens `FoodPicker`, and the
+         * choice comes back through the ViewModel the two share.
          */
         is FoodRoute.AddFood -> FoodAddRoute(
             date = route.date,
@@ -243,7 +247,7 @@ private fun FoodDestination(
             entryId = route.entryId,
             onClose = { stack.pop() },
             onSearchFood = { stack.push(FoodRoute.FoodPicker) },
-            onUseRecipe = { stack.select(FoodRoute.Recipes) },
+            onUseRecipe = { stack.push(FoodRoute.RecipePicker) },
             /*
              * PRD_FOOD 17's fourth row: a barcode Open Food Facts has no card for opens the
              * editor already holding it. `push` and not `replaceTop`, so back returns to the
@@ -305,6 +309,31 @@ private fun FoodDestination(
                     onEditorPrefillChange(prefill)
                     stack.push(FoodRoute.FoodEditor())
                 },
+                onBack = { stack.pop() },
+                modifier = modifier,
+            )
+        }
+
+        /*
+         * FR-FOOD-004's picker, the food picker's twin.
+         *
+         * Same shape and same reason: the route carries no parameter, the stack has no result
+         * channel, so what it chose is written straight into the add flow's ViewModel and the
+         * sheet underneath finds it there. `stack.pop()` and never `select`, which is the whole
+         * difference between coming back to the meal being logged and being sent to browse.
+         *
+         * The creation it offers is pushed on top rather than swapped in: a recipe written from
+         * here belongs to this list, and saving it pops back to a picker that now has something
+         * to choose.
+         */
+        FoodRoute.RecipePicker -> {
+            val add = foodAddViewModel()
+            RecipePickerRoute(
+                onPicked = { recipeId ->
+                    add.onRecipeChosen(recipeId)
+                    stack.pop()
+                },
+                onCreateRecipe = { stack.push(FoodRoute.RecipeEditor()) },
                 onBack = { stack.pop() },
                 modifier = modifier,
             )

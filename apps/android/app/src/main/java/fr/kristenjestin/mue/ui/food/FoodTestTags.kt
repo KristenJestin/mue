@@ -106,6 +106,15 @@ internal object FoodTestTags {
     /** The step back to the four paths, from whichever one was taken (PRD_FOOD 7). */
     const val ADD_BACK_TO_PATHS: String = "food:addBackToPaths"
 
+    /**
+     * FR-FOOD-004: the recipe a line is being built from, on the sheet.
+     *
+     * Its own name rather than [LOG_RECIPE]'s, which belongs to a different control on a
+     * different screen — the action PRD_FOOD 11 puts on a recipe's own card. This one is the
+     * chosen recipe, and what it does when tapped is open the picker again.
+     */
+    const val CHOSEN_RECIPE: String = "food:chosenRecipe"
+
     const val QUICK_NAME_FIELD: String = "food:quickNameField"
     const val QUICK_ENERGY_FIELD: String = "food:quickEnergyField"
 
@@ -135,6 +144,15 @@ internal object FoodTestTags {
     fun recipeCard(recipeId: String): String = "food:recipe:$recipeId"
 
     fun favouriteRecipe(recipeId: String): String = "food:favouriteRecipe:$recipeId"
+
+    /**
+     * FR-FOOD-004's picker: the recipe a line is built from, chosen over the `Add food` sheet.
+     *
+     * Its own handle rather than [RECIPE_LIST]'s, because it is not the `Recipes` view: it has no
+     * switcher, no bottom action and no favourites, and a test that could not tell the two apart
+     * would pass on the very confusion this screen exists to end.
+     */
+    const val RECIPE_PICKER: String = "food:recipePicker"
 
     const val RECIPE_DETAIL: String = "food:recipeDetail"
     const val RECIPE_SERVINGS: String = "food:recipeServings"

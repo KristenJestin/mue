@@ -21,11 +21,14 @@ import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.MealSlot
+import fr.kristenjestin.mue.domain.model.RecipeDetail
+import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.FoodLogRepository
 import fr.kristenjestin.mue.domain.repository.ProductLookup
 import fr.kristenjestin.mue.domain.repository.ProductLookupResult
+import fr.kristenjestin.mue.domain.repository.RecipeRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,12 +50,17 @@ import java.util.Locale
 /**
  * The `Add food` sheet: PRD_FOOD 7's ways in, then the quantity, the moment and the write.
  *
- * **It is shared with the food picker on purpose.** `FoodRoute.FoodPicker` is a `data object` —
- * it carries no parameter, so it cannot carry a destination for what it chose — and the module's
- * stack has no result channel. Both screens therefore ask for *this* ViewModel, which the
- * activity's store hands out once, exactly as `Log activity` and the strength editor share one
- * draft (PRD 9.1). The picker writes the chosen food through [onFoodChosen] and pops; the sheet
- * underneath finds it already there.
+ * **It is shared with the two pickers on purpose.** `FoodRoute.FoodPicker` and
+ * `FoodRoute.RecipePicker` are `data object`s — they carry no parameter, so neither can carry a
+ * destination for what it chose — and the module's stack has no result channel. All three screens
+ * therefore ask for *this* ViewModel, which the activity's store hands out once, exactly as
+ * `Log activity` and the strength editor share one draft (PRD 9.1). A picker writes its choice
+ * through [onFoodChosen] or [onRecipeChosen] and pops; the sheet underneath finds it already
+ * there.
+ *
+ * [onRecipeChosen] is the half that was missing, and its absence is what `Use a recipe` was
+ * answered with: a **view change**, which replaced the whole tab and closed the sheet. A landing
+ * place for the choice is all it needed.
  *
  * Nothing here computes a nutritional value, a bound, a label or a moment.
  * [fr.kristenjestin.mue.domain.logic.NutritionMath],
@@ -68,6 +76,13 @@ import java.util.Locale
 internal class FoodAddViewModel(
     private val logs: FoodLogRepository,
     private val foods: FoodCatalogueRepository,
+    /**
+     * FR-FOOD-004's other catalogue, behind the same kind of domain interface.
+     *
+     * The recipe picker writes its choice here exactly as the food picker writes its own, so the
+     * whole hand-off — chosen, resolved, rescaled, saved — is proved on the JVM against a fake.
+     */
+    private val recipes: RecipeRepository,
     /**
      * FR-FOOD-003's one network call, behind the domain interface PRD_FOOD 20.2 requires.
      *
@@ -114,16 +129,40 @@ internal class FoodAddViewModel(
         .flatMapLatest { id -> if (id == null) flowOf(null) else foods.observeById(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 
+    /**
+     * FR-FOOD-004: the recipe behind the draft, observed as the food is, **with its catalogue**.
+     *
+     * The ingredients are resolved inside the same emission as the recipe, which is
+     * `RecipeDetailViewModel`'s rule and matters for the same reason: a detail and a catalogue
+     * read a frame apart would print `—` over a figure that is known, and a line saved on that
+     * frame would freeze the dash.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val recipe: StateFlow<FoodAddRecipe?> = _draft
+        .map { it.recipe }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(null)
+            } else {
+                recipes.observeDetail(id).map { detail ->
+                    detail?.let { FoodAddRecipe(it, resolveIngredients(it)) }
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
     val uiState: StateFlow<FoodAddUiState> = combine(
         _draft,
         food,
         original,
         transient,
-    ) { draft, chosen, entry, flags -> build(draft, chosen, entry, flags) }
+        recipe,
+    ) { draft, chosen, entry, flags, chosenRecipe -> build(draft, chosen, entry, flags, chosenRecipe) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = build(_draft.value, null, null, transient.value),
+            initialValue = build(_draft.value, null, null, transient.value, null),
         )
 
     /**
@@ -164,6 +203,7 @@ internal class FoodAddViewModel(
             it.copy(
                 kindId = FoodLogKind.FOOD.id,
                 foodId = id.value,
+                recipeId = null,
                 quantity = "",
                 portionThousandths = null,
                 weighedCooked = false,
@@ -171,10 +211,44 @@ internal class FoodAddViewModel(
         }
     }
 
+    /**
+     * FR-FOOD-004: the recipe the picker came back with.
+     *
+     * The counterpart of [onFoodChosen], and it exists because the sheet had none: `Use a recipe`
+     * had nowhere to hand a choice, so it changed **view** instead — which closed the sheet and
+     * left the person on the recipe catalogue with nothing linking back to the meal they were
+     * writing. This is that landing place. The picker writes here and pops; the sheet underneath
+     * finds the recipe already chosen and asks how many servings.
+     *
+     * An id, not a `RecipeDetail`, for the reason a food is an id: the aggregate is observed from
+     * the repository, so a recipe corrected between being chosen and being logged is quoted as it
+     * is now — and PRD_FOOD 8.4 freezes it only at the moment of saving.
+     *
+     * The servings are cleared rather than kept. A count typed against another recipe would mean
+     * a different amount of food, and a number left in the field is a number somebody may not
+     * re-read.
+     */
+    fun onRecipeChosen(id: RecipeId) {
+        clearErrors()
+        updateDraft {
+            it.copy(
+                kindId = FoodLogKind.RECIPE.id,
+                recipeId = id.value,
+                foodId = null,
+                scanning = false,
+                scanBarcode = "",
+                quantity = "",
+                portionThousandths = null,
+                weighedCooked = false,
+                servings = "",
+            )
+        }
+    }
+
     /** FR-FOOD-005: the path that has a name and an energy and no quantity at all. */
     fun onQuickAddChosen() {
         clearErrors()
-        updateDraft { it.copy(kindId = FoodLogKind.QUICK.id, foodId = null) }
+        updateDraft { it.copy(kindId = FoodLogKind.QUICK.id, foodId = null, recipeId = null) }
     }
 
     // endregion
@@ -185,7 +259,14 @@ internal class FoodAddViewModel(
     fun onScanChosen() {
         clearErrors()
         transient.update { it.copy(scan = FoodScanState.Idle, scanAttempted = false) }
-        updateDraft { it.copy(kindId = FoodLogKind.FOOD.id, foodId = null, scanning = true) }
+        updateDraft {
+            it.copy(
+                kindId = FoodLogKind.FOOD.id,
+                foodId = null,
+                recipeId = null,
+                scanning = true,
+            )
+        }
     }
 
     /**
@@ -499,7 +580,13 @@ internal class FoodAddViewModel(
      */
     fun save() {
         val draft = _draft.value
-        when (val resolution = draft.resolve(food.value, original.value, today())) {
+        val resolved = draft.resolve(
+            food = food.value,
+            original = original.value,
+            today = today(),
+            recipe = recipe.value,
+        )
+        when (val resolution = resolved) {
             is FoodAddResolution.Refused ->
                 transient.update { it.copy(errors = resolution.errors, saveError = null) }
 
@@ -570,15 +657,29 @@ internal class FoodAddViewModel(
 
     // endregion
 
+    /**
+     * The foods an aggregate's ingredients name, resolved in one read.
+     *
+     * A missing food is not an error (PRD_FOOD 21.2) and is simply absent from the map; its
+     * contribution is unknown and the strict sum of PRD_FOOD 13.1 carries that through.
+     */
+    private suspend fun resolveIngredients(detail: RecipeDetail): Map<FoodId, Food> {
+        val ids = detail.foodIds
+        if (ids.isEmpty()) return emptyMap()
+        return foods.findByIds(ids).associateBy(Food::id)
+    }
+
     private fun build(
         draft: FoodAddDraft,
         chosen: Food?,
         entry: FoodLogEntry?,
         flags: Transient,
+        chosenRecipe: FoodAddRecipe?,
     ): FoodAddUiState = FoodAddUiState.of(
         draft = draft,
         food = chosen,
         original = entry,
+        recipe = chosenRecipe,
         today = today(),
         errors = flags.errors,
         saveError = flags.saveError,
@@ -690,6 +791,7 @@ internal class FoodAddViewModel(
                 FoodAddViewModel(
                     logs = app.container.food.foodLogRepository,
                     foods = app.container.food.foodCatalogueRepository,
+                    recipes = app.container.food.recipeRepository,
                     lookup = app.container.food.productLookup,
                     savedState = createSavedStateHandle(),
                 )

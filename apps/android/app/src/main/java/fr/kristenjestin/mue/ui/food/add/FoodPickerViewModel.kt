@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -84,21 +85,54 @@ internal data class FoodSourceFilterUiState(
 /**
  * The picker as it is drawn (PRD_FOOD 9.4).
  *
- * [isRecent] says which of the two lists is on screen — the recently used, or the results of a
- * search — because PRD_FOOD 17 words their empty states differently: nothing logged yet is not
- * the same fact as nothing matching.
+ * [recent] and [results] are **two lists**, exactly as they are on the `Foods` view, and for the
+ * sentence that view already quotes: "les aliments récemment utilisés apparaissent **en tête**
+ * lorsque la recherche est vide". *En tête* of the catalogue, not instead of it.
+ *
+ * Reading it as "instead of" is what the owner met on his own phone: recency comes from the
+ * journal, a phone that has logged nothing has no recency, and the picker answered a full
+ * catalogue with `Nothing logged yet` while `Foods`, two taps away and over the same table, listed
+ * 1 038 rows. So the head is a head — it may be empty, and the catalogue is underneath it either
+ * way.
+ *
+ * [isRecent] still says which state this is, because PRD_FOOD 17 words the two empty lists
+ * differently and because only a *search* offers the creation of what it did not find.
  */
 @Immutable
 internal data class FoodPickerUiState(
     val query: String,
     val sources: List<FoodSourceFilterUiState>,
+    /** The head of an empty search: what the journal used most recently, or nothing. */
+    val recent: List<FoodPickerRowUiState>,
+    /**
+     * The catalogue itself, with anything already drawn under [recent] left out.
+     *
+     * A food eaten yesterday is also in the catalogue, and drawing it twice in one scroll would
+     * be two cards for one food — and two nodes answering to one test tag.
+     */
     val results: List<FoodPickerRowUiState>,
     val isRecent: Boolean,
+    val recentTitle: String,
     val sectionTitle: String,
     val emptyMessage: String?,
 ) {
-    val isEmpty: Boolean get() = results.isEmpty()
+    val hasRecent: Boolean get() = recent.isNotEmpty()
+
+    /** True only when there is nothing at all to choose from, head and catalogue alike. */
+    val isEmpty: Boolean get() = recent.isEmpty() && results.isEmpty()
 }
+
+/**
+ * One reading of the catalogue: the head, the page under it, and the terms both answer.
+ *
+ * The pair travels with the rows for `FoodCatalogueViewModel`'s reason — while a new query is
+ * still being read the old rows are still arriving — and the two lists travel together so a head
+ * and a page that disagree can never be drawn as one list.
+ */
+private data class FoodPickerReading(
+    val recent: List<Food> = emptyList(),
+    val found: List<Food> = emptyList(),
+)
 
 /**
  * The one search bar of PRD_FOOD 9.4, over the whole catalogue at once.
@@ -124,29 +158,38 @@ internal class FoodPickerViewModel(
     private val source: StateFlow<String?> = savedState.getStateFlow(KEY_SOURCE, null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val results: Flow<List<Food>> = combine(query, source) { text, sourceId ->
+    private val readings: Flow<FoodPickerReading> = combine(query, source) { text, sourceId ->
         text.trim() to sourceId?.let(FoodSource::fromId)
     }
         .distinctUntilChanged()
         .flatMapLatest { (text, filter) ->
-            if (text.isEmpty() && filter == null) {
-                // PRD_FOOD 9.4: "les aliments récemment utilisés apparaissent en tête lorsque la
-                // recherche est vide". Recency comes from the journal, not from the catalogue.
+            /*
+             * PRD_FOOD 9.4: "les aliments récemment utilisés apparaissent **en tête** lorsque la
+             * recherche est vide". A head over the catalogue, and the catalogue is read either
+             * way — a journal with nothing in it must not empty a list of 1 038 foods.
+             *
+             * A filter is a search of a kind, so it silences the head exactly as it does on the
+             * `Foods` view: a `Mine` list topped by a recent Ciqual entry answers a question that
+             * was not asked.
+             */
+            val recent = if (text.isEmpty() && filter == null) {
                 foods.observeRecentlyUsed(RECENT_LIMIT)
             } else {
-                foods.search(text, filter, SEARCH_LIMIT)
+                flowOf(emptyList())
             }
+
+            combine(recent, foods.search(text, filter, SEARCH_LIMIT), ::FoodPickerReading)
         }
 
     val uiState: StateFlow<FoodPickerUiState> = combine(
         query,
         source,
-        results,
-    ) { text, sourceId, found -> build(text, sourceId, found) }
+        readings,
+    ) { text, sourceId, reading -> build(text, sourceId, reading) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = build(query.value, source.value, emptyList()),
+            initialValue = build(query.value, source.value, FoodPickerReading()),
         )
 
     fun onQueryChange(raw: String) {
@@ -168,11 +211,14 @@ internal class FoodPickerViewModel(
     private fun build(
         text: String,
         sourceId: String?,
-        found: List<Food>,
+        reading: FoodPickerReading,
     ): FoodPickerUiState {
         val trimmed = text.trim()
         val filter = sourceId?.let(FoodSource::fromId)
         val isRecent = trimmed.isEmpty() && filter == null
+        val recent = if (isRecent) reading.recent else emptyList()
+        val recentIds = recent.mapTo(mutableSetOf(), Food::id)
+        val results = reading.found.filterNot { it.id in recentIds }
         return FoodPickerUiState(
             query = text,
             sources = listOf<FoodSource?>(null) .plus(FoodSource.entries).map { option ->
@@ -183,15 +229,23 @@ internal class FoodPickerViewModel(
                     selected = option == filter,
                 )
             },
-            results = found.map(FoodPickerRowUiState::of),
+            recent = recent.map(FoodPickerRowUiState::of),
+            results = results.map(FoodPickerRowUiState::of),
             isRecent = isRecent,
+            recentTitle = FoodAddMessages.RECENT_SECTION,
             sectionTitle = if (isRecent) {
-                FoodAddMessages.RECENT_SECTION
+                FoodAddMessages.CATALOGUE_SECTION
             } else {
                 FoodAddMessages.RESULTS_SECTION
             },
+            /*
+             * Only when there is nothing at all. `Nothing logged yet` used to stand over a full
+             * catalogue, which is how a person concludes the picker is broken; now it can only
+             * appear when the head *and* the catalogue are both empty, and the catalogue is never
+             * empty — PRD_FOOD 9.1 seeds it before the first launch.
+             */
             emptyMessage = when {
-                found.isNotEmpty() -> null
+                recent.isNotEmpty() || results.isNotEmpty() -> null
                 isRecent -> FoodAddMessages.NOTHING_RECENT
                 else -> FoodAddMessages.NO_RESULTS
             },

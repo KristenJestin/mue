@@ -18,6 +18,8 @@ import fr.kristenjestin.mue.domain.model.LoggedAmount
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Quantity
+import fr.kristenjestin.mue.domain.model.RecipeDetail
+import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.Servings
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -50,6 +52,14 @@ internal data class FoodAddDraft(
     val kindId: String = FoodLogKind.FOOD.id,
     /** The catalogue entry chosen, resolved against the repository rather than copied here. */
     val foodId: String? = null,
+    /**
+     * FR-FOOD-004: the recipe chosen, resolved against the repository exactly as [foodId] is.
+     *
+     * An id and not a `RecipeDetail`, for the reason the food is an id: a recipe corrected between
+     * being chosen and being logged has to be quoted as it is now, and an aggregate with its
+     * ingredients cannot cross a `Bundle`.
+     */
+    val recipeId: String? = null,
     /** ISO-8601. PRD_FOOD 15 refuses a future day, and the sheet is opened on a day already. */
     val consumedOn: String = "",
     /** `HH:mm` (PRD_FOOD 10.3), stored to the minute like the line it becomes. */
@@ -108,6 +118,8 @@ internal data class FoodAddDraft(
 
     val food: FoodId? get() = foodId?.let(::FoodId)
 
+    val recipe: RecipeId? get() = recipeId?.let(::RecipeId)
+
     val entry: FoodLogEntryId? get() = entryId?.let(::FoodLogEntryId)
 
     val isEditing: Boolean get() = entryId != null
@@ -157,6 +169,7 @@ internal data class FoodAddDraft(
     fun backToPaths(): FoodAddDraft = copy(
         kindId = FoodLogKind.FOOD.id,
         foodId = null,
+        recipeId = null,
         quantity = "",
         portionThousandths = null,
         weighedCooked = false,
@@ -233,6 +246,14 @@ internal data class FoodAddDraft(
                 entryId = entry.id.value,
                 kindId = entry.kind.id,
                 foodId = entry.foodRef?.value,
+                /*
+                 * FR-FOOD-008: the recipe a stored line came from is **not** put back in the
+                 * draft. PRD_FOOD 8.4 froze this line's values and PRD_FOOD 11 makes a recipe
+                 * edit non-retroactive, so a correction rescales the snapshot it carries; loading
+                 * the recipe here would quietly recompute the line against a preparation that may
+                 * have changed since.
+                 */
+                recipeId = null,
                 consumedOn = entry.consumedOn.toString(),
                 consumedAt = format(entry.consumedAt),
                 slotId = entry.slot.id,
@@ -399,6 +420,48 @@ internal fun FoodAddDraft.quickNutrientsOrNull(): Nutrients? =
         ?.nutrients
 
 /**
+ * The recipe a **new** line is being built from, with the catalogue its ingredients name.
+ *
+ * The two travel together for `RecipeDetailViewModel`'s reason: a detail and a catalogue read a
+ * frame apart would print `—` over a figure that is known. A food that is simply absent is not an
+ * error — PRD_FOOD 21.2 makes it the ordinary way a recipe arrives before the food it references
+ * — and its contribution is unknown, which the strict sum of PRD_FOOD 13.1 already propagates.
+ *
+ * Nothing here adds anything up: [NutritionMath] owns every figure, and this only says which
+ * aggregate to ask it about.
+ */
+internal data class FoodAddRecipe(
+    val detail: RecipeDetail,
+    val foods: Map<FoodId, Food> = emptyMap(),
+) {
+    val id: RecipeId get() = detail.id
+
+    val name: String get() = detail.recipe.name
+
+    val baseServings: Int get() = detail.recipe.baseServings
+
+    /** PRD_FOOD 13.1: `valeur par portion = total de la recette / baseServings`. */
+    val perServing: Nutrients get() = NutritionMath.perServing(detail, foods)
+
+    /** PRD_FOOD 13.1: `ligne RECIPE = valeur par portion × portions consommées`. */
+    fun line(servings: Servings): Nutrients =
+        NutritionMath.recipeLine(detail, foods, servings)
+}
+
+/**
+ * FR-FOOD-004: what a new recipe line is worth, or null while the servings do not parse.
+ *
+ * The counterpart of [recipeNutrientsOrNull], and deliberately a different function: that one
+ * rescales a snapshot a line already carries (PRD_FOOD 8.4), this one computes a snapshot that
+ * does not exist yet from the recipe as it is right now.
+ */
+internal fun FoodAddDraft.newRecipeNutrientsOrNull(recipe: FoodAddRecipe?): Nutrients? {
+    val chosen = recipe ?: return null
+    val eaten = FoodValidation.validateConsumedServings(servings).valueOrNull ?: return null
+    return chosen.line(eaten)
+}
+
+/**
  * FR-FOOD-008 on a recipe line: the frozen snapshot rescaled to the servings now stated.
  *
  * PRD_FOOD 8.4 keeps a line's values as they were saved and PRD_FOOD 11 makes a recipe edit
@@ -426,6 +489,8 @@ internal fun FoodAddDraft.resolve(
     food: Food?,
     original: FoodLogEntry?,
     today: LocalDate,
+    /** FR-FOOD-004: the recipe a new line is being built from, null on every other path. */
+    recipe: FoodAddRecipe? = null,
     id: FoodLogEntryId = FoodLogEntryId.random(),
 ): FoodAddResolution {
     val day = date(today)
@@ -494,24 +559,61 @@ internal fun FoodAddDraft.resolve(
             )
         }
 
+        /*
+         * FR-FOOD-004 and FR-FOOD-008, in that order, because they are two different lines.
+         *
+         * A **new** line is computed from the recipe as it stands now: `NutritionMath.recipeLine`
+         * over the aggregate and the catalogue behind it. A **correction** rescales the snapshot
+         * the stored line already carries — PRD_FOOD 8.4 froze those values and PRD_FOOD 11 makes
+         * a recipe edit non-retroactive, so reopening the recipe would silently rewrite history.
+         *
+         * The correction is tried first, so a line being edited can never be recomputed even if
+         * a recipe happens to be loaded. Reaching neither means a recipe line with nothing behind
+         * it, which is the state the sheet used to be able to enter and cannot any longer: `Use a
+         * recipe` now chooses one before this stage exists.
+         */
         FoodLogKind.RECIPE -> {
-            val previous = original ?: return refuse(FoodAddErrors.EMPTY)
             val eaten = when (val parsed = FoodValidation.validateConsumedServings(servings)) {
                 is Validated.Invalid -> return refuse(FoodAddErrors(servings = parsed.message))
                 is Validated.Valid -> parsed.value
             }
-            val rescaled = recipeNutrientsOrNull(previous)
-                ?: return refuse(FoodAddErrors(servings = FoodValidation.CONSUMED_SERVINGS_ERROR))
             val amount = LoggedAmount.Portioned(eaten)
-            line(
-                kind = FoodLogKind.RECIPE,
-                title = previous.title,
-                amount = amount,
-                nutrients = rescaled,
-                estimation = previous.estimation,
-                amountLabel = FoodLabels.amountLabel(amount),
-                sourceRef = previous.sourceRef,
-            )
+
+            when {
+                original != null -> {
+                    val rescaled = recipeNutrientsOrNull(original) ?: return refuse(
+                        FoodAddErrors(servings = FoodValidation.CONSUMED_SERVINGS_ERROR),
+                    )
+                    line(
+                        kind = FoodLogKind.RECIPE,
+                        title = original.title,
+                        amount = amount,
+                        nutrients = rescaled,
+                        estimation = original.estimation,
+                        amountLabel = FoodLabels.amountLabel(amount),
+                        sourceRef = original.sourceRef,
+                    )
+                }
+
+                recipe != null -> line(
+                    kind = FoodLogKind.RECIPE,
+                    title = recipe.name,
+                    amount = amount,
+                    nutrients = recipe.line(eaten),
+                    /*
+                     * PRD_FOOD 8.4 names two approximate lines: a quick add, and a recipe holding
+                     * an approximate ingredient. A `Food` carries no estimation of its own, so a
+                     * recipe assembled from catalogue entries is measured — and an ingredient
+                     * whose food is missing contributes an *unknown*, which the strict sum of
+                     * PRD_FOOD 13.1 propagates as `—` rather than as an approximation.
+                     */
+                    estimation = Estimation.MEASURED,
+                    amountLabel = FoodLabels.amountLabel(amount),
+                    sourceRef = recipe.id.value,
+                )
+
+                else -> refuse(FoodAddErrors.EMPTY)
+            }
         }
 
         FoodLogKind.FOOD -> {

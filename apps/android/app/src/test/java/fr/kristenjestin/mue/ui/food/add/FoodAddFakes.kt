@@ -51,13 +51,25 @@ internal class RecordingFoodCatalogueRepository(
         return recentState.map { it.take(limit) }
     }
 
+    /**
+     * The two patterns the Room implementation really sends, applied in Kotlin.
+     *
+     * The ligature variant is reproduced rather than ignored because a screen depends on it —
+     * `boeuf` has to reach a row stored as `bœuf saute` — and a fake that folded only one way
+     * would let that rule pass untested here and be wrong on the phone.
+     */
     override fun search(query: String, source: FoodSource?, limit: Int): Flow<List<Food>> {
         searches += Triple(query, source, limit)
         val folded = Food.fold(query)
+        val alternate = Food.ligatureVariantOf(folded)
         return state.map { all ->
             all.asSequence()
                 .filter { source == null || it.source == source }
-                .filter { folded.isEmpty() || it.nameFolded.contains(folded) }
+                .filter {
+                    folded.isEmpty() ||
+                        it.nameFolded.contains(folded) ||
+                        it.nameFolded.contains(alternate)
+                }
                 .take(limit)
                 .toList()
         }

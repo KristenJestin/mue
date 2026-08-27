@@ -17,6 +17,7 @@ import fr.kristenjestin.mue.domain.model.Quantity
 import fr.kristenjestin.mue.domain.model.ReferenceUnit
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.ui.food.day.FoodDayPreviewData
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -346,13 +347,41 @@ internal fun previewLateBreakfastState(): FoodAddUiState = FoodAddUiState.of(
     today = FoodAddPreviewData.TODAY,
 )
 
-/** The picker on an empty search: what was logged most recently (PRD_FOOD 9.4). */
+/**
+ * The picker on an empty search: what was logged most recently, **and the catalogue under it**
+ * (PRD_FOOD 9.4).
+ *
+ * The two lists are disjoint here for the reason the ViewModel de-duplicates them: a food drawn
+ * under both headings would be two cards for one food, and two nodes answering to one test tag.
+ */
 internal fun previewPickerState(): FoodPickerUiState = FoodPickerUiState(
     query = "",
     sources = sourceFilters(null),
+    recent = listOf(FoodAddPreviewData.apple()).map(FoodPickerRowUiState::of),
+    results = FoodAddPreviewData.catalogue()
+        .filterNot { it.id == FoodAddPreviewData.apple().id }
+        .map(FoodPickerRowUiState::of),
+    isRecent = true,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
+    sectionTitle = FoodAddMessages.CATALOGUE_SECTION,
+    emptyMessage = null,
+)
+
+/**
+ * The same screen on a phone that has logged nothing yet.
+ *
+ * The head is empty and the catalogue is not, which is the whole of the first defect: 1 038
+ * seeded entries were hidden behind `Nothing logged yet` because the recents were read as the
+ * list rather than as its head.
+ */
+internal fun previewPickerNothingLoggedState(): FoodPickerUiState = FoodPickerUiState(
+    query = "",
+    sources = sourceFilters(null),
+    recent = emptyList(),
     results = FoodAddPreviewData.catalogue().map(FoodPickerRowUiState::of),
     isRecent = true,
-    sectionTitle = FoodAddMessages.RECENT_SECTION,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
+    sectionTitle = FoodAddMessages.CATALOGUE_SECTION,
     emptyMessage = null,
 )
 
@@ -360,10 +389,52 @@ internal fun previewPickerState(): FoodPickerUiState = FoodPickerUiState(
 internal fun previewEmptyPickerState(): FoodPickerUiState = FoodPickerUiState(
     query = "sauerkraut ice cream",
     sources = sourceFilters(null),
+    recent = emptyList(),
     results = emptyList(),
     isRecent = false,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
     sectionTitle = FoodAddMessages.RESULTS_SECTION,
     emptyMessage = FoodAddMessages.NO_RESULTS,
+)
+
+/**
+ * The recipe picker with something to choose (FR-FOOD-004).
+ *
+ * It borrows `RecipePreviewData`'s own recipes rather than inventing three more: the picker and
+ * the `Recipes` view show the same objects, and two fixtures for one catalogue is how the two
+ * screens end up disagreeing about what a recipe looks like.
+ */
+internal fun previewRecipePickerState(): RecipePickerUiState = RecipePickerUiState(
+    query = "",
+    results = RecipePreviewData.recipes().map(RecipePickerRowUiState::of),
+    sectionTitle = FoodAddMessages.RECIPE_RESULTS_SECTION,
+    emptyMessage = null,
+    hasAnyRecipe = true,
+)
+
+/** PRD_FOOD 17: "aucune recette enregistrée" — the invitation, and no fake recipe. */
+internal fun previewEmptyRecipePickerState(): RecipePickerUiState = RecipePickerUiState(
+    query = "",
+    results = emptyList(),
+    sectionTitle = FoodAddMessages.RECIPE_RESULTS_SECTION,
+    emptyMessage = FoodAddMessages.NO_RECIPES,
+    hasAnyRecipe = false,
+)
+
+/**
+ * FR-FOOD-004 on the sheet: a recipe chosen, and the servings still to state.
+ *
+ * The figures under the field are `Per serving` until a count is typed, which is the recipe's
+ * answer to the per-100 card a food shows at the same moment.
+ */
+internal fun previewRecipeServingsState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft(MealSlot.DINNER).copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+        servings = "1.5",
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    today = FoodAddPreviewData.TODAY,
 )
 
 private fun sourceFilters(selected: FoodSource?): List<FoodSourceFilterUiState> =

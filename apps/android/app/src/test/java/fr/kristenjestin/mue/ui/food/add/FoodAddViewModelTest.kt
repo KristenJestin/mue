@@ -1,14 +1,20 @@
 package fr.kristenjestin.mue.ui.food.add
 
 import androidx.lifecycle.SavedStateHandle
+import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.logic.FoodValidation
+import fr.kristenjestin.mue.domain.logic.NutritionMath
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Quantity
+import fr.kristenjestin.mue.domain.model.RecipeDetail
+import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.ui.food.day.FakeFoodLogRepository
+import fr.kristenjestin.mue.ui.food.recipes.FakeRecipeRepository
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -267,6 +273,176 @@ class FoodAddViewModelTest {
 
     // endregion
 
+    // region logging a recipe (FR-FOOD-004)
+
+    /**
+     * The hand-off `Use a recipe` never had.
+     *
+     * The button used to change **view**, which closed the sheet and left the person on the
+     * recipe catalogue; the sheet had nowhere to put a recipe because there was no
+     * `onRecipeChosen` at all. Choosing one must now land here — on the servings stage, with the
+     * recipe on screen and the moment still the one the `+` was pressed in.
+     */
+    @Test
+    fun `choosing a recipe lands on the servings stage without losing the moment`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertEquals(FoodAddStage.SERVINGS, state.stage)
+        assertEquals(RecipePreviewData.LONGEST_NAME, assertNotNull(state.recipe).name)
+        assertEquals("Serves 2", state.recipe?.meta)
+        assertEquals(MealSlot.DINNER, state.slot)
+        assertEquals(TODAY, state.date)
+        // Nothing has been typed yet, so the figures are what one serving is worth.
+        assertEquals(FoodAddMessages.PER_SERVING_SECTION, assertNotNull(state.per100).header)
+    }
+
+    /**
+     * PRD_FOOD 13.1: `ligne RECIPE = valeur par portion × portions consommées`.
+     *
+     * The expected value is [NutritionMath]'s own answer rather than a number retyped here: the
+     * arithmetic belongs to the domain and is proved in `NutritionMathTest`, and what this asserts
+     * is that the sheet asked it about the right recipe and the right catalogue.
+     */
+    @Test
+    fun `a recipe line freezes what the servings are worth`() = addTest(
+        catalogue = RecipePreviewData.catalogue(),
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        add.viewModel.onServingsChange("1,5")
+        add.viewModel.save()
+        advanceUntilIdle()
+
+        val saved = add.logs.saved.single()
+        assertEquals(FoodLogKind.RECIPE, saved.kind)
+        assertEquals(RecipePreviewData.LONGEST_NAME, saved.title)
+        assertEquals(RecipePreviewData.SALMON_ID, saved.recipeRef)
+        assertEquals(MealSlot.DINNER, saved.slot)
+        assertEquals(
+            Servings.ofConsumedOrNull(1.5),
+            saved.consumedServings,
+        )
+        assertEquals(
+            NutritionMath.recipeLine(
+                RecipePreviewData.salmon(),
+                RecipePreviewData.catalogueById(),
+                assertNotNull(Servings.ofConsumedOrNull(1.5)),
+            ),
+            saved.nutrients,
+        )
+    }
+
+    /**
+     * PRD_FOOD 21.2 and 13.1 together: an ingredient whose food never arrived is unknown, and a
+     * strict sum makes the whole line unknown rather than short.
+     *
+     * `—`, never `≈ 0`. A recipe missing a third of its ingredients that reported the other two
+     * thirds as a total would be a number nobody could act on.
+     */
+    @Test
+    fun `a recipe with an unresolved ingredient saves unknown values, never zero`() = addTest(
+        catalogue = RecipePreviewData.catalogue(),
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.LUNCH, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.CURRY_ID)
+        advanceUntilIdle()
+
+        add.viewModel.onServingsChange("1")
+        add.viewModel.save()
+        advanceUntilIdle()
+
+        val saved = add.logs.saved.single()
+        assertNull(saved.nutrients.energy, "an unresolved ingredient was counted as zero")
+        assertEquals(FoodLabels.UNKNOWN, FoodLabels.energy(saved.nutrients.energy))
+    }
+
+    /** PRD_FOOD 15: the servings are bounded, and a refusal lands beside the field. */
+    @Test
+    fun `a servings count outside its range refuses the save beside the field`() = addTest(
+        catalogue = RecipePreviewData.catalogue(),
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        add.viewModel.onServingsChange("40")
+        add.viewModel.save()
+        advanceUntilIdle()
+
+        assertTrue(add.logs.saved.isEmpty())
+        assertEquals(
+            FoodValidation.CONSUMED_SERVINGS_ERROR,
+            state(add).errors.servings,
+        )
+    }
+
+    /** PRD_FOOD 7: a path chosen is a path that can be unchosen, the recipe included. */
+    @Test
+    fun `going back to the ways in lets go of the recipe`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+        add.viewModel.onServingsChange("2")
+
+        add.viewModel.onBackToPaths()
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertEquals(FoodAddStage.PATHS, state.stage)
+        assertNull(state.recipe)
+        assertEquals("", state.servings)
+    }
+
+    /** Two recipes are two amounts of food: a count typed against one must not survive the other. */
+    @Test
+    fun `choosing another recipe clears the servings typed against the first`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+        add.viewModel.onServingsChange("3")
+
+        add.viewModel.onRecipeChosen(RecipePreviewData.CURRY_ID)
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertEquals(RecipePreviewData.CURRY_NAME, assertNotNull(state.recipe).name)
+        assertEquals("", state.servings)
+    }
+
+    /** FR-FOOD-002 after FR-FOOD-004: a food chosen afterwards is a food line, not a recipe one. */
+    @Test
+    fun `choosing a food after a recipe leaves the recipe behind`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, MealSlot.DINNER, null)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        add.viewModel.onFoodChosen(FoodAddPreviewData.rice().id)
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertEquals(FoodAddStage.AMOUNT, state.stage)
+        assertNull(state.recipe)
+    }
+
+    // endregion
+
     // region correcting a line (FR-FOOD-008)
 
     @Test
@@ -518,6 +694,7 @@ class FoodAddViewModelTest {
         val viewModel: FoodAddViewModel,
         val logs: FakeFoodLogRepository,
         val foods: RecordingFoodCatalogueRepository,
+        val recipes: FakeRecipeRepository,
         val lookup: FakeProductLookup,
     )
 
@@ -528,16 +705,19 @@ class FoodAddViewModelTest {
     private fun addTest(
         entries: List<FoodLogEntry> = emptyList(),
         catalogue: List<Food> = FoodAddPreviewData.catalogue(),
+        recipes: List<RecipeDetail> = emptyList(),
         savedState: SavedStateHandle = SavedStateHandle(),
         lookup: FakeProductLookup = FakeProductLookup(),
         body: suspend TestScope.(Add) -> Unit,
     ) = runTest(mainDispatcher) {
         val logs = FakeFoodLogRepository(entries)
         val foods = RecordingFoodCatalogueRepository(catalogue)
+        val recipeStore = FakeRecipeRepository(recipes)
         val add = Add(
             viewModel = FoodAddViewModel(
                 logs = logs,
                 foods = foods,
+                recipes = recipeStore,
                 lookup = lookup,
                 savedState = savedState,
                 clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC),
@@ -545,6 +725,7 @@ class FoodAddViewModelTest {
             ),
             logs = logs,
             foods = foods,
+            recipes = recipeStore,
             lookup = lookup,
         )
 

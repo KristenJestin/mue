@@ -53,6 +53,35 @@ class FoodPickerScreenTest {
 
         compose.onNodeWithText(FoodAddMessages.RECENT_SECTION).assertIsDisplayed()
         compose.onNodeWithTag(FoodTestTags.SEARCH_RESULTS).assertIsDisplayed()
+        assertDrawn(rowTag(FoodAddPreviewData.apple()), FoodAddPreviewData.APPLE_NAME)
+    }
+
+    /**
+     * PRD_FOOD 9.4: the recently used sit **at the head of** the catalogue, not in place of it.
+     *
+     * Both headings are on screen at once, and the rows under the second one are the catalogue's.
+     */
+    @Test
+    fun theCatalogueIsDrawnUnderTheRecentlyUsed() {
+        show(previewPickerState())
+
+        compose.onNodeWithText(FoodAddMessages.RECENT_SECTION).assertIsDisplayed()
+        compose.onNodeWithText(FoodAddMessages.CATALOGUE_SECTION).assertIsDisplayed()
+        assertDrawn(rowTag(FoodAddPreviewData.rice()), FoodAddPreviewData.RICE_NAME)
+    }
+
+    /**
+     * The first defect, on the glass.
+     *
+     * A phone that has logged nothing has no recency, and that used to leave `Nothing logged yet`
+     * standing over a catalogue of 1 038 seeded foods. The head may be empty; the list is not.
+     */
+    @Test
+    fun aPhoneThatHasLoggedNothingStillSeesTheCatalogue() {
+        show(previewPickerNothingLoggedState())
+
+        compose.onNodeWithText(FoodAddMessages.NOTHING_RECENT).assertDoesNotExist()
+        compose.onNodeWithText(FoodAddMessages.CATALOGUE_SECTION).assertIsDisplayed()
         assertDrawn(rowTag(FoodAddPreviewData.rice()), FoodAddPreviewData.RICE_NAME)
     }
 
@@ -135,10 +164,21 @@ class FoodPickerScreenTest {
         assertEquals(1, created)
     }
 
-    /** Nothing logged yet is a different fact, and offers no creation of its own. */
+    /**
+     * Nothing logged yet is a different fact, and offers no creation of its own.
+     *
+     * It can only be reached with the catalogue empty as well, which on a seeded phone never
+     * happens — the state is built by hand here precisely because the app cannot produce it.
+     */
     @Test
     fun nothingLoggedYetSaysSoWithoutOfferingACreation() {
-        show(previewPickerState().copy(results = emptyList(), emptyMessage = FoodAddMessages.NOTHING_RECENT))
+        show(
+            previewPickerState().copy(
+                recent = emptyList(),
+                results = emptyList(),
+                emptyMessage = FoodAddMessages.NOTHING_RECENT,
+            ),
+        )
 
         compose.onNodeWithText(FoodAddMessages.NOTHING_RECENT).assertIsDisplayed()
         compose.onNodeWithTag(FoodTestTags.CREATE_FOOD).assertDoesNotExist()

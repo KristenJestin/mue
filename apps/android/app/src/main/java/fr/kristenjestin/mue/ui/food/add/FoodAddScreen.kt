@@ -383,6 +383,14 @@ private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
         }
 
         FoodAddStage.SERVINGS -> {
+            /*
+             * FR-FOOD-004: the recipe card sits where the food card sits, and taps back to the
+             * picker the same way. On a **correction** there is no recipe card — FR-FOOD-008
+             * rescales the snapshot the line carries and never reopens the recipe — so the
+             * section below stands alone, exactly as it did before this stage could be reached
+             * from the ways in.
+             */
+            ChosenRecipe(state, actions)
             ServingsSection(state, actions)
             Figures(state)
             MomentSection(state, actions)
@@ -1020,7 +1028,81 @@ private fun QuickAddSection(state: FoodAddUiState, actions: FoodAddActions) {
     }
 }
 
-/** FR-FOOD-008 on a recipe line: the servings eaten, rescaled from the frozen snapshot. */
+/**
+ * FR-FOOD-004: the recipe this line is being built from, and the way back to the picker.
+ *
+ * The same card as [ChosenFood] with the same gesture on it, because it is the same decision seen
+ * on the other path — and because tapping the chosen thing to change it is a habit worth keeping
+ * across the two ways in. Absent while a stored line is being corrected: that sheet has no picker
+ * behind it to return to.
+ */
+@Composable
+private fun ChosenRecipe(state: FoodAddUiState, actions: FoodAddActions) {
+    val recipe = state.recipe ?: return
+    val colors = MueTheme.colors
+    MueSurfaceCard(
+        modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.CHOSEN_RECIPE),
+        shape = MueTheme.shapes.card,
+        contentPadding = PaddingValues(MueTheme.spacing.xl),
+        onClick = actions.onUseRecipe,
+        onClickLabel = FoodAddMessages.CHANGE_RECIPE,
+    ) {
+        MueSplitRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clearAndSetSemantics { contentDescription = recipe.description },
+            gap = MueTheme.spacing.md,
+            stackedGap = MueTheme.spacing.sm,
+            start = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.lg),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(MueMinTouchTarget)
+                            .clip(MueTheme.shapes.field)
+                            .background(colors.accentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        MueIcon(
+                            iconName = recipe.iconName,
+                            tint = colors.onAccentSoft,
+                            size = 18.dp,
+                        )
+                    }
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
+                    ) {
+                        // Never capped: PRD_FOOD 15 lets a recipe name run to 80 characters.
+                        MueText(recipe.name, MueTheme.typography.bodyStrong)
+                        MueText(
+                            recipe.meta,
+                            MueTheme.typography.micro,
+                            color = colors.textTertiary,
+                        )
+                    }
+                }
+            },
+            end = {
+                MueIcon(
+                    iconName = MueIcons.CHEVRON_RIGHT,
+                    tint = colors.textTertiary,
+                    size = 16.dp,
+                )
+            },
+        )
+    }
+}
+
+/**
+ * The servings of a recipe line (FR-FOOD-004 and 008).
+ *
+ * The footnote says which of the two lines this is, because the two compute their values from
+ * different places and a reader is owed the difference: a **new** line is computed from the
+ * recipe's ingredients as they stand, and a **correction** rescales the snapshot PRD_FOOD 8.4
+ * froze when the line was written.
+ */
 @Composable
 private fun ServingsSection(state: FoodAddUiState, actions: FoodAddActions) {
     FoodSectionCard(title = FoodAddMessages.SERVINGS_SECTION) {
@@ -1034,7 +1116,11 @@ private fun ServingsSection(state: FoodAddUiState, actions: FoodAddActions) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             )
             MueText(
-                text = FoodAddMessages.SERVINGS_FROZEN,
+                text = if (state.recipe != null) {
+                    FoodAddMessages.SERVINGS_FROM_RECIPE
+                } else {
+                    FoodAddMessages.SERVINGS_FROZEN
+                },
                 style = MueTheme.typography.micro,
                 color = MueTheme.colors.textQuiet,
             )
@@ -1396,6 +1482,25 @@ private fun FoodAddQuickPreview() {
     MuePreviewHost(padding = 0) {
         FoodAddScreen(
             state = previewQuickState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * FR-FOOD-004: a recipe chosen, and the servings still to state.
+ *
+ * What to look for: the recipe card where a food's card would be, the servings field under it,
+ * and figures that are the recipe's own — not a snapshot rescaled from a line that does not exist
+ * yet.
+ */
+@Preview(name = "Add food — a recipe", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodAddRecipePreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewRecipeServingsState(),
             actions = FoodAddActions(),
             modifier = Modifier.fillMaxSize(),
         )

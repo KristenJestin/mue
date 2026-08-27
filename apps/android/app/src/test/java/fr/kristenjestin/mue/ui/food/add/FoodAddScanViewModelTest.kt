@@ -6,6 +6,7 @@ import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.repository.LookupFailure
 import fr.kristenjestin.mue.domain.repository.ProductLookupResult
 import fr.kristenjestin.mue.ui.food.day.FakeFoodLogRepository
+import fr.kristenjestin.mue.ui.food.recipes.FakeRecipeRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -465,6 +466,7 @@ class FoodAddScanViewModelTest {
             viewModel = FoodAddViewModel(
                 logs = FakeFoodLogRepository(emptyList()),
                 foods = foods,
+                recipes = FakeRecipeRepository(),
                 lookup = lookup,
                 savedState = SavedStateHandle(),
                 clock = Clock.fixed(

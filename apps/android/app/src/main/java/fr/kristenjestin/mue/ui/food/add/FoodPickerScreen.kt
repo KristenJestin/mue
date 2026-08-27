@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -95,6 +97,11 @@ internal fun FoodPickerRoute(
 /**
  * The picker as it is drawn: one search bar, one source filter, one list (PRD_FOOD 9.4).
  *
+ * The list carries **two headings** when nothing has been typed — the recently used, then the
+ * catalogue they head — exactly as the `Foods` view draws the same two lists. It is one scroll and
+ * not two: the head is often short and often empty, and a second scrolling region for it would
+ * strand the catalogue below the fold.
+ *
  * The list is lazy because the catalogue is not small — 1 038 entries are seeded on first launch —
  * and because a search that matches half of them must still scroll like a list of ten.
  *
@@ -114,6 +121,26 @@ internal fun FoodPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
+    val list = rememberLazyListState()
+
+    /*
+     * Back to the top whenever this stops being the same list.
+     *
+     * `LazyColumn` re-anchors on the **key** of whatever was first visible, so an item inserted
+     * *above* that key scrolls itself out of sight instead of pushing the list down. The recents
+     * are read from the journal and land a frame after the catalogue does, which is exactly that
+     * case: the head appeared in the state, the `Catalogue` heading stayed pinned to the top, and
+     * the whole head sat above the viewport where nobody could see it. The `Foods` view never met
+     * this because its first three items — the title, the search and the filter — are always
+     * there, so its anchor cannot move.
+     *
+     * Resetting on the terms rather than on the rows is also the honest behaviour: a list that has
+     * become the answer to a different question starts at its own beginning, not in the middle of
+     * the last one.
+     */
+    LaunchedEffect(state.query, state.isRecent, state.hasRecent) {
+        list.scrollToItem(0)
+    }
 
     MueSubScreenScaffold(
         title = FoodAddMessages.PICKER_TITLE,
@@ -152,14 +179,8 @@ internal fun FoodPickerScreen(
             modifier = Modifier.padding(top = spacing.md),
         )
 
-        MueText(
-            text = state.sectionTitle,
-            style = MueTheme.typography.label,
-            color = MueTheme.colors.textTertiary,
-            modifier = Modifier.padding(top = spacing.lg, bottom = spacing.sm),
-        )
-
         LazyColumn(
+            state = list,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -167,6 +188,21 @@ internal fun FoodPickerScreen(
             verticalArrangement = Arrangement.spacedBy(spacing.sm),
             contentPadding = PaddingValues(bottom = spacing.xxxl),
         ) {
+            /*
+             * PRD_FOOD 9.4: the recently used head the list, they do not replace it. The heading
+             * is inside the scroll rather than above it so that the catalogue's own heading can
+             * follow the rows it belongs to — which is what the `Foods` view already does with
+             * the same two lists.
+             */
+            if (state.hasRecent) {
+                item(key = "recentTitle") { SectionTitle(state.recentTitle) }
+                items(items = state.recent, key = { "recent:${it.id}" }) { row ->
+                    FoodResultRow(row = row, onClick = { onPicked(FoodId(row.id)) })
+                }
+            }
+
+            item(key = "sectionTitle") { SectionTitle(state.sectionTitle) }
+
             items(items = state.results, key = { it.id }) { row ->
                 FoodResultRow(row = row, onClick = { onPicked(FoodId(row.id)) })
             }
@@ -204,6 +240,17 @@ internal fun FoodPickerScreen(
             }
         }
     }
+}
+
+/** The word over a run of rows, worded and spaced as the `Foods` view words and spaces its own. */
+@Composable
+private fun SectionTitle(title: String) {
+    MueText(
+        text = title,
+        style = MueTheme.typography.label,
+        color = MueTheme.colors.textTertiary,
+        modifier = Modifier.padding(top = MueTheme.spacing.md, bottom = MueTheme.spacing.xxs),
+    )
 }
 
 /**
@@ -346,6 +393,29 @@ private fun FoodPickerNarrowPreview() {
     MuePreviewHost(padding = 0) {
         FoodPickerScreen(
             state = previewPickerState(),
+            onQueryChange = {},
+            onClearQuery = {},
+            onSourceSelected = {},
+            onPicked = {},
+            onCreateFood = {},
+            onBack = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The picker on a phone that has never logged anything.
+ *
+ * What to look for: the catalogue, drawn. This is the state the first defect was reported from,
+ * and the head being empty is not a reason to show nothing.
+ */
+@Preview(name = "Food picker — nothing logged yet", showBackground = true, backgroundColor = 0xFF101012, heightDp = 800)
+@Composable
+private fun FoodPickerNothingLoggedPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodPickerScreen(
+            state = previewPickerNothingLoggedState(),
             onQueryChange = {},
             onClearQuery = {},
             onSourceSelected = {},
