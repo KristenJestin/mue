@@ -49,6 +49,30 @@ services:
       retries: 5
       start_period: 30s
 
+  # Browsing the data with your eyes, which is the only way to answer "did the
+  # weight actually arrive?" without writing a script for it.
+  #
+  # Development only, and it never reaches production: the deployment file
+  # carries no such service, and this one binds to loopback like the database
+  # it reads (§22.5). It connects as the limited `mue` role, not as the owner,
+  # so what you can see here is exactly what the application can see.
+  adminer:
+    image: adminer:5
+    container_name: mue-dev-adminer
+    restart: unless-stopped
+    ports:
+      - "${MUE_ADMINER_BIND:-127.0.0.1}:${MUE_ADMINER_PORT:-8081}:8080"
+    environment:
+      # Pre-fills the login form: server, user and database. The password is
+      # deliberately not injected — Adminer has no env var for it, and a
+      # password in a compose file is a password in your shell history.
+      ADMINER_DEFAULT_SERVER: postgres:5432
+      ADMINER_DEFAULT_DRIVER: pgsql
+      ADMINER_DESIGN: dracula
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
     name: ${MUE_DB_VOLUME:-mue-dev-pgdata}

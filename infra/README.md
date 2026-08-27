@@ -148,3 +148,31 @@ configuration and the secrets needed for a restore are backed up by the
 server's own documented procedure, and a restore is exercised on a clean
 install. The development volume is disposable by design and is backed up by
 nothing.
+
+## Voir les données à l'œil (développement)
+
+`docker compose -f infra/compose.dev.yml up -d` démarre aussi **Adminer** sur
+<http://127.0.0.1:8081>, en boucle locale comme la base qu'il lit.
+
+Il se connecte avec le rôle limité `mue`, pas avec le propriétaire : ce que
+l'écran montre est exactement ce que l'application peut voir. Le mot de passe
+n'est pas pré-rempli — Adminer n'a pas de variable pour ça, et un mot de passe
+dans un fichier de composition est un mot de passe dans l'historique du shell.
+
+| Champ | Valeur |
+|---|---|
+| Système | PostgreSQL |
+| Serveur | `postgres:5432` |
+| Utilisateur | la valeur de `MUE_DB_ROLE` dans `.env` |
+| Mot de passe | la valeur de `MUE_DB_PASSWORD` |
+| Base | la valeur de `POSTGRES_DB` |
+
+Les tables métier sont dans le schéma `mue_app`, l'authentification dans
+`mue_auth`. Pour vérifier qu'une pesée est bien arrivée :
+
+```sql
+select date, weight_cg, revision, origin_type from mue_app.measurement order by date desc;
+```
+
+Ce service n'existe qu'en développement : le fichier de déploiement n'en porte
+aucun équivalent.
