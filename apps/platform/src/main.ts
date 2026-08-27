@@ -77,9 +77,30 @@ async function serveAsset(pathname: string): Promise<Response | null> {
   });
 }
 
+/**
+ * How long a connection may say nothing before Bun closes it.
+ *
+ * Bun's default is ten seconds, which is right for request/response and wrong for
+ * `GET /api/v1/sync/events` — the live channel of sync PRD 9.4 holds one response
+ * open for as long as the phone is in the foreground and writes only when the
+ * journal moves. Left at the default it died at ten seconds every time, and the
+ * failure was invisible from the client: the greeting arrived, so the connection
+ * looked healthy, and the phone simply stopped hearing about changes until its
+ * socket timed out and it reconnected.
+ *
+ * Sixty seconds is three times the channel's own heartbeat
+ * (`HEARTBEAT_INTERVAL_MS` in `@mue/api`), so two lost comments are tolerated
+ * before the transport gives up, and it is the same order as the idle timeout a
+ * reverse proxy in front of this process would apply anyway (section 20.5). It is
+ * not infinite: a connection that has genuinely gone away must still be reclaimed,
+ * and it is the heartbeat that proves one has not.
+ */
+const IDLE_TIMEOUT_SECONDS = 60;
+
 const server = Bun.serve({
   port,
   hostname,
+  idleTimeout: IDLE_TIMEOUT_SECONDS,
   ...tlsOption,
   fetch: async (request) => {
     const { pathname } = new URL(request.url);

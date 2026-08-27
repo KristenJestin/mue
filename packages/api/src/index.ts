@@ -8,6 +8,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 export { createApiApp, type ApiOptions } from "./app";
 export { mountAuthRoutes, requireSession, type AuthedEnv, type AuthVariables } from "./auth-routes";
 export { createSyncRoutes, syncErrorHandler, type SyncRouteOptions } from "./sync";
+export {
+  createSyncEventRoutes,
+  HEARTBEAT_INTERVAL_MS,
+  MAX_STREAM_MS,
+  POLL_INTERVAL_MS,
+  type SyncEventRouteOptions,
+} from "./sync-events";
 
 /**
  * The MCP endpoint is mounted in a later phase. Both dependency surfaces are bound
