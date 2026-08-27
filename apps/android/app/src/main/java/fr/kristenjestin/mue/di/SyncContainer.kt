@@ -17,15 +17,18 @@ import fr.kristenjestin.mue.data.remote.sync.SyncApi
 import fr.kristenjestin.mue.data.remote.sync.SyncEventStream
 import fr.kristenjestin.mue.data.sync.HealthProfileSeeding
 import fr.kristenjestin.mue.data.sync.LiveSyncChannel
+import fr.kristenjestin.mue.data.sync.PushOnWrite
 import fr.kristenjestin.mue.data.sync.RoomSyncStore
 import fr.kristenjestin.mue.data.sync.SyncEngine
 import fr.kristenjestin.mue.data.sync.SyncOutbox
+import fr.kristenjestin.mue.data.sync.SyncScheduler
 import fr.kristenjestin.mue.data.sync.SyncStore
 import fr.kristenjestin.mue.data.sync.SyncTokenStore
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Everything server synchronisation needs, registered in one place.
@@ -36,8 +39,11 @@ import kotlinx.coroutines.SupervisorJob
  *
  * Lazy for the same reason as everything in [AppContainer]: a cold start that never
  * synchronises must not pay for a database handle, a Keystore lookup or an HTTP client.
- * [outbox] is the one exception — it owns nothing but a UUID generator and a clock, so there is
- * nothing to defer, and the measurement repository needs it on the very first save.
+ * [outbox] is the one exception — it owns a UUID generator, a clock and a flow with nothing in
+ * it, so there is nothing to defer, and the measurement repository needs it on the very first
+ * save. The collector started beside it in `init` is the second half of that: it has to be
+ * listening *before* the first row can be minted, and building this container is the only event
+ * that is guaranteed to happen first.
  *
  * [engine] is laziest of all, and deliberately so: constructing it is what runs the `inflight`
  * recovery, so "engine start" happens when a synchronisation is actually about to be attempted
@@ -49,6 +55,50 @@ class SyncContainer(
 ) {
     /** Mints the outbox row a local write journals in its own transaction (FR-SYNC-001). */
     val outbox: SyncOutbox = SyncOutbox()
+
+    /**
+     * Where PRD 9.4's missing trigger is wired: **a local write schedules a send.**
+     *
+     * ## Why here
+     *
+     * `SyncOutbox` is the one place that knows a row was minted, and it must stay free of
+     * Android to keep the JVM tests that assert on the exact rows it builds. This file is the
+     * nearest place that already holds an application context and already owns process-wide
+     * lifetimes. So the outbox announces on a flow, and the two lines below turn that
+     * announcement into `SyncScheduler.syncNow` — the same constrained one-shot the application
+     * start and the foreground trigger enqueue, so the network and battery constraints of PRD 19
+     * are inherited rather than restated. An unpaired or offline phone therefore schedules
+     * nothing that spins: WorkManager holds the request until a network exists, and the worker
+     * answers `NotPaired` with a success.
+     *
+     * ## Why it starts in `init` rather than being started by `MueApplication`
+     *
+     * Because that is what makes the ordering impossible to get wrong. A mutation can only be
+     * minted through [outbox], [outbox] can only be reached through this container, and this
+     * container cannot exist without having run this block — so there is no window in which a
+     * save is journalled with nobody listening. Starting it from `MueApplication.onCreate`
+     * instead would read better and be one refactor away from a first save that goes nowhere.
+     *
+     * It costs one coroutine that spends its entire life suspended on a flow with no value in
+     * it, and no work at all in a process that never writes.
+     */
+    private val pushOnWrite = PushOnWrite(
+        minted = outbox.minted,
+        schedule = { SyncScheduler.syncNow(applicationContext) },
+    )
+
+    /**
+     * The collector's home. Separate from [engineScope]: this one must survive a cancelled
+     * synchronisation, and a shared job would let one failure take the other down.
+     *
+     * `Dispatchers.Default` and not `Main`: it waits out the quiet window and then hands
+     * WorkManager a request, and neither has any business on the frame loop.
+     */
+    private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    init {
+        writeScope.launch { pushOnWrite.run() }
+    }
 
     /** The outbox, the remote identity of each aggregate, and the single `sync_state` row. */
     val syncDao: SyncDao by lazy { database.syncDao() }
