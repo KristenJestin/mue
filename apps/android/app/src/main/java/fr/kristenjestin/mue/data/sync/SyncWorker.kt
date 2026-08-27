@@ -74,7 +74,12 @@ object SyncScheduler {
 
     /** The unique name the period is registered under. Public so a test can go and read it. */
     const val PERIODIC_WORK: String = "mue.sync.periodic"
-    private const val ONE_SHOT_WORK = "mue.sync.now"
+    /**
+     * The unique name every one-shot is registered under. Public for the same reason
+     * [PERIODIC_WORK] is: `SyncSchedulerCollapseTest` has to read the queue this names to prove
+     * that a burst of enqueues leaves one request behind and not forty.
+     */
+    const val ONE_SHOT_WORK: String = "mue.sync.now"
 
     /**
      * How long the phone may stay wrong while nobody is looking at it.
@@ -147,7 +152,15 @@ object SyncScheduler {
     }
 
     /**
-     * `Sync now`, the initial association and the return to the foreground (PRD 9.4).
+     * `Sync now`, the initial association, the return to the foreground (PRD 9.4) — and, since
+     * [PushOnWrite], the local write that PRD 9.4 forgot to list.
+     *
+     * The last of those is the reason `REPLACE` is now load-bearing rather than merely tidy, so
+     * it is worth stating what it does and does not buy. It collapses any number of pending
+     * requests into one: `SyncSchedulerCollapseTest` enqueues forty in a row on a device and
+     * finds a single work info. What it does not do is spare a run that has already started —
+     * `REPLACE` cancels it — which is why the write trigger holds its own quiet window and hands
+     * this one request per burst rather than leaning on the policy to sort out forty.
      *
      * `REPLACE` because the newest request is the one the user is waiting on, and because two
      * concurrent runs would be serialised by the engine's own gate anyway — replacing is honest
