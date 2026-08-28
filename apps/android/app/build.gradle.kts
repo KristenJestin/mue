@@ -34,6 +34,31 @@ android {
                 signingConfig = signingConfigs.getByName("debug")
             }
         }
+
+        /*
+         * The build the owner actually carries: `release`'s speed with `debug`'s trust store.
+         *
+         * A debug build is not what the app feels like. Measured over 24 tab switches on one
+         * device: debug spends 13–29 frames past 64 ms with a worst case of 81–200 ms, while the
+         * same source under R8 spends 0–1 and never passes 100 ms. The half-second before a tab
+         * moves is unoptimised, un-precompiled code, not the layout.
+         *
+         * But `release` cannot reach his server: the network security config that trusts a
+         * user-installed authority lives in the `debug` source set on purpose, so a shipped build
+         * only ever trusts the platform store. Judging the speed then costs the synchronisation,
+         * and judging the synchronisation costs the speed.
+         *
+         * `local` initialises from `release` — minified, shrunk, R8'd, baseline profile and all —
+         * and adds only the debug source set's `res/xml` and manifest overlay. Production is
+         * untouched: `release` is still built from `main` + `release` alone, and this variant is
+         * signed with the debug key, so it can never be published.
+         */
+        create("local") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = null
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
@@ -59,6 +84,22 @@ android {
     // writes them to has to ship as an androidTest asset.
     sourceSets.getByName("androidTest") {
         assets.srcDirs(files("$projectDir/schemas"))
+    }
+
+    /*
+     * `local` reads the `debug` source set rather than owning a copy of it.
+     *
+     * The only thing it needs from there is the manifest overlay contributing
+     * `android:networkSecurityConfig` and the `res/xml` it points at — the two files that let a
+     * build trust a user-installed authority, and therefore reach a server whose certificate no
+     * public CA would ever issue. Copying them would be two files free to drift, and the drift
+     * would show up as a phone that pairs on one build and refuses on the other.
+     *
+     * Pointed, not copied, so `debug` and `local` cannot disagree about what they trust.
+     */
+    sourceSets.getByName("local") {
+        manifest.srcFile("src/debug/AndroidManifest.xml")
+        res.srcDirs(files("src/debug/res"))
     }
 
     packaging {
