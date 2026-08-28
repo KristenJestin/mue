@@ -43,6 +43,14 @@ beforeEach(async () => {
 interface Profile {
   heightCm: number | null;
   birthDate: string | null;
+  /**
+   * Optional and never null, exactly as the wire has it (PRD_SCALE FR-PROFILE-007).
+   *
+   * A test helper that allowed `sex: null` would let this file assert a payload no client can
+   * send and the schema refuses — and the interesting cases below all turn on the difference
+   * between a stated value and a missing key.
+   */
+  sex?: "female" | "male";
 }
 
 function profileUpsert(
@@ -95,6 +103,22 @@ async function stored(): Promise<
     .from(healthProfile)
     .where(eq(healthProfile.userId, USER));
   return rows[0];
+}
+
+/**
+ * The stored sex on its own, as its own column holds it.
+ *
+ * Separate from [stored] rather than folded into it, because the two answer different
+ * questions: `stored` is the aggregate the merge produced, and this is the one conversion
+ * PRD_SCALE 22 forced — an optional key on the wire, a nullable column in PostgreSQL. Reading it
+ * apart is also what keeps every assertion written before this field existed meaningful.
+ */
+async function storedSex(): Promise<string | null | undefined> {
+  const rows = await handle.db
+    .select({ sex: healthProfile.sex })
+    .from(healthProfile)
+    .where(eq(healthProfile.userId, USER));
+  return rows[0]?.sex;
 }
 
 /** Every profile snapshot the journal holds, oldest first. This is the audit trail. */
@@ -507,6 +531,147 @@ describe("section 16 — the profile is personal data", () => {
     await submit(profileUpsert({ heightCm: 19, birthDate: "1998-11-18" }, null));
     expect(await stored()).toBeUndefined();
     expect(await auditedVersions()).toEqual([]);
+  });
+});
+
+/**
+ * PRD_SCALE 22 — *"le sexe rejoint l'agrégat `HealthProfile`"*, under section 13.4's
+ * field-by-field merge and nothing else.
+ *
+ * The field is optional where its two neighbours are nullable, because it arrives after every
+ * client that speaks this contract was written. That difference is the whole risk: a build that
+ * has never heard of `sex` sends a complete payload without one, and the naive merge reads that
+ * as an erasure. The tests below are the two halves of the answer — absence is stable when
+ * nobody stated anything, and it is an edit when the author was looking at a version that had
+ * one.
+ */
+describe("PRD_SCALE 22 — the sex joins the profile", () => {
+  test("is stored, and comes back down as the key it was sent as", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18", sex: "male" }, null));
+
+    expect(await storedSex()).toBe("male");
+    expect(await auditedVersions()).toEqual([
+      { heightCm: 171, birthDate: "1998-11-18", sex: "male" },
+    ]);
+
+    const response = await pull(null);
+    if (response.status !== "ok") throw new Error("expected a page");
+    expect(response.changes.at(-1)?.payload).toEqual({
+      heightCm: 171,
+      birthDate: "1998-11-18",
+      sex: "male",
+    });
+  });
+
+  /**
+   * The regression the round trip is about, on this aggregate.
+   *
+   * A merge that returned only `{heightCm, birthDate}` would journal a payload that is
+   * *complete and empty of the sex the author had just stated*, and the phone that sent it would
+   * apply its own echo as an erasure on the next pull. There would be no error and no conflict —
+   * only a field that never sticks, on every device, for ever.
+   */
+  test("an unstated sex is an absent key and never a null", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null));
+
+    expect(await storedSex()).toBeNull();
+    // `sexSchema` is `.optional()` and refuses null, and `pull` re-parses every journalled
+    // change: a snapshot carrying `sex: null` would stop the cursor on a change the server
+    // itself wrote. So the key has to be absent, not present and empty.
+    const [snapshot] = await auditedVersions();
+    expect(snapshot).not.toHaveProperty("sex");
+    expect(await pull(null)).toMatchObject({ status: "ok" });
+  });
+
+  /**
+   * The trap, and the reason no special case was needed to avoid it.
+   *
+   * The laptop sets a sex. The phone has been offline since revision 1, has never received it,
+   * and its build predates the field entirely — so it sends the complete aggregate as it knows
+   * it, with no `sex` key at all, quoting the revision it was editing. Both its payload and that
+   * base lack the field, so `incoming === base` between two absences and the stored value
+   * stands. The height it *did* move goes through in the same mutation.
+   */
+  test("a client that has never heard of `sex` preserves the one another device set", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(
+      profileUpsert({ heightCm: 171, birthDate: "1998-11-18", sex: "female" }, "1", LAPTOP),
+    );
+
+    await submit(profileUpsert({ heightCm: 172, birthDate: "1998-11-18" }, "1", PHONE));
+
+    expect(await stored()).toEqual({ heightCm: 172, birthDate: "1998-11-18", revision: 3n });
+    expect(await storedSex()).toBe("female");
+    // And the journal hands the phone back the profile it converges on, sex included.
+    expect(await auditedVersions()).toEqual([
+      { heightCm: 171, birthDate: "1998-11-18" },
+      { heightCm: 171, birthDate: "1998-11-18", sex: "female" },
+      { heightCm: 172, birthDate: "1998-11-18", sex: "female" },
+    ]);
+  });
+
+  /**
+   * The other half, which a blunt "an absent sex never means anything" rule would have broken.
+   * FR-PROFILE-007 makes the field optional and says an empty one is valid, so a person must be
+   * able to unset it — and they do it the way they clear a height: on a version they are looking
+   * at and whose revision their client quotes.
+   */
+  test("an author editing a version that had a sex can remove it", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: null, sex: "male" }, null, PHONE));
+
+    await submit(profileUpsert({ heightCm: 171, birthDate: null }, "1", PHONE));
+
+    expect(await storedSex()).toBeNull();
+    expect(await stored()).toEqual({ heightCm: 171, birthDate: null, revision: 2n });
+  });
+
+  /** With no base there is nothing to have been an edit *of*, so an absence protects instead. */
+  test("a device that has never seen the profile cannot remove its sex", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18", sex: "male" }, null));
+
+    await submit(profileUpsert({ heightCm: 180, birthDate: null }, null, LAPTOP));
+
+    expect(await storedSex()).toBe("male");
+    // The height is an assertion and still stands; the two rules are independent, field by field.
+    expect(await stored()).toEqual({ heightCm: 180, birthDate: "1998-11-18", revision: 2n });
+  });
+
+  /** Rule 3: two origins that really did both move the field, from the same base. */
+  test("a conflict on the sex follows the last accepted mutation and stays audited", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: null, sex: "male" }, null, PHONE));
+    await submit(profileUpsert({ heightCm: 171, birthDate: null, sex: "female" }, "1", PHONE));
+    await submit(profileUpsert({ heightCm: 171, birthDate: null }, "1", AGENT));
+
+    expect(await storedSex()).toBeNull();
+    expect(await auditedVersions()).toEqual([
+      { heightCm: 171, birthDate: null, sex: "male" },
+      { heightCm: 171, birthDate: null, sex: "female" },
+      { heightCm: 171, birthDate: null },
+    ]);
+  });
+
+  /** Three independent fields, three separate merges, one mutation each. */
+  test("the sex and the height merge separately from one base", async () => {
+    await submit(profileUpsert({ heightCm: 171, birthDate: "1998-11-18" }, null, PHONE));
+    await submit(profileUpsert({ heightCm: 180, birthDate: "1998-11-18" }, "1", PHONE));
+    await submit(
+      profileUpsert({ heightCm: 171, birthDate: "1998-11-18", sex: "female" }, "1", AGENT),
+    );
+
+    expect(await stored()).toEqual({ heightCm: 180, birthDate: "1998-11-18", revision: 3n });
+    expect(await storedSex()).toBe("female");
+  });
+
+  /** Section 16 again: a rejection may name the field and never what it held. */
+  test("no rejection quotes the sex it refused", async () => {
+    const results = await submit(
+      profileUpsert({ heightCm: 171, birthDate: "1998-11-18", sex: "other" as "male" }, null),
+    );
+
+    const error = refused(results[0]);
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.message).not.toContain("other");
+    expect(await stored()).toBeUndefined();
   });
 });
 
