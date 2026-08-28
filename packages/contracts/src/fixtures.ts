@@ -73,19 +73,65 @@ const FIFTH_SEQUENCE = "9007199254740997";
 
 const CURSOR = toBase64Url(JSON.stringify({ v: 1, seq: LARGE_SEQUENCE }));
 
+/**
+ * A weighing from a paired scale, carrying everything PRD_SCALE 22 added: the business
+ * provenance, the raw impedance, and the composition estimated from them.
+ *
+ * **The four estimates are computed, not invented.** They are what PRD_SCALE 13.2's published
+ * equations give for 78.45 kg at 171 cm, 27 years old, male, at 520 ohm — the profile
+ * `validHealthProfile` states, aged to the date of this weighing:
+ *
+ * ```text
+ * FFM   = 13.055 + 0.204×78.45 + 0.394×(171²/520) − 0.136×27 + 8.125×1 = 55.66748 kg → 5567 cg
+ * fat%  = (78.45 − 55.66748) / 78.45 × 100                             = 29.0408 %  →  290 ‰₁
+ * water = 55.66748 × 0.732 / 78.45 × 100                               = 51.9421 %  →  519 ‰₁
+ * REE   = 10×78.45 + 6.25×171 − 5×27 + 5                               = 1723.25    → 1723 kcal
+ * ```
+ *
+ * That is deliberate rather than decorative. PRD_SCALE 13.2 requires the Kotlin and the
+ * TypeScript implementations to produce **the same stored integers** for the same payload, and a
+ * fixture built from round invented numbers would round-trip exactly as green while agreeing with
+ * neither. These bytes are therefore also a test vector: an implementation that disagrees with
+ * them disagrees with the publication.
+ */
 const validMeasurement = {
   date: "2026-08-25",
   weightCg: 7_845,
+  sourceType: "scale",
+  impedanceOhm: 520,
+  bodyComposition: {
+    formulaId: "mue-foot-to-foot-v1",
+    formulaVersion: 1,
+    // Equal to `weightCg` above, and BR-SCALE-015 is why: a refinement in the payload schema
+    // makes any other value unrepresentable rather than merely wrong.
+    inputWeightCg: 7_845,
+    inputHeightCm: 171,
+    inputAgeYears: 27,
+    inputSex: "male",
+    bodyFatDeciPercent: 290,
+    fatFreeMassCg: 5_567,
+    bodyWaterDeciPercent: 519,
+    restingEnergyKcal: 1_723,
+  },
 } satisfies MeasurementPayloadV1;
 
 /**
- * Two boundaries at once: the minimum legal weight, recorded on a leap day.
+ * Three boundaries at once: the minimum legal weight, recorded on a leap day, **stating none of
+ * the three fields PRD_SCALE 22 added**.
  *
- * The leap day is the edge; the year is only what carries it. It used to be `2028-02-29`, and
- * `date-policy.ts` refuses that outright: `pastEventDay` says a weighing is a record of
+ * The leap day is the calendar edge; the year is only what carries it. It used to be `2028-02-29`,
+ * and `date-policy.ts` refuses that outright: `pastEventDay` says a weighing is a record of
  * something that happened, so it cannot fall four years after the server's own day, and BR-009
  * has always said as much in words. `2024-02-29` is the same 29th of February, exercising the
  * same calendar arithmetic, on a day that has already passed and always will have.
+ *
+ * The bareness is the other edge, and it is the one that pins the decision `measurement.ts`
+ * argues for. This is byte for byte what a build from before the scale module emits, and it is
+ * still a **complete, valid** instance of the same payload schema version — which is the whole
+ * claim that made extending version 1 preferable to minting a version 2. It is also the "without"
+ * half of the pair the Android drift detector needs: with `measurement-v1-valid.json` carrying
+ * all three fields and this one carrying none, a Kotlin DTO that made any of them mandatory fails
+ * here, and one that dropped them fails there.
  */
 const edgeMeasurement = {
   date: "2024-02-29",
@@ -103,12 +149,19 @@ const PROFILE_MUTATION_ID = "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071";
 const validHealthProfile = {
   heightCm: 171,
   birthDate: "1998-11-18",
+  sex: "male",
 } satisfies HealthProfilePayloadV1;
 
 /**
- * The cleared profile: both fields stated as null rather than omitted. It is the instance that
- * proves "the user emptied this" is expressible, which is what section 13.4's field-by-field
- * merge needs to tell apart from "this client did not mention it".
+ * The cleared profile: both original fields stated as null rather than omitted, and `sex` absent
+ * rather than null.
+ *
+ * The two shapes sit side by side on purpose, because the aggregate genuinely has both.
+ * `heightCm` and `birthDate` are nullable-and-required, so this instance proves "the user emptied
+ * this" is expressible — what section 13.4's field-by-field merge needs to tell apart from "this
+ * client did not mention it". `sex` is the optional addition of PRD_SCALE 22, so its unstated form
+ * is the *missing key*, and this instance is what stops a Kotlin DTO from writing it back as an
+ * explicit null the schema would refuse.
  */
 const clearedHealthProfile = {
   heightCm: null,
@@ -736,7 +789,8 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     file: "measurement-v1-valid.json",
     schema: "MeasurementPayloadV1",
     kind: "valid",
-    description: "A typical weight measurement payload.",
+    description:
+      "A weighing from a paired scale, with its impedance and its body composition (PRD_SCALE 22).",
     value: validMeasurement,
     validator: measurementPayloadV1Schema,
   },
@@ -744,7 +798,8 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     file: "measurement-v1-edge.json",
     schema: "MeasurementPayloadV1",
     kind: "edge",
-    description: "The minimum legal weight, recorded on a leap day.",
+    description:
+      "The minimum legal weight on a leap day, stating no provenance, no impedance and no composition.",
     value: edgeMeasurement,
     validator: measurementPayloadV1Schema,
   },
@@ -752,7 +807,7 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     file: "health-profile-v1-valid.json",
     schema: "HealthProfilePayloadV1",
     kind: "valid",
-    description: "The owner's own profile: 171 cm, born 1998-11-18.",
+    description: "The owner's own profile: 171 cm, born 1998-11-18, sex stated.",
     value: validHealthProfile,
     validator: healthProfilePayloadV1Schema,
   },
@@ -760,7 +815,8 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     file: "health-profile-v1-edge.json",
     schema: "HealthProfilePayloadV1",
     kind: "edge",
-    description: "A cleared profile: both fields null and present, never absent.",
+    description:
+      "A cleared profile: height and birth date null and present, sex absent rather than null.",
     value: clearedHealthProfile,
     validator: healthProfilePayloadV1Schema,
   },

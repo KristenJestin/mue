@@ -54,6 +54,27 @@ export const birthDateSchema = z.iso
   });
 
 /**
+ * The two values the foot-to-foot equation of PRD_SCALE 13.2 accepts, and only those.
+ *
+ * There is no third constant for "not stated". PRD_SCALE FR-PROFILE-007 makes the field optional
+ * and an unstated sex is modelled by *absence*, because a stored `unknown` would propagate into
+ * `BodyCompositionV1.inputSex`, where FR-BODY-004 requires the snapshot to record an input the
+ * formula really used. A profile with no sex simply has no composition (FR-BODY-001), which is
+ * the ordinary state of the first weighings and is never an error.
+ *
+ * These are `Sex.wireValue` on Android, and the strings `body_composition.input_sex` and
+ * `health_profile.sex` already hold.
+ */
+export const SEXES = ["female", "male"] as const;
+
+export const sexSchema = z.enum(SEXES).meta({
+  id: "Sex",
+  description:
+    "Sex as the body-composition equations take it (PRD_SCALE FR-PROFILE-007, 13.2). Used for nothing else: BMI is unaffected and its adult categories are identical for everyone.",
+  examples: ["female", "male"],
+});
+
+/**
  * Height and birth date, both nullable, both always present.
  *
  * Nullable rather than optional, and that distinction carries section 13.4's field merge. An
@@ -68,16 +89,38 @@ export const birthDateSchema = z.iso
  * which day the weight belongs to — that would be lost when the payload is read back from the
  * journal on its own. The profile's identifier carries none: it is a constant known to every
  * reader, and repeating it would only create a second place for it to be wrong.
+ *
+ * ## And `sex`, which is optional where the other two are nullable
+ *
+ * PRD_SCALE 22 puts the sex in this aggregate — *"le sexe rejoint l'agrégat `HealthProfile`"* —
+ * under section 13.4's field-by-field merge, and PRD_SCALE FR-PROFILE-007 makes it optional and
+ * absent when unstated. That is a different shape from its two neighbours, and the difference is
+ * not an inconsistency; it is what makes this an addition rather than a break.
+ *
+ * `heightCm` and `birthDate` are required-and-nullable because every client that has ever spoken
+ * this contract states them. `sex` arrives afterwards. Required-and-nullable would mean every
+ * payload an existing client produces is suddenly missing a required field — rejected as
+ * `sync.missing_required_field`, on an aggregate whose whole point is that a phone can push its
+ * profile — and that is exactly the kind of break `measurement.ts` argues a payload schema
+ * version exists for. Optional keeps the addition additive, which section 12.4 asks for.
+ *
+ * The merge survives the difference, because *absence is stable*. Section 13.4's three-way merge
+ * compares the incoming value against the base snapshot the author quoted, and for a client that
+ * does not know this field both are absent — so `incoming === base`, the stored value stands, and
+ * a sex set from another device is preserved rather than erased by a phone that has never heard
+ * of it. That is the same outcome nullability would have bought, obtained from the evidence the
+ * wire already carries.
  */
 export const healthProfilePayloadV1Schema = z
   .object({
     heightCm: z.int().min(HEIGHT_MIN_CM).max(HEIGHT_MAX_CM).nullable(),
     birthDate: birthDateSchema.nullable(),
+    sex: sexSchema.optional(),
   })
   .meta({
     id: "HealthProfilePayloadV1",
     description:
-      "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. Both fields are nullable and both are always present: null is a stated empty value, never an omission.",
+      "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. `heightCm` and `birthDate` are nullable and always present: null is a stated empty value, never an omission. `sex` is an optional addition of PRD_SCALE 22 and is absent when unstated, so a payload written before the field existed is still complete.",
   });
 
 export type HealthProfilePayloadV1 = z.infer<typeof healthProfilePayloadV1Schema>;

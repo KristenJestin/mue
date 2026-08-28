@@ -2,6 +2,8 @@ package fr.kristenjestin.mue.data.remote.sync
 
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.logic.errorMessage
+import fr.kristenjestin.mue.domain.model.MeasurementSource
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserProfile
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.serializer
@@ -169,6 +171,8 @@ class ContractDriftTest {
             ContractFixtures.read("health-profile-v1-valid.json"),
         )
 
+        assertEquals(Sex.MALE.wireValue, profile.sex, "the valid instance states a sex")
+
         val heightCm = assertNotNull(profile.heightCm, "the valid instance states a height")
         assertTrue(
             heightCm in UserProfile.HEIGHT_RANGE_CM,
@@ -208,6 +212,7 @@ class ContractDriftTest {
 
         assertEquals(null, cleared.heightCm)
         assertEquals(null, cleared.birthDate)
+        assertEquals(null, cleared.sex)
 
         val written = SyncJson.instance.encodeToString(
             serializer<HealthProfilePayloadV1Dto>(),
@@ -215,6 +220,11 @@ class ContractDriftTest {
         )
         assertTrue(written.contains("\"heightCm\":null"), "a cleared height is stated: $written")
         assertTrue(written.contains("\"birthDate\":null"), "a cleared date is stated: $written")
+
+        // And the addition of PRD_SCALE 22, which is the other shape: `sex` is `.optional()`, so
+        // its unstated form is the missing key. A `"sex":null` here would be refused by the
+        // server, and this is what stops the DTO from ever writing one.
+        assertTrue(!written.contains("sex"), "an unstated sex is absent, not null: $written")
 
         // An omitted key is not a third state: it does not parse.
         val failure = runCatching {
@@ -224,6 +234,70 @@ class ContractDriftTest {
             )
         }.exceptionOrNull()
         assertIs<SerializationException>(failure)
+    }
+
+    /**
+     * The two measurement instances, read as the pair they are: one carrying every field
+     * PRD_SCALE 22 added, one carrying none of them.
+     *
+     * That pairing is the whole of the version decision, checked from the Kotlin side. The bare
+     * instance is byte for byte what a build from before the scale module emits, and it must still
+     * decode — a DTO that made any of the three fields mandatory fails here. The full instance must
+     * come back whole and be written back whole — a DTO that dropped one fails in
+     * [everyFixtureRoundTripsThroughItsKotlinDto], which is the same failure the sex suffered
+     * silently until now.
+     *
+     * The four estimates are asserted as **values**, for the reason
+     * [theHealthProfileFixtureCarriesValuesTheContractWouldAccept] gives: they are what
+     * PRD_SCALE 13.2's published equations give for this weight, height, age, sex and impedance,
+     * so they are simultaneously a shape check and the test vector the Kotlin calculator owes the
+     * same answer to.
+     */
+    @Test
+    fun theMeasurementFixturesPinBothHalvesOfTheDoubleOptionality() {
+        val full = SyncJson.instance.decodeFromString(
+            serializer<MeasurementPayloadV1Dto>(),
+            ContractFixtures.read("measurement-v1-valid.json"),
+        )
+
+        assertEquals(7_845, full.weightCg)
+        assertEquals(MeasurementSource.SCALE.wireValue, full.sourceType)
+        assertEquals(520, full.impedanceOhm)
+
+        val composition = assertNotNull(full.bodyComposition, "the valid instance carries one")
+        assertEquals("mue-foot-to-foot-v1", composition.formulaId)
+        assertEquals(1, composition.formulaVersion)
+        // BR-SCALE-015, as the contract's own refinement enforces it on the way in.
+        assertEquals(full.weightCg, composition.inputWeightCg)
+        assertEquals(Sex.MALE.wireValue, composition.inputSex)
+        assertEquals(
+            listOf(5_567, 290, 519, 1_723),
+            listOf(
+                composition.fatFreeMassCg,
+                composition.bodyFatDeciPercent,
+                composition.bodyWaterDeciPercent,
+                composition.restingEnergyKcal,
+            ),
+        )
+        assertTrue(
+            composition.fatFreeMassCg <= full.weightCg,
+            "PRD_SCALE 13.2: 0 < FFM <= weight",
+        )
+
+        val bare = SyncJson.instance.decodeFromString(
+            serializer<MeasurementPayloadV1Dto>(),
+            ContractFixtures.read("measurement-v1-edge.json"),
+        )
+
+        assertEquals(3_000, bare.weightCg)
+        assertEquals(null, bare.sourceType)
+        assertEquals(null, bare.impedanceOhm)
+        assertEquals(null, bare.bodyComposition)
+
+        // The three additions are `.optional()` and not `.nullable()`: unset means the key is
+        // gone. A `"impedanceOhm":null` would be refused by the server.
+        val written = SyncJson.instance.encodeToString(serializer<MeasurementPayloadV1Dto>(), bare)
+        assertEquals("""{"date":"2024-02-29","weightCg":3000}""", written)
     }
 
     /**

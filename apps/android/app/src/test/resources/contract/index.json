@@ -1,25 +1,25 @@
 {
   "fixtures": [
     {
-      "description": "A typical weight measurement payload.",
+      "description": "A weighing from a paired scale, with its impedance and its body composition (PRD_SCALE 22).",
       "file": "measurement-v1-valid.json",
       "kind": "valid",
       "schema": "MeasurementPayloadV1"
     },
     {
-      "description": "The minimum legal weight, recorded on a leap day.",
+      "description": "The minimum legal weight on a leap day, stating no provenance, no impedance and no composition.",
       "file": "measurement-v1-edge.json",
       "kind": "edge",
       "schema": "MeasurementPayloadV1"
     },
     {
-      "description": "The owner's own profile: 171 cm, born 1998-11-18.",
+      "description": "The owner's own profile: 171 cm, born 1998-11-18, sex stated.",
       "file": "health-profile-v1-valid.json",
       "kind": "valid",
       "schema": "HealthProfilePayloadV1"
     },
     {
-      "description": "A cleared profile: both fields null and present, never absent.",
+      "description": "A cleared profile: height and birth date null and present, sex absent rather than null.",
       "file": "health-profile-v1-edge.json",
       "kind": "edge",
       "schema": "HealthProfilePayloadV1"

@@ -9,7 +9,7 @@ import {
   HEIGHT_MIN_CM,
   healthProfilePayloadV1Schema,
 } from "./health-profile";
-import { measurementPayloadV1Schema } from "./measurement";
+import { IMPEDANCE_MAX_OHM, measurementPayloadV1Schema } from "./measurement";
 import { aggregateMetaSchema } from "./meta";
 import { mutationEnvelopeSchema, syncChangeSchema } from "./mutation";
 import { revisionSchema, sequenceSchema } from "./primitives";
@@ -107,7 +107,207 @@ describe("measurement payload v1", () => {
       }).success,
     ).toBe(false);
   });
+
+  /**
+   * The claim that made extending version 1 preferable to minting a version 2: a payload written
+   * by a build from before the scale module is still a *complete* instance of the same version.
+   * If this ever fails, the three additions have become a break and they owe a version bump.
+   */
+  test("a payload from before PRD_SCALE 22 is still complete and unchanged by a round trip", () => {
+    const before = { date: "2026-01-01", weightCg: 7_000 };
+    expect(expectRoundTrip(measurementPayloadV1Schema, before)).toEqual(before);
+  });
+
+  /**
+   * BR-SCALE-008 and PRD_SCALE 22: the impedance rides on the measurement, so it synchronises for
+   * a weighing that has no composition — which is the whole material FR-BODY-006's retroactive
+   * calculation needs on the other clients. The two fields are independently optional and this is
+   * the combination that proves it.
+   */
+  test("an impedance without a composition is the ordinary state, not a contradiction", () => {
+    expectRoundTrip(measurementPayloadV1Schema, {
+      date: "2026-01-01",
+      weightCg: 7_000,
+      sourceType: "scale",
+      impedanceOhm: 512,
+    });
+  });
+
+  test("refuses an impedance that is an absence rather than a value (BR-SCALE-005)", () => {
+    for (const impedanceOhm of [0, -1, 1.5, IMPEDANCE_MAX_OHM + 1]) {
+      expect(
+        measurementPayloadV1Schema.safeParse({ date: "2026-01-01", weightCg: 7_000, impedanceOhm })
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  test("refuses a provenance that is not one of the four, and never carries a scale", () => {
+    expect(
+      measurementPayloadV1Schema.safeParse({
+        date: "2026-01-01",
+        weightCg: 7_000,
+        sourceType: "bluetooth",
+      }).success,
+    ).toBe(false);
+
+    // PRD_SCALE 16.2 and 22: the device identifier is not a field this payload has, so a payload
+    // carrying one is *stripped* rather than rejected — and the assertion is that it does not
+    // survive. `z.object` is strip mode, which is exactly why every field that must cross the
+    // wire is declared: an undeclared key is silently dropped, and that is how the sex used to be
+    // lost on the way out of Android.
+    const parsed = measurementPayloadV1Schema.parse({
+      date: "2026-01-01",
+      weightCg: 7_000,
+      sourceType: "scale",
+      sourceScaleId: "9d5a1c7e-0000-4000-8000-000000000000",
+    });
+    expect(Object.hasOwn(parsed, "sourceScaleId")).toBe(false);
+  });
+
+  /**
+   * PRD_SCALE 13.2's own worked example, as the arithmetic and not as a shape.
+   *
+   * The published equations for 78.45 kg at 171 cm, 27 years old, male, 520 ohm give exactly
+   * these four integers. `measurement-v1-valid.json` carries them, so this is simultaneously the
+   * fixture's justification and the test vector the Kotlin and TypeScript implementations owe the
+   * same answer to (PRD_SCALE 13.2: "un même payload doit produire les mêmes entiers stockés dans
+   * les deux environnements").
+   */
+  test("accepts a full scale weighing with the composition its formulas actually produce", () => {
+    const weightCg = 7_845;
+    const heightCm = 171;
+    const ageYears = 27;
+    const impedanceOhm = 520;
+
+    const weightKg = weightCg / 100;
+    const ffmKg =
+      13.055 +
+      0.204 * weightKg +
+      0.394 * ((heightCm * heightCm) / impedanceOhm) -
+      0.136 * ageYears +
+      8.125;
+    const composition = {
+      formulaId: "mue-foot-to-foot-v1",
+      formulaVersion: 1,
+      inputWeightCg: weightCg,
+      inputHeightCm: heightCm,
+      inputAgeYears: ageYears,
+      inputSex: "male",
+      bodyFatDeciPercent: Math.round(((weightKg - ffmKg) / weightKg) * 1_000),
+      fatFreeMassCg: Math.round(ffmKg * 100),
+      bodyWaterDeciPercent: Math.round(((ffmKg * 0.732) / weightKg) * 1_000),
+      restingEnergyKcal: Math.round(10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5),
+    };
+
+    expect([
+      composition.fatFreeMassCg,
+      composition.bodyFatDeciPercent,
+      composition.bodyWaterDeciPercent,
+      composition.restingEnergyKcal,
+    ]).toEqual([5_567, 290, 519, 1_723]);
+
+    expectRoundTrip(measurementPayloadV1Schema, {
+      date: "2026-08-25",
+      weightCg,
+      sourceType: "scale",
+      impedanceOhm,
+      bodyComposition: composition,
+    });
+  });
+
+  /** BR-SCALE-015, made unrepresentable rather than merely wrong. */
+  test("refuses a composition whose input weight is not its parent's weight", () => {
+    const parsed = measurementPayloadV1Schema.safeParse({
+      ...fullMeasurement,
+      bodyComposition: { ...fullComposition, inputWeightCg: 7_840 },
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(["bodyComposition", "inputWeightCg"]);
+  });
+
+  /** PRD_SCALE 13.2: `0 < FFM ≤ poids`. Both halves, at the boundary on each side. */
+  test("refuses a fat-free mass that is zero, negative or above the weight", () => {
+    for (const fatFreeMassCg of [0, -1, fullMeasurement.weightCg + 5]) {
+      expect(
+        measurementPayloadV1Schema.safeParse({
+          ...fullMeasurement,
+          bodyComposition: { ...fullComposition, fatFreeMassCg, inputWeightCg: 7_845 },
+        }).success,
+      ).toBe(false);
+    }
+    // Equal to the weight is legal: it is a person with no fat mass, which the equation cannot
+    // produce but the bound does not exclude, and clamping is forbidden either way.
+    expect(
+      measurementPayloadV1Schema.safeParse({
+        ...fullMeasurement,
+        bodyComposition: { ...fullComposition, fatFreeMassCg: fullMeasurement.weightCg },
+      }).success,
+    ).toBe(true);
+  });
+
+  /** PRD_SCALE 13.2: percentages strictly between 0 and 100, in tenths, both ends. */
+  test("refuses a percentage at or beyond either end of the scale", () => {
+    for (const field of ["bodyFatDeciPercent", "bodyWaterDeciPercent"] as const) {
+      for (const value of [0, 1_000, -1, 1_001]) {
+        expect([
+          field,
+          value,
+          measurementPayloadV1Schema.safeParse({
+            ...fullMeasurement,
+            bodyComposition: { ...fullComposition, [field]: value },
+          }).success,
+        ]).toEqual([field, value, false]);
+      }
+    }
+  });
+
+  test("refuses a resting energy that is not strictly positive", () => {
+    for (const restingEnergyKcal of [0, -1]) {
+      expect(
+        measurementPayloadV1Schema.safeParse({
+          ...fullMeasurement,
+          bodyComposition: { ...fullComposition, restingEnergyKcal },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * BR-SCALE-006 from the other end. A composition cannot exist alone because there is no
+   * aggregate type, no envelope branch and no identifier for one — so the only thing left to
+   * assert here is that the nested object is genuinely whole-or-absent: a half-stated one does
+   * not parse into a measurement that would then be written without it.
+   */
+  test("refuses a partial composition rather than accepting it with fields missing", () => {
+    const { restingEnergyKcal: _dropped, ...partial } = fullComposition;
+    expect(
+      measurementPayloadV1Schema.safeParse({ ...fullMeasurement, bodyComposition: partial })
+        .success,
+    ).toBe(false);
+  });
 });
+
+const fullComposition = {
+  formulaId: "mue-foot-to-foot-v1",
+  formulaVersion: 1,
+  inputWeightCg: 7_845,
+  inputHeightCm: 171,
+  inputAgeYears: 27,
+  inputSex: "male",
+  bodyFatDeciPercent: 290,
+  fatFreeMassCg: 5_567,
+  bodyWaterDeciPercent: 519,
+  restingEnergyKcal: 1_723,
+};
+
+const fullMeasurement = {
+  date: "2026-08-25",
+  weightCg: 7_845,
+  sourceType: "scale",
+  impedanceOhm: 520,
+  bodyComposition: fullComposition,
+};
 
 /**
  * The health profile's rules, fed real values.
@@ -167,6 +367,38 @@ describe("health profile payload v1", () => {
       expect(healthProfilePayloadV1Schema.safeParse({ heightCm: 171, birthDate }).success).toBe(
         false,
       );
+    }
+  });
+
+  /**
+   * The sex of PRD_SCALE FR-PROFILE-007 and 22, and the shape that makes it an addition.
+   *
+   * It is `.optional()` where its two neighbours are nullable-and-required, and the reason is
+   * that it arrived later: a required field would make every payload an existing client already
+   * produces suddenly incomplete. This is the assertion that says the addition costs nothing.
+   */
+  test("a profile written before the sex existed is still complete", () => {
+    const before = { heightCm: 171, birthDate: "1998-11-18" };
+    expect(expectRoundTrip(healthProfilePayloadV1Schema, before)).toEqual(before);
+  });
+
+  test("states a sex when there is one, and omits it rather than nulling it when there is not", () => {
+    for (const sex of ["female", "male"]) {
+      expectRoundTrip(healthProfilePayloadV1Schema, { heightCm: 171, birthDate: null, sex });
+    }
+    // Absent is the unstated form. `null` is not a third state and does not parse, which is what
+    // keeps the Kotlin DTO from writing a key the server would refuse.
+    expect(
+      healthProfilePayloadV1Schema.safeParse({ heightCm: null, birthDate: null, sex: null })
+        .success,
+    ).toBe(false);
+  });
+
+  test("refuses any value outside the two the equations accept", () => {
+    for (const sex of ["other", "unknown", "", "Male", 0]) {
+      expect(
+        healthProfilePayloadV1Schema.safeParse({ heightCm: null, birthDate: null, sex }).success,
+      ).toBe(false);
     }
   });
 });

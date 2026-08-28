@@ -405,6 +405,74 @@
         ],
         "type": "string"
       },
+      "BodyCompositionV1": {
+        "description": "Estimated body composition for one weighing, with the exact snapshot of the inputs it was derived from (PRD_SCALE 12.3, 13.2, 21.1). An optional child of its measurement and never an aggregate of its own (BR-SCALE-006); `inputWeightCg` always equals the parent's `weightCg` (BR-SCALE-015) and `fatFreeMassCg` never exceeds it.",
+        "properties": {
+          "bodyFatDeciPercent": {
+            "exclusiveMaximum": 1000,
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "bodyWaterDeciPercent": {
+            "exclusiveMaximum": 1000,
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "fatFreeMassCg": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "formulaId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "formulaVersion": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "inputAgeYears": {
+            "maximum": 150,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inputHeightCm": {
+            "maximum": 230,
+            "minimum": 120,
+            "type": "integer"
+          },
+          "inputSex": {
+            "$ref": "#/components/schemas/Sex"
+          },
+          "inputWeightCg": {
+            "maximum": 25000,
+            "minimum": 3000,
+            "multipleOf": 5,
+            "type": "integer"
+          },
+          "restingEnergyKcal": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bodyFatDeciPercent",
+          "bodyWaterDeciPercent",
+          "fatFreeMassCg",
+          "formulaId",
+          "formulaVersion",
+          "inputAgeYears",
+          "inputHeightCm",
+          "inputSex",
+          "inputWeightCg",
+          "restingEnergyKcal"
+        ],
+        "type": "object"
+      },
       "CounterString": {
         "description": "A 64-bit counter in canonical decimal form, carried as a string.",
         "examples": [
@@ -1139,7 +1207,7 @@
         "type": "object"
       },
       "HealthProfilePayloadV1": {
-        "description": "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. Both fields are nullable and both are always present: null is a stated empty value, never an omission.",
+        "description": "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. `heightCm` and `birthDate` are nullable and always present: null is a stated empty value, never an omission. `sex` is an optional addition of PRD_SCALE 22 and is absent when unstated, so a payload written before the field existed is still complete.",
         "properties": {
           "birthDate": {
             "anyOf": [
@@ -1162,6 +1230,9 @@
                 "type": "null"
               }
             ]
+          },
+          "sex": {
+            "$ref": "#/components/schemas/Sex"
           }
         },
         "required": [
@@ -1446,10 +1517,21 @@
         "type": "string"
       },
       "MeasurementPayloadV1": {
-        "description": "Weight measurement, payload schema version 1.",
+        "description": "Weight measurement, payload schema version 1. `sourceType`, `impedanceOhm` and `bodyComposition` are optional additions of PRD_SCALE 22: a payload carrying none of them is complete and valid. Two rules the JSON Schema cannot express are enforced on parse: `bodyComposition.inputWeightCg` must equal `weightCg` (BR-SCALE-015), and `bodyComposition.fatFreeMassCg` must not exceed it (PRD_SCALE 13.2). A complete payload with no `bodyComposition` removes the one already stored for that date (BR-SCALE-007).",
         "properties": {
+          "bodyComposition": {
+            "$ref": "#/components/schemas/BodyCompositionV1"
+          },
           "date": {
             "$ref": "#/components/schemas/LocalDate"
+          },
+          "impedanceOhm": {
+            "exclusiveMinimum": 0,
+            "maximum": 65535,
+            "type": "integer"
+          },
+          "sourceType": {
+            "$ref": "#/components/schemas/MeasurementSourceType"
           },
           "weightCg": {
             "maximum": 25000,
@@ -1463,6 +1545,20 @@
           "weightCg"
         ],
         "type": "object"
+      },
+      "MeasurementSourceType": {
+        "description": "Business provenance of a weight (PRD_SCALE 21.1). The scale's local identifier, address and name are never carried (PRD_SCALE 16.2, 22).",
+        "enum": [
+          "agent",
+          "manual",
+          "scale",
+          "server"
+        ],
+        "examples": [
+          "manual",
+          "scale"
+        ],
+        "type": "string"
       },
       "MeasurementUpsertChange": {
         "properties": {
@@ -2234,6 +2330,18 @@
           "position"
         ],
         "type": "object"
+      },
+      "Sex": {
+        "description": "Sex as the body-composition equations take it (PRD_SCALE FR-PROFILE-007, 13.2). Used for nothing else: BMI is unaffected and its adult categories are identical for everyone.",
+        "enum": [
+          "female",
+          "male"
+        ],
+        "examples": [
+          "female",
+          "male"
+        ],
+        "type": "string"
       },
       "StrengthExercise": {
         "description": "One exercise of a session, with its definition snapshot and its sets.",

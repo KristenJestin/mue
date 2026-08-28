@@ -12,6 +12,7 @@ import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.local.database.SyncStateEntity
 import fr.kristenjestin.mue.data.remote.sync.AggregateMetaDto
+import fr.kristenjestin.mue.data.remote.sync.BodyCompositionV1Dto
 import fr.kristenjestin.mue.data.remote.sync.DeleteChangeDto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementPayloadV1Dto
 import fr.kristenjestin.mue.data.remote.sync.MeasurementUpsertChangeDto
@@ -228,14 +229,15 @@ class RoomSyncStoreTest {
         assertEquals(at, syncDao.syncState()?.lastSuccessAt)
     }
 
-    // --- une descente est un payload partiel (BR-SCALE-008) --------------------------------
+    // --- une descente est un payload complet (PRD_SCALE 22, BR-SCALE-007) -------------------
 
     /**
      * Rien en local : la mesure est créée nue, et rien n'est inventé.
      *
      * `server` plutôt que `manual` — [MeasurementSource] a la constante exactement pour ce cas, et
      * `manual` affirmerait une saisie à la main que personne n'a faite. Ni impédance ni
-     * composition, parce que `MeasurementPayloadV1Dto` n'en porte aucune.
+     * composition, parce que **ce payload-ci** n'en porte aucune : depuis PRD_SCALE 22 le fil peut
+     * les transporter, donc leur absence est une information et non plus une limite du contrat.
      */
     @Test
     fun anUpsertOnAnUnknownDateInsertsABareServerMeasurement() = runTest {
@@ -252,39 +254,96 @@ class RoomSyncStoreTest {
     }
 
     /**
-     * **Le défaut qui détruisait des données de santé.** Une pesée pieds nus porte une provenance
-     * matérielle, une balance émettrice, une impédance et une composition ; le serveur renvoie en
-     * écho la poussée que cet appareil vient de faire, avec le même poids. Rien dans ce paquet ne
-     * filtre les échos par `origin` ni ne compare les révisions, donc ce changement *sera* appliqué
-     * — et il ne doit rien coûter.
+     * **BR-SCALE-007 à la lettre**, ce qui est le renversement que PRD_SCALE 22 rend correct.
      *
-     * L'impédance est la partie irremplaçable (BR-SCALE-008, FR-BODY-004) : le fil ne la transporte
-     * pas, le serveur ne l'a donc jamais reçue et ne pourra jamais la redescendre. Une fois remise
-     * à `NULL`, le calcul rétroactif de FR-BODY-006 ne peut plus reconstruire l'estimation.
+     * Cette fonction portait une règle provisoire : un changement descendu répétant le poids connu
+     * ne touchait à rien, parce que `MeasurementPayloadV1Dto` ne transportait alors que `date` et
+     * `weightCg` et qu'appliquer la règle du payload complet à un payload partiel aurait effacé une
+     * impédance irremplaçable. Le fil transporte désormais les trois champs, donc un payload sans
+     * composition **dit** qu'il n'y en a pas, et le retrait est l'application de la règle et non sa
+     * violation.
+     *
+     * Ce qui rend l'écho inoffensif n'est donc plus une comparaison de poids, c'est que le serveur
+     * renvoie les champs qu'il a reçus — voir le test suivant. La contrepartie serveur est une
+     * dépendance de ce comportement, pas une hypothèse.
      */
     @Test
-    fun anUpsertOfTheSameWeightKeepsTheImpedanceTheCompositionAndTheProvenance() = runTest {
+    fun anUpsertWithNoCompositionRemovesTheOneAlreadyStored() = runTest {
         seedScaleMeasurement("2026-08-27", weightCg = 7_845)
 
         store.applyPage(listOf(upsert("2026-08-27", 7_845, "4")), "eyJ2IjoxfQ", at)
 
         val stored = database.measurementDao().findByDate("2026-08-27")
         assertEquals(7_845, stored?.measurement?.weightCg)
-        assertEquals(
-            "BR-SCALE-008 : le fil ne peut pas la redescendre, donc rien ne peut l'effacer",
-            545,
-            stored?.measurement?.impedanceOhm,
-        )
-        assertNotNull(
-            "BR-SCALE-007 ne s'applique pas à un payload qui ne porte pas de composition",
+        assertNull(
+            "BR-SCALE-007 : un payload complet sans composition retire l'ancienne",
             stored?.composition,
         )
+        assertNull(stored?.measurement?.impedanceOhm)
+        assertNull(
+            "PRD_SCALE 16.2 : le fil ne peut rien dire de la balance, donc il n'affirme rien",
+            stored?.measurement?.sourceScaleId,
+        )
+        assertEquals(MeasurementSource.SERVER.wireValue, stored?.measurement?.sourceType)
+        assertEquals(0, database.measurementDao().compositionCount())
+    }
+
+    /**
+     * L'autre moitié : une descente qui **porte** une impédance et une composition les écrit,
+     * toutes les deux, dans la même transaction (PRD_SCALE 22, BR-SCALE-008).
+     *
+     * C'est ce qui rend l'écho du serveur inoffensif à la place de l'ancienne comparaison de
+     * poids, et c'est ce qui donne au calcul rétroactif de FR-BODY-006 la même matière sur chaque
+     * client. `source_scale_id` reste le seul champ qu'une descente ne peut pas rétablir : il ne
+     * quitte jamais le téléphone, et BR-SCALE-010 fait déjà de cette colonne une colonne annulable.
+     */
+    @Test
+    fun anUpsertCarryingImpedanceAndACompositionWritesThemWhole() = runTest {
+        seedScaleMeasurement("2026-08-27", weightCg = 7_845)
+
+        store.applyPage(
+            listOf(
+                upsert(
+                    date = "2026-08-27",
+                    weightCg = 7_845,
+                    revision = "4",
+                    sourceType = MeasurementSource.SCALE.wireValue,
+                    impedanceOhm = 520,
+                    composition = BodyCompositionV1Dto(
+                        formulaId = "mue-foot-to-foot-v1",
+                        formulaVersion = 1,
+                        inputWeightCg = 7_845,
+                        inputHeightCm = 171,
+                        inputAgeYears = 27,
+                        inputSex = Sex.MALE.wireValue,
+                        bodyFatDeciPercent = 290,
+                        fatFreeMassCg = 5_567,
+                        bodyWaterDeciPercent = 519,
+                        restingEnergyKcal = 1_723,
+                    ),
+                ),
+            ),
+            "eyJ2IjoxfQ",
+            at,
+        )
+
+        val stored = database.measurementDao().findByDate("2026-08-27")
+        assertEquals(7_845, stored?.measurement?.weightCg)
         assertEquals(
-            "la provenance matérielle n'est pas une information que le serveur corrige",
+            "la provenance métier traverse (PRD_SCALE 22)",
             MeasurementSource.SCALE.wireValue,
             stored?.measurement?.sourceType,
         )
-        assertEquals("scale-1", stored?.measurement?.sourceScaleId)
+        assertEquals(520, stored?.measurement?.impedanceOhm)
+        assertNull(stored?.measurement?.sourceScaleId)
+        assertEquals(5_567, stored?.composition?.fatFreeMassCg)
+        assertEquals(Sex.MALE.wireValue, stored?.composition?.inputSex)
+        assertEquals(
+            "BR-SCALE-015 : l'instantané reprend le poids de sa mesure parente",
+            7_845,
+            stored?.composition?.inputWeightCg,
+        )
+        assertEquals(1, database.measurementDao().compositionCount())
     }
 
     /**
@@ -489,12 +548,21 @@ class RoomSyncStoreTest {
         weightCg: Int,
         revision: String,
         aggregateType: String = WIRE_AGGREGATE_MEASUREMENT,
+        sourceType: String? = null,
+        impedanceOhm: Int? = null,
+        composition: BodyCompositionV1Dto? = null,
     ): SyncChangeDto = MeasurementUpsertChangeDto(
         sequence = revision,
         aggregateType = aggregateType,
         aggregateId = date,
         payloadSchemaVersion = 1,
-        payload = MeasurementPayloadV1Dto(date, weightCg),
+        payload = MeasurementPayloadV1Dto(
+            date = date,
+            weightCg = weightCg,
+            sourceType = sourceType,
+            impedanceOhm = impedanceOhm,
+            bodyComposition = composition,
+        ),
         meta = meta(date, revision, deletedAt = null),
     )
 

@@ -13,7 +13,7 @@ import java.io.File
 import kotlin.test.assertNotNull
 
 /**
- * The nineteen files under `src/test/resources/contract`, and the Kotlin consumer they were
+ * The thirty-three files under `src/test/resources/contract`, and the Kotlin consumer they were
  * committed for.
  *
  * `packages/contracts/src/fixtures.ts` emits them: every instance is `.parse`d by its own Zod
@@ -35,10 +35,19 @@ object ContractFixtures {
      * the manifest names and this map does not is a fixture with no Kotlin consumer, and
      * [ContractDriftTest] fails on it rather than skipping it quietly — which is the failure
      * mode that let sixteen fixtures land unconsumed in the first place.
+     *
+     * `BodyCompositionV1` is the one entry with no fixture file of its own, and deliberately so.
+     * PRD_SCALE 22 makes a composition a *nested child* of a measurement and never an aggregate,
+     * so it has no payload of its own to ship an instance of; it is exercised inside
+     * `measurement-v1-valid.json`, which carries one, and its absence is exercised inside
+     * `measurement-v1-edge.json`, which carries none. It is registered anyway because this map is
+     * the register of shapes Android claims to consume, and a component id missing from it reads
+     * as one Android does not read.
      */
     val CONSUMERS: Map<String, KSerializer<*>> = mapOf(
         "ActivitySessionPayloadV1" to serializer<ActivitySessionPayloadV1Dto>(),
         "AggregateMeta" to serializer<AggregateMetaDto>(),
+        "BodyCompositionV1" to serializer<BodyCompositionV1Dto>(),
         "CustomExerciseDefinitionPayloadV1" to
             serializer<CustomExerciseDefinitionPayloadV1Dto>(),
         "FoodLogEntryPayloadV1" to serializer<FoodLogEntryPayloadV1Dto>(),

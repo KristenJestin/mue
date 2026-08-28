@@ -271,12 +271,23 @@ class SyncOutbox(
      * aggregate as PRD 12.2 requires: omitting a null would make "the user cleared their birth
      * date" indistinguishable from "this client does not know about birth dates".
      *
-     * [sex] rejoint les deux autres pour la même raison et suit la même règle (PRD_SCALE 22 :
-     * « le sexe rejoint l'agrégat `HealthProfile` » ; sync PRD 13.4 : fusion champ par champ).
-     * Faire évoluer ce payload est sans risque aujourd'hui : `healthProfile` n'est pas dans
-     * `SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES`, donc aucune de ces lignes ne part sur le fil —
-     * elles sont journalisées, gardées, et sortiront inchangées le jour où le contrat serveur
-     * aura la branche qui leur manque.
+     * [sex] rejoint les deux autres (PRD_SCALE 22 : « le sexe rejoint l'agrégat `HealthProfile` »)
+     * mais **ne suit pas exactement la même règle**, et la différence est dans le contrat : le
+     * schéma Zod le déclare `.optional()` là où ses deux voisins sont `.nullable()`, parce qu'il
+     * arrive après eux et qu'un champ requis rendrait d'un coup incomplet tout payload déjà
+     * produit par un client existant. Ici cela ne change rien — ce payload-ci est le format de
+     * l'outbox et l'écrit toujours, `null` compris ; c'est `SyncWire.healthProfilePayload` qui le
+     * fait disparaître du corps lorsqu'il est absent, via le défaut de
+     * `HealthProfilePayloadV1Dto.sex`.
+     *
+     * **Ces lignes partent, et il faut le lire ici.** Une version antérieure de ce KDoc affirmait
+     * l'inverse : que `healthProfile` n'était pas dans `SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES`
+     * et que faire évoluer ce payload était donc sans conséquence. C'était vrai pendant toute la
+     * vie de la fonctionnalité, et ce ne l'est plus depuis que le contrat serveur a la branche qui
+     * lui manquait : le type est dans la liste, `SyncWire.toEnvelope` a sa branche, et chaque
+     * enregistrement de profil s'en va au prochain envoi. Un champ ajouté ici est un champ qui
+     * traverse — ou qui est silencieusement retiré s'il ne traverse pas, ce qui est exactement ce
+     * qui est arrivé au sexe jusqu'à PRD_SCALE 22.
      */
     fun healthProfileUpsert(
         heightCm: Int?,
