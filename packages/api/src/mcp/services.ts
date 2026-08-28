@@ -1,6 +1,7 @@
 import type {
   ActivitySessionPayloadV1,
   AggregateType,
+  BodyCompositionV1,
   CustomExerciseDefinitionPayloadV1,
   FoodLogEntryPayloadV1,
   FoodPayloadV1,
@@ -62,10 +63,40 @@ export interface StoredAggregate<Payload> {
   readonly meta: AggregateMetadata;
 }
 
+/**
+ * One weighing, with everything PRD_SCALE 22 lets leave the phone and nothing else.
+ *
+ * ## Why the whole aggregate and not the weight alone
+ *
+ * `mue.upsert_weight_measurement` states a *complete* payload (section 12.2), and BR-SCALE-007
+ * makes a complete payload with no composition the order to delete the stored one. A view that
+ * stopped at `weightCg` therefore left the tool nothing to restate, and correcting a weight by
+ * a tenth of a kilogram destroyed the impedance and the composition of that day. The read shape
+ * has to be at least as wide as the write shape or the write is a deletion in disguise.
+ *
+ * ## What is deliberately absent
+ *
+ * There is no field for *which* scale. PRD_SCALE 16.2 and 22 are explicit that the local
+ * identifier, the Bluetooth address and the advertised name never leave the phone -- and
+ * `mue_app.measurements` has no column for any of them, so this is not a field withheld here
+ * but a fact the server was never told. `sourceType` is the business provenance and is
+ * synchronised; it says a weighing came from a scale and says nothing about the device.
+ */
 export interface WeightMeasurementView {
   readonly date: string;
   /** Hundredths of a kilogram, the integer unit Android stores. */
   readonly weightCg: number;
+  /** `manual`, `scale`, `agent` or `server` (PRD_SCALE 21.1). Never null: the column defaults. */
+  readonly sourceType: string;
+  /**
+   * Raw impedance in ohms, on the measurement and not on the composition (FR-BODY-004,
+   * BR-SCALE-008). Null when no usable reading was taken -- BR-SCALE-005 makes a scale's
+   * refusal an absence and never a value. Present even where no composition could be
+   * computed, which is what FR-BODY-006's retroactive calculation needs.
+   */
+  readonly impedanceOhm: number | null;
+  /** The optional child of BR-SCALE-006, or null when this date carries none. */
+  readonly bodyComposition: BodyCompositionV1 | null;
   readonly revision: string;
   readonly createdAt: string;
   readonly updatedAt: string;

@@ -1,6 +1,8 @@
 import {
   MEAL_SLOTS,
+  sexSchema,
   type ActivitySessionPayloadV1,
+  type BodyCompositionV1,
   type CustomExerciseDefinitionPayloadV1,
   type FoodLogEntryPayloadV1,
   type FoodPayloadV1,
@@ -160,6 +162,7 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
 
   const {
     activitySessions,
+    bodyComposition,
     customExercises,
     foodLogEntries,
     foods,
@@ -245,6 +248,20 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
       return instantOrNull(rows[0]?.at);
     },
 
+    /**
+     * The whole profile, `sex` included (PRD_SCALE 22).
+     *
+     * The omission this replaces was not cosmetic. `mue.update_health_profile` reads this
+     * aggregate, rebuilds a complete payload from it, and quotes `meta.revision` as the base
+     * it was editing -- so a profile read without its sex produced a payload without one,
+     * against a base snapshot that had one, and section 13.4's field merge correctly read
+     * that as *the author removed the sex*. Editing a height cleared it, and with it every
+     * future body composition, which FR-BODY-001 cannot compute without one.
+     *
+     * The lesson generalises past this field: for an aggregate merged field by field, a read
+     * used as a merge base must return every field the wire carries, or the ones it drops are
+     * deleted by anyone who edits any of the others.
+     */
     async getHealthProfile(
       userId: string,
     ): Promise<StoredAggregate<HealthProfilePayloadV1> | null> {
@@ -255,7 +272,17 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
       const row = rows[0];
       if (row === undefined) return null;
       return {
-        payload: { heightCm: row.heightCm, birthDate: row.birthDate },
+        payload: {
+          heightCm: row.heightCm,
+          birthDate: row.birthDate,
+          // `health_profile.sex` is a nullable column and the payload key is `.optional()`:
+          // an unstated sex is an *absent* key, never a `null`, because `sexSchema.optional()`
+          // refuses `null` and the merged payload is journalled and re-parsed by every pull.
+          // Parsed rather than cast, for the same reason `health-profile.ts` parses it: the
+          // column is plain text, and a value that is neither `female` nor `male` is not a sex
+          // this build can put back on the wire.
+          ...ifPresent("sex", storedSex(row.sex)),
+        },
         meta: metaOf(row),
       };
     },
@@ -273,8 +300,9 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
       if (query.afterDate !== null) filters.push(lt(measurements.date, query.afterDate));
 
       const rows = await database.db
-        .select()
+        .select({ measurement: measurements, composition: bodyComposition })
         .from(measurements)
+        .leftJoin(bodyComposition, onSameWeighing)
         .where(and(...filters))
         .orderBy(desc(measurements.date))
         // One extra row answers `hasMore` without a second count query.
@@ -282,11 +310,9 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
 
       const page = rows.slice(0, query.limit);
       return {
-        measurements: page.map((row): WeightMeasurementView => ({
-          date: row.date,
-          weightCg: row.weightCg,
-          ...metaOf(row),
-        })),
+        measurements: page.map((row): WeightMeasurementView =>
+          measurementViewOf(row.measurement, row.composition),
+        ),
         hasMore: rows.length > query.limit,
       };
     },
@@ -297,13 +323,14 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
       includeDeleted: boolean,
     ): Promise<WeightMeasurementView | null> {
       const rows = await database.db
-        .select()
+        .select({ measurement: measurements, composition: bodyComposition })
         .from(measurements)
+        .leftJoin(bodyComposition, onSameWeighing)
         .where(and(eq(measurements.userId, userId), eq(measurements.date, date)));
       const row = rows[0];
       if (row === undefined) return null;
-      if (row.deletedAt !== null && !includeDeleted) return null;
-      return { date: row.date, weightCg: row.weightCg, ...metaOf(row) };
+      if (row.measurement.deletedAt !== null && !includeDeleted) return null;
+      return measurementViewOf(row.measurement, row.composition);
     },
 
     /**
@@ -773,6 +800,79 @@ export function createMueMcpServices(database: DatabaseHandle): MueMcpServices {
 
 function instantOrNull(value: Date | string | null | undefined): string | null {
   return value === null || value === undefined ? null : new Date(value).toISOString();
+}
+
+/*
+ * The weighing and its optional child (PRD_SCALE 21.1, 22).
+ */
+
+/**
+ * The join a weighing and its composition are always read across.
+ *
+ * `body_composition`'s primary key *is* its foreign key onto `measurements(user_id, date)`, so
+ * there is at most one child per weighing and a left join costs one row either way. Written
+ * once, and used by both readers, because a condition spelled twice is a condition that can be
+ * spelled differently -- and dropping `user_id` from one copy would hand one account's
+ * composition to another.
+ */
+const onSameWeighing = and(
+  eq(schema.bodyComposition.userId, schema.measurements.userId),
+  eq(schema.bodyComposition.date, schema.measurements.date),
+);
+
+/** The child row, rebuilt into the shape the payload and the tools state it in. */
+function compositionOf(
+  row: typeof schema.bodyComposition.$inferSelect | null,
+): BodyCompositionV1 | null {
+  if (row === null) return null;
+  return {
+    formulaId: row.formulaId,
+    formulaVersion: row.formulaVersion,
+    inputWeightCg: row.inputWeightCg,
+    inputHeightCm: row.inputHeightCm,
+    inputAgeYears: row.inputAgeYears,
+    // Plain text columns, narrowed by the schema that refused anything else on the way in.
+    inputSex: row.inputSex as BodyCompositionV1["inputSex"],
+    bodyFatDeciPercent: row.bodyFatDeciPercent,
+    fatFreeMassCg: row.fatFreeMassCg,
+    bodyWaterDeciPercent: row.bodyWaterDeciPercent,
+    restingEnergyKcal: row.restingEnergyKcal,
+  };
+}
+
+/**
+ * One `WeightMeasurementView`, from the parent row and the joined child.
+ *
+ * One transcription for both readers, for the reason the food payloads above are also written
+ * once: two copies of "which column is which key" is how a composition ends up reported by
+ * `get_weight_measurement` and silently dropped by `list_weight_measurements`, which no shape
+ * comparison can see and which BR-SCALE-007 then turns into a deletion on the next write.
+ */
+function measurementViewOf(
+  row: typeof schema.measurements.$inferSelect,
+  composition: typeof schema.bodyComposition.$inferSelect | null,
+): WeightMeasurementView {
+  return {
+    date: row.date,
+    weightCg: row.weightCg,
+    sourceType: row.sourceType,
+    impedanceOhm: row.impedanceOhm,
+    bodyComposition: compositionOf(composition),
+    ...metaOf(row),
+  };
+}
+
+/**
+ * The stored sex, read back into the shape the payload states it in.
+ *
+ * Parsed and not cast: `health_profile.sex` is plain text, and a value that is neither
+ * `female` nor `male` is not a sex this build knows. Treating one as a sex would put it back
+ * on the wire, where `sexSchema` refuses it and a journalled snapshot would stop a cursor.
+ * `packages/domain/src/sync/health-profile.ts` does exactly this on the write side.
+ */
+function storedSex(value: string | null): HealthProfilePayloadV1["sex"] | null {
+  const parsed = sexSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 /*

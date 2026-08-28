@@ -2,6 +2,12 @@ import type { MeasurementPayloadV1, MueError, MutationResult, PullResponse } fro
 import { type DatabaseHandle, createTestDatabase, migrate, schema, seedUser } from "@mue/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  buildMeasurementUpsert,
+  deleteMeasurement,
+  listMeasurements,
+  upsertMeasurement,
+} from "./authoring";
 import { readChanges } from "./pull";
 import { submitMutations } from "./push";
 import type { SyncContext } from "./types";
@@ -76,6 +82,12 @@ const FROM_A_SCALE = {
 
 /** The same date, entered by hand: a complete payload that states none of the three fields. */
 const TYPED_BY_HAND = { date: DATE, weightCg: 7_800 } as const satisfies MeasurementPayloadV1;
+
+/** The same thing on a day of its own, for the reads that want all three shapes at once. */
+const TYPED_BY_HAND_ON_ANOTHER_DAY = {
+  date: "2026-08-27",
+  weightCg: 7_805,
+} as const satisfies MeasurementPayloadV1;
 
 function upsert(
   payload: MeasurementPayloadV1,
@@ -522,5 +534,126 @@ describe("the round trip — what a device pushes comes back identical", () => {
 
     const changes = page(await pullAll()).changes;
     expect(changes.map((change) => change.payload)).toEqual(sent);
+  });
+});
+
+/**
+ * The server-side authoring API of `authoring.ts`, over the same aggregate.
+ *
+ * It is a second way into `submitMutation` -- the one a route or a script uses when it is not
+ * an MCP tool -- and it had the same defect the tools had, for the same reason: it could only
+ * *state* a weight and could only *read* a weight. On an aggregate written whole, that is not a
+ * narrower API, it is a deletion. `buildMeasurementUpsert` emitted `{date, weightCg}`, which
+ * section 12.2 makes complete and BR-SCALE-007 reads as "this day has no composition", and
+ * `listMeasurements` gave a caller nothing with which to restate one.
+ */
+describe("authoring a weighing from the server side", () => {
+  test("an upsert carries the provenance, the impedance and the composition", async () => {
+    const result = await upsertMeasurement(handle, context, { ...AGENT }, FROM_A_SCALE);
+    expect(result.status).toBe("applied");
+
+    expect(await storedMeasurement()).toEqual({
+      weightCg: FROM_A_SCALE.weightCg,
+      sourceType: "scale",
+      impedanceOhm: FROM_A_SCALE.impedanceOhm,
+      deleted: false,
+    });
+    expect(await storedComposition()).toEqual(FROM_A_SCALE.bodyComposition);
+  });
+
+  test("the envelope omits a field it was not given rather than nulling it", () => {
+    // `measurementPayloadV1Schema` declares the three additions `.optional()` and not
+    // `.nullable()`, so an explicit `null` is a payload it refuses. The payload is journalled
+    // verbatim and `pull` re-parses every entry it returns, so a null here would stop a cursor
+    // dead on a change this server itself wrote.
+    const envelope = buildMeasurementUpsert({ ...AGENT }, { date: DATE, weightCg: 7_000 });
+    expect(envelope.payload).toEqual({ date: DATE, weightCg: 7_000 });
+    expect(Object.keys(envelope.payload as object).sort()).toEqual(["date", "weightCg"]);
+  });
+
+  test("a reader gets the whole weighing, which is what lets it restate one", async () => {
+    await upsertMeasurement(handle, context, { ...AGENT }, FROM_A_SCALE);
+    // A second day with an impedance and no composition: FR-BODY-004's ordinary case, and the
+    // one a read that stopped at the weight would silently flatten into the first.
+    await upsertMeasurement(
+      handle,
+      context,
+      { ...PHONE },
+      {
+        date: "2026-08-26",
+        weightCg: 7_800,
+        sourceType: "scale",
+        impedanceOhm: 505,
+      },
+    );
+    // And a third typed by hand, which carries neither.
+    await upsertMeasurement(handle, context, { ...PHONE }, TYPED_BY_HAND_ON_ANOTHER_DAY);
+
+    const rows = await listMeasurements(handle, context);
+    expect(rows.map((row) => row.date)).toEqual([DATE, "2026-08-26", "2026-08-27"]);
+
+    const [scale, impedanceOnly, manual] = rows;
+    expect(scale!.sourceType).toBe("scale");
+    expect(scale!.impedanceOhm).toBe(FROM_A_SCALE.impedanceOhm);
+    expect(scale!.bodyComposition).toEqual(FROM_A_SCALE.bodyComposition);
+
+    expect(impedanceOnly!.impedanceOhm).toBe(505);
+    expect(impedanceOnly!.bodyComposition).toBeNull();
+
+    expect(manual!.sourceType).toBe("manual");
+    expect(manual!.impedanceOhm).toBeNull();
+    expect(manual!.bodyComposition).toBeNull();
+  });
+
+  test("what a reader returns is exactly what an author can state back", async () => {
+    // The loop the two regressions were breaks in, closed here in one assertion: read a
+    // weighing, hand it straight back to the authoring API, and nothing is lost. It holds only
+    // because the read shape is at least as wide as the write shape -- which is the property
+    // that has to be maintained, rather than the three fields that happen to need it today.
+    await upsertMeasurement(handle, context, { ...PHONE }, FROM_A_SCALE);
+    const before = (await listMeasurements(handle, context))[0]!;
+
+    await upsertMeasurement(
+      handle,
+      context,
+      { ...AGENT },
+      {
+        date: before.date,
+        weightCg: before.weightCg,
+        sourceType: before.sourceType as typeof FROM_A_SCALE.sourceType,
+        ...(before.impedanceOhm === null ? {} : { impedanceOhm: before.impedanceOhm }),
+        ...(before.bodyComposition === null ? {} : { bodyComposition: before.bodyComposition }),
+        baseRevision: before.revision,
+      },
+    );
+
+    // Against the *rows*, and not only against a second call to the same reader. A read and a
+    // write narrowed in the same way agree with each other perfectly while losing everything
+    // they both dropped, so comparing two reads is the one comparison this cannot rest on.
+    expect(await storedMeasurement()).toEqual({
+      weightCg: FROM_A_SCALE.weightCg,
+      sourceType: FROM_A_SCALE.sourceType,
+      impedanceOhm: FROM_A_SCALE.impedanceOhm,
+      deleted: false,
+    });
+    expect(await storedComposition()).toEqual(FROM_A_SCALE.bodyComposition);
+
+    const after = (await listMeasurements(handle, context))[0]!;
+    expect(after.weightCg).toBe(before.weightCg);
+    expect(after.sourceType).toBe(before.sourceType);
+    expect(after.impedanceOhm).toBe(before.impedanceOhm);
+    expect(after.bodyComposition).toEqual(before.bodyComposition);
+    // It really was a second write, so this is a round trip and not a read of the first one.
+    expect(BigInt(after.revision)).toBeGreaterThan(BigInt(before.revision));
+  });
+
+  test("a tombstone is still absent from the reader, composition and all", async () => {
+    await upsertMeasurement(handle, context, { ...PHONE }, FROM_A_SCALE);
+    const revision = (await listMeasurements(handle, context))[0]!.revision;
+    await deleteMeasurement(handle, context, { ...PHONE }, { date: DATE, baseRevision: revision });
+
+    expect(await listMeasurements(handle, context)).toEqual([]);
+    // BR-SCALE-007: the child went with its parent, and the left join cannot bring it back.
+    expect(await storedComposition()).toBeUndefined();
   });
 });
