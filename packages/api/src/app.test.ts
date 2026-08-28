@@ -39,6 +39,20 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
   return app.fetch(new Request(`${BASE_URL}${path}`, init));
 }
 
+/**
+ * A day comfortably inside `pastEventDay`, computed rather than written down.
+ *
+ * The fixtures here used to be literal dates in 2028. That was harmless while nothing judged a
+ * date and is not any more: a weighing is a record of something that happened, so the push path
+ * now refuses one dated years ahead. A relative day keeps the fixture correct for as long as the
+ * suite exists, which a literal one could not be.
+ */
+function daysAgo(days: number): string {
+  const day = new Date();
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
+}
+
 function measurement(date: string, weightCg: number): unknown {
   return {
     mutationId: Bun.randomUUIDv7(),
@@ -112,7 +126,7 @@ describe("POST /api/v1/sync/push", () => {
     const response = await call("/api/v1/sync/push", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mutations: [measurement("2028-01-01", 7000)] }),
+      body: JSON.stringify({ mutations: [measurement(daysAgo(30), 7000)] }),
     });
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
@@ -122,7 +136,7 @@ describe("POST /api/v1/sync/push", () => {
   });
 
   test("applies a batch presented with the sign-in bearer", async () => {
-    const mutation = measurement("2028-01-02", 7150);
+    const mutation = measurement(daysAgo(31), 7150);
     const send = () =>
       call("/api/v1/sync/push", {
         method: "POST",
@@ -147,7 +161,7 @@ describe("POST /api/v1/sync/push", () => {
     const response = await call("/api/v1/sync/push", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
-      body: JSON.stringify({ mutations: [measurement("2028-01-03", 42)] }),
+      body: JSON.stringify({ mutations: [measurement(daysAgo(32), 42)] }),
     });
     // A default Ktor client throws on a non-2xx before the body is parsed, so a
     // 4xx here would hide the very error FR-SYNC-007 asks the client to show.
@@ -155,6 +169,90 @@ describe("POST /api/v1/sync/push", () => {
     expect(await response.json()).toMatchObject({
       results: [{ status: "rejected", error: { code: "sync.invalid_payload" } }],
     });
+  });
+
+  test("refuses a weighing dated beyond the clock-skew tolerance, naming the field", async () => {
+    // The half of F-02 that no MCP fix could have reached. `mue.upsert_weight_measurement` and
+    // this endpoint are two authoring paths onto one journal, and a rule enforced only in the
+    // tool would leave the phone's own push accepting exactly what the tool had just refused.
+    // Both go through `submitMutation`, so both meet `pastEventDay` here.
+    const response = await call("/api/v1/sync/push", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+      body: JSON.stringify({ mutations: [measurement("2099-12-01", 7000)] }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      results: { status: string; error: { code: string; field: string; message: string } }[];
+    };
+    expect(body.results[0]?.status).toBe("rejected");
+    expect(body.results[0]?.error.code).toBe("sync.invalid_payload");
+    // Named, so a client can put the message beside the field the person typed in.
+    expect(body.results[0]?.error.field).toBe("payload.date");
+    expect(body.results[0]?.error.message).toContain("payload.date");
+
+    // Nothing reached the aggregate.
+    const rows = await database.sql`
+      select 1 from mue_app.measurements where "date" = '2099-12-01'
+    `;
+    expect(rows).toHaveLength(0);
+  });
+
+  test("still accepts a day one ahead of UTC, which is a device abroad and not a bad date", async () => {
+    // The tolerance earning its place: a phone at UTC+14 writes a calendar date the server
+    // reading UTC has not reached, and that phone is right. Refusing it would be F-02 the
+    // other way round -- a correct row, stranded in an outbox, refused for ever because
+    // `push` replays a stored rejection verbatim.
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const response = await call("/api/v1/sync/push", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+      body: JSON.stringify({
+        mutations: [measurement(tomorrow.toISOString().slice(0, 10), 7200)],
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { results: { status: string }[] };
+    expect(body.results[0]?.status).toBe("applied");
+  });
+
+  test("a meal proposal is not judged by the push path, so an offline phone keeps its plan", async () => {
+    // `planningWindow` is deliberately absent here. A proposal journalled for tomorrow on a
+    // phone that then spends three days offline arrives with a day that is now behind, and
+    // refusing it would strand a row the phone has already stored -- permanently, since a
+    // rejection is recorded under its `mutationId` and replayed. The window is checked where a
+    // proposal is *made*, which is `mue.plan_meal`.
+    const plannedOn = daysAgo(3);
+    const response = await call("/api/v1/sync/push", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+      body: JSON.stringify({
+        mutations: [
+          {
+            mutationId: Bun.randomUUIDv7(),
+            baseRevision: null,
+            origin: { type: "android", id: "device-api-test" },
+            clientOccurredAt: new Date().toISOString(),
+            aggregateType: "mealPlanEntry",
+            aggregateId: `${plannedOn}:dinner`,
+            op: "upsert",
+            payloadSchemaVersion: 1,
+            payload: {
+              plannedOn,
+              slot: "dinner",
+              recipeId: crypto.randomUUID(),
+              plannedServingsThousandths: 1000,
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { results: { status: string }[] };
+    expect(body.results[0]?.status).toBe("applied");
   });
 
   test("rejects a malformed request body with the error envelope", async () => {
@@ -176,7 +274,7 @@ describe("POST /api/v1/sync/pull", () => {
       body: JSON.stringify({
         cursor: null,
         limit: 1,
-        supportedSchemaVersions: { measurement: [1] },
+        supportedSchemaVersions: { measurement: [1], mealPlanEntry: [1] },
       }),
     });
     expect(first.status).toBe(200);
@@ -198,7 +296,7 @@ describe("POST /api/v1/sync/pull", () => {
       headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
       body: JSON.stringify({
         cursor: page.nextCursor,
-        supportedSchemaVersions: { measurement: [1] },
+        supportedSchemaVersions: { measurement: [1], mealPlanEntry: [1] },
       }),
     });
     const rest = (await resumed.json()) as { changes: { aggregateId: string }[] };

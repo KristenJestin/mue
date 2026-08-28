@@ -4,6 +4,7 @@
 
 export * from "./activity";
 export * from "./cursor";
+export * from "./date-policy";
 export * from "./errors";
 export * from "./food";
 export * from "./food-log";

@@ -4,6 +4,7 @@ import {
   mealSlotSchema,
   MEAL_PLAN_ENTRY_PAYLOAD_VERSION_1,
   MEAL_PLAN_MAX_DAYS_AHEAD,
+  planningWindow,
   SERVINGS_MAX_THOUSANDTHS,
   SERVINGS_MIN_THOUSANDTHS,
   SERVINGS_STEP_THOUSANDTHS,
@@ -141,23 +142,6 @@ function planView(
     isConsumed: payload.consumedLogEntryId !== undefined,
     ...meta,
   };
-}
-
-/** The server's own calendar day, as `food-log.ts` computes it for the opposite bound. */
-function serverLocalDate(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-/** The furthest day a proposal may be made for: today plus [MEAL_PLAN_MAX_DAYS_AHEAD]. */
-function furthestPlannableDate(): string {
-  const now = new Date();
-  const furthest = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + MEAL_PLAN_MAX_DAYS_AHEAD),
-  );
-  return furthest.toISOString().slice(0, 10);
 }
 
 // --- mue.list_meal_plan ---------------------------------------------------------------------
@@ -381,26 +365,15 @@ async function planHandler(context: ToolContext, args: PlanArgs) {
     );
   }
 
-  const today = serverLocalDate();
-  if (args.plannedOn < today) {
-    return refuse(
-      context,
-      PLAN_TOOL_NAME,
-      invalidPayload(
-        "A proposal is for a meal that has not happened yet, so it cannot be dated in the past. To record a meal that was eaten, use `mue.create_food_log`.",
-        "plannedOn",
-      ),
-    );
-  }
-  if (args.plannedOn > furthestPlannableDate()) {
-    return refuse(
-      context,
-      PLAN_TOOL_NAME,
-      invalidPayload(
-        `A meal can be planned at most ${MEAL_PLAN_MAX_DAYS_AHEAD} days ahead.`,
-        "plannedOn",
-      ),
-    );
+  // Rule `planningWindow`, and this is the only place it is applied. It is the one rule of the
+  // three that is unstable under replay -- a proposal for tomorrow, journalled on a phone that
+  // then goes offline for three days, arrives with a day that is now behind -- so it is checked
+  // where a proposal is *made* and deliberately not on the sync push path. See its docstring.
+  const window = planningWindow("plannedOn", args.plannedOn, {
+    hint: "To record a meal that was eaten, use `mue.create_food_log`.",
+  });
+  if (window !== undefined) {
+    return refuse(context, PLAN_TOOL_NAME, invalidPayload(window.message, window.field));
   }
 
   if (offStep(args.servings, SERVINGS_STEP_THOUSANDTHS)) {

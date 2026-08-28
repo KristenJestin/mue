@@ -57,6 +57,20 @@ function measurement(date: string, weightCg: number): unknown {
   };
 }
 
+/**
+ * A day inside `pastEventDay`, computed rather than written down.
+ *
+ * These pushes used to be dated 2029, which the date policy now refuses: a weighing is a record
+ * of something that happened (BR-009). A refused mutation is never journalled, so the stream had
+ * nothing to announce and the test hung until its own timeout -- which is the rule working, and
+ * a fixture that had quietly always been wrong.
+ */
+function daysAgo(days: number): string {
+  const day = new Date();
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
+}
+
 async function push(date: string, weightCg: number): Promise<void> {
   const response = await app.fetch(
     new Request(`${BASE_URL}/api/v1/sync/push`, {
@@ -220,7 +234,7 @@ describe("GET /api/v1/sync/events", () => {
     // Pushed after the stream is open, so what is observed is the announcement
     // and not a baseline the stream happened to be holding.
     const reading = readUntil(opened, controller, (read) => read.includes("event: change"));
-    await push("2029-03-01", 7420);
+    await push(daysAgo(11), 7420);
 
     expect(await reading).toContain("event: change");
   });
@@ -230,7 +244,7 @@ describe("GET /api/v1/sync/events", () => {
     const opened = await response;
 
     const reading = readUntil(opened, controller, (read) => read.includes("event: change"));
-    await push("2029-03-02", 7430);
+    await push(daysAgo(12), 7430);
     const text = await reading;
 
     // Section 12.3: the sequence is the server's and the client cursor is

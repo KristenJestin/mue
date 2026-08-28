@@ -1,6 +1,7 @@
 import {
   localDateSchema,
   MEASUREMENT_PAYLOAD_VERSION_1,
+  pastEventDay,
   WEIGHT_MAX_CENTIGRAMS,
   WEIGHT_MIN_CENTIGRAMS,
   WEIGHT_STEP_CENTIGRAMS,
@@ -229,7 +230,7 @@ const upsertInputSchema = {
   date: localDateSchema
     .optional()
     .describe(
-      "Required. The day the weight belongs to, YYYY-MM-DD, in the person's local calendar. Recording a second weight for a day replaces the first, without warning.",
+      "Required. The day the weight belongs to, YYYY-MM-DD, in the person's local calendar. A weighing is something that happened, so this day cannot be in the future. Recording a second weight for a day replaces the first, without warning.",
     ),
   weightKg: z
     .number()
@@ -326,6 +327,14 @@ async function upsertHandler(context: ToolContext, args: UpsertArgs) {
         "Give the weight in `weightKg`. Ask the person; the server will not estimate one from anything else it holds.",
       ),
     );
+  }
+  // Rule `pastEventDay`. PRD section 11.1 and BR-009: "Aucune mesure ne peut porter une date
+  // postérieure à aujourd'hui". The phone's form has always refused one; this tool did not.
+  const day = pastEventDay("date", args.date, {
+    hint: "Ask the person which day they weighed themselves; the server will not assume today.",
+  });
+  if (day !== undefined) {
+    return refuse(context, UPSERT_TOOL_NAME, invalidPayload(day.message, day.field));
   }
 
   const weight = resolveWeight(args);

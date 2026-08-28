@@ -1,5 +1,7 @@
 import {
   BIRTH_DATE_YEAR_PATTERN,
+  birthDay,
+  LIFETIME_MAX_YEARS,
   HEALTH_PROFILE_AGGREGATE_ID,
   HEALTH_PROFILE_PAYLOAD_VERSION_1,
   HEIGHT_MAX_CM,
@@ -109,7 +111,7 @@ const updateInputSchema = {
     .regex(BIRTH_DATE_YEAR_PATTERN)
     .optional()
     .describe(
-      "Date of birth, YYYY-MM-DD, year 1900 to 2099. Omit it when the person did not give one; omitting leaves the stored one untouched.",
+      `Date of birth, YYYY-MM-DD, year 1900 to 2099, not in the future and not more than ${LIFETIME_MAX_YEARS} years ago. Omit it when the person did not give one; omitting leaves the stored one untouched.`,
     ),
   clearHeightCm: z
     .boolean()
@@ -185,6 +187,21 @@ async function updateHandler(context: ToolContext, args: UpdateArgs) {
       UPDATE_TOOL_NAME,
       invalidPayload("Give a `birthDate` or clear it, not both.", "clearBirthDate"),
     );
+  }
+  // Rule `birthDay` -- `pastEventDay` and `lifetimeFloor` together, which is PRD section 11.2's
+  // "Pas dans le futur, pas antérieure de plus de 120 ans" in the order it states them.
+  //
+  // Only an argument is judged, never the merged value: `lifetimeFloor` moves with the calendar,
+  // so re-judging a stored date would one day make an unrelated height edit impossible for
+  // someone who had simply got older than the bound. `birthDateSchema` keeps the absolute
+  // 1900-2099 pattern that lets a journalled profile stay parseable for ever.
+  if (args.birthDate !== undefined) {
+    const born = birthDay("birthDate", args.birthDate, {
+      hint: "Ask the person for their date of birth; the server will not derive one from an age.",
+    });
+    if (born !== undefined) {
+      return refuse(context, UPDATE_TOOL_NAME, invalidPayload(born.message, born.field));
+    }
   }
 
   const stored = await context.services.getHealthProfile(context.identity.userId);

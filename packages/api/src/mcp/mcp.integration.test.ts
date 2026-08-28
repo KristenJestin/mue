@@ -32,6 +32,7 @@ import {
   PAIRING_PATH,
   type PairingWindow,
 } from "./index";
+import { CLOCK_SKEW_TOLERANCE_DAYS } from "@mue/contracts";
 import { MUE_MCP_PROTOCOL_VERSION, PRD_REQUESTED_PROTOCOL_VERSION } from "./protocol";
 
 /**
@@ -2393,6 +2394,25 @@ describe("the whole section 14 catalogue", () => {
     return `${day.getFullYear()}-${month}-${String(day.getDate()).padStart(2, "0")}`;
   }
 
+  /**
+   * The reference day the date policy compares against, and the furthest day a record of
+   * something that happened may carry. UTC, because the rule is: the tolerance is derived
+   * from the civil-offset range *relative to UTC*, so the bound must not move with the
+   * timezone the test host happens to be configured in.
+   */
+  function utcDatePlus(days: number): string {
+    const now = new Date();
+    const day = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days),
+    );
+    return day.toISOString().slice(0, 10);
+  }
+
+  /** The latest day `pastEventDay` admits, which is what its message has to name. */
+  function pastEventDayBound(): string {
+    return utcDatePlus(CLOCK_SKEW_TOLERANCE_DAYS);
+  }
+
   /** One computed nutrient, as `nutrition-view.ts` puts it on the wire. */
   interface ComputedEnergy {
     known: boolean;
@@ -2913,8 +2933,13 @@ describe("the whole section 14 catalogue", () => {
   });
 
   test("plan_meal refuses a date in the past and one beyond sixty days, naming the field", async () => {
+    // Rule `planningWindow`. Both ends carry the same one day of tolerance, for the same
+    // reason: these dates are zoneless, so a device at UTC-12 is still on a day the server
+    // reading UTC has already left, and refusing it to plan its own dinner would be F-02 in
+    // the other direction. Yesterday-in-UTC is therefore inside the window and the day before
+    // it is not.
     const past = await callError(client, "mue.plan_meal", {
-      plannedOn: localDatePlus(-1),
+      plannedOn: utcDatePlus(-2),
       slot: "dinner",
       recipeId,
       servings: 1,
@@ -2924,7 +2949,7 @@ describe("the whole section 14 catalogue", () => {
 
     // PRD_FOOD 15: "aujourd'hui ou dans le futur, dans les 60 jours". Sixty is inside.
     const edge = (await callOk(client, "mue.plan_meal", {
-      plannedOn: localDatePlus(60),
+      plannedOn: utcDatePlus(60),
       slot: "breakfast",
       recipeId,
       servings: 1,
@@ -2932,15 +2957,15 @@ describe("the whole section 14 catalogue", () => {
     expect(edge.created).toBe(true);
 
     const beyond = await callError(client, "mue.plan_meal", {
-      plannedOn: localDatePlus(61),
+      plannedOn: utcDatePlus(61),
       slot: "breakfast",
       recipeId,
       servings: 1,
     });
     expect(beyond.code).toBe("sync.invalid_payload");
     expect(beyond.field).toBe("plannedOn");
-    // Section 16: the message names the field, never the value.
-    expect(beyond.message).not.toContain(localDatePlus(61));
+    // Section 16: the message names the field and the bound, never the value it was given.
+    expect(beyond.message).not.toContain(utcDatePlus(61));
 
     // And nothing was written for the day that was refused.
     const rows = await handle.database.db
@@ -2949,10 +2974,135 @@ describe("the whole section 14 catalogue", () => {
       .where(
         and(
           eq(schema.mealPlanEntries.userId, userId),
-          eq(schema.mealPlanEntries.plannedOn, localDatePlus(61)),
+          eq(schema.mealPlanEntries.plannedOn, utcDatePlus(61)),
         ),
       );
     expect(rows).toEqual([]);
+  });
+
+  // --- the one date policy, on every tool that carries a business date ---------------------
+
+  /**
+   * F-02, reproduced exactly as it was reported: `plan_meal` and `create_food_log` refused a
+   * nonsense date and `create_activity` did not, so three tools disagreed about what a date in
+   * the future means. The rules are named once in `@mue/contracts` and every tool below says
+   * which one it uses, so the disagreement cannot come back one tool at a time.
+   */
+  test("create_activity refuses the 2099 session of F-02, naming the field and the bound", async () => {
+    const error = await callError(client, "mue.create_activity", {
+      movement: "running",
+      startedOn: "2099-12-01",
+      durationMinutes: 35,
+    });
+
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("startedOn");
+    // The message has to teach: the bound the agent missed, spelled as a date it can compare
+    // against rather than as a rule it has to reconstruct.
+    expect(error.message).toContain(pastEventDayBound());
+    // Section 16 keeps the value out. `MueError.message` is documented "safe to log: no
+    // personal data", and the day a person trained on is exactly that. The agent already
+    // holds what it sent; what it lacked was the bound.
+    expect(error.message).not.toContain("2099-12-01");
+
+    // Nothing was written for the day that was refused.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.activitySessions)
+      .where(
+        and(
+          eq(schema.activitySessions.userId, userId),
+          eq(schema.activitySessions.startedOn, "2099-12-01"),
+        ),
+      );
+    expect(rows).toEqual([]);
+  });
+
+  test("a recorded day tolerates one day of clock skew and refuses two", async () => {
+    // The tolerance is a whole calendar day because these dates are zoneless: a phone at
+    // UTC+14 is already on a date a server reading UTC has not reached. One day covers the
+    // entire civil-offset range and nothing beyond it.
+    const skewed = (await callOk(client, "mue.create_activity", {
+      movement: "walking",
+      startedOn: utcDatePlus(1),
+      durationMinutes: 20,
+    })) as { created: boolean };
+    expect(skewed.created).toBe(true);
+
+    const beyond = await callError(client, "mue.create_activity", {
+      movement: "walking",
+      startedOn: utcDatePlus(2),
+      durationMinutes: 20,
+    });
+    expect(beyond.field).toBe("startedOn");
+    expect(beyond.message).toContain(pastEventDayBound());
+  });
+
+  test("update_activity refuses moving a stored session into the future", async () => {
+    const created = (await callOk(client, "mue.create_activity", {
+      movement: "cycling",
+      startedOn: utcDatePlus(-3),
+      durationMinutes: 40,
+    })) as { activity: { id: string; revision: string } };
+
+    const error = await callError(client, "mue.update_activity", {
+      id: created.activity.id,
+      startedOn: utcDatePlus(2),
+    });
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("startedOn");
+    expect(error.message).toContain(pastEventDayBound());
+  });
+
+  test("upsert_weight_measurement refuses a weighing dated beyond the skew window", async () => {
+    // PRD section 11.1 and BR-009: a measurement is never dated after today. It is the tool
+    // F-02 did not name, and it accepted 2099 exactly as readily as `create_activity` did.
+    const error = await callError(client, "mue.upsert_weight_measurement", {
+      date: utcDatePlus(2),
+      weightKg: 70.15,
+    });
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("date");
+    expect(error.message).toContain(pastEventDayBound());
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.measurements)
+      .where(
+        and(eq(schema.measurements.userId, userId), eq(schema.measurements.date, utcDatePlus(2))),
+      );
+    expect(rows).toEqual([]);
+  });
+
+  test("update_health_profile refuses a birth date in the future and one beyond a lifetime", async () => {
+    // PRD section 11.2: "Pas dans le futur, pas anterieure de plus de 120 ans". The payload
+    // schema keeps its absolute 1900-2099 pattern -- a journalled profile has to stay
+    // parseable for ever -- so the clock-relative half is applied where a profile is authored.
+    const future = await callError(client, "mue.update_health_profile", {
+      birthDate: utcDatePlus(2),
+    });
+    expect(future.code).toBe("sync.invalid_payload");
+    expect(future.field).toBe("birthDate");
+    expect(future.message).toContain(pastEventDayBound());
+
+    const ancient = await callError(client, "mue.update_health_profile", {
+      birthDate: "1900-01-01",
+    });
+    expect(ancient.code).toBe("sync.invalid_payload");
+    expect(ancient.field).toBe("birthDate");
+    expect(ancient.message).toContain("120");
+  });
+
+  test("create_food_log keeps its refusal, now worded by the shared rule", async () => {
+    const error = await callError(client, "mue.create_food_log", {
+      consumedOn: utcDatePlus(2),
+      consumedAt: "12:30",
+      title: "Soupe",
+      energyKcal: 200,
+    });
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("consumedOn");
+    expect(error.message).toContain(pastEventDayBound());
   });
 
   test("plan_meal refuses a serving count off its quarter step and an unknown recipe", async () => {
@@ -3029,8 +3179,11 @@ describe("the whole section 14 catalogue", () => {
 
   test("list_meal_plan reads the proposals back over a period, with their recipe names", async () => {
     const data = (await callOk(client, "mue.list_meal_plan", {
-      from: localDatePlus(0),
-      to: localDatePlus(60),
+      // Wide enough to hold every proposal the suite has made: the assertion below is that
+      // the page *is* the live rows, so a period that clipped one would fail for the wrong
+      // reason. The window tests plan in UTC, this reads in UTC.
+      from: utcDatePlus(-2),
+      to: utcDatePlus(62),
     })) as {
       entries: {
         aggregateId: string;

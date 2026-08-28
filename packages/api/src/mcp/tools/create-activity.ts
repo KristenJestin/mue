@@ -1,4 +1,4 @@
-import { instantSchema, localDateSchema } from "@mue/contracts";
+import { instantSchema, localDateSchema, pastEventDay } from "@mue/contracts";
 import { z } from "zod";
 import {
   activityEnvironmentSchema,
@@ -48,7 +48,7 @@ const inputSchema = {
   startedOn: localDateSchema
     .optional()
     .describe(
-      "Required. The calendar day the session belongs to, YYYY-MM-DD, in the local time of the person. Resolve words like 'yesterday' yourself; the server will not guess a date.",
+      "Required. The calendar day the session belongs to, YYYY-MM-DD, in the local time of the person. A session is something that happened, so this day cannot be in the future. Resolve words like 'yesterday' yourself; the server will not guess a date.",
     ),
   durationMinutes: z
     .int()
@@ -169,6 +169,14 @@ function validate(args: CreateActivityArgs) {
       args.durationSeconds === undefined ? "durationMinutes" : "durationSeconds",
     );
   }
+  // Rule `pastEventDay`. This tool creates a *finished* session -- FR-ACTIVITY-005 says
+  // "Interdire les dates futures" and the form on the phone has always refused one -- and until
+  // F-02 it was the one write path that did not. The rule is shared rather than restated here,
+  // so a session, a weighing and a journal line answer the same question the same way.
+  const day = pastEventDay("startedOn", args.startedOn, {
+    hint: "Resolve a relative day against the person's own calendar before you send it.",
+  });
+  if (day !== undefined) return invalidPayload(day.message, day.field);
   return null;
 }
 

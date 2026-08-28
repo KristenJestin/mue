@@ -48,11 +48,43 @@ beforeEach(async () => {
   await seedUser(handle, USER);
 });
 
-/** The instance `packages/contracts` emitted for a fixture file, by name. */
+/**
+ * A day safely inside `pastEventDay`, computed rather than written down.
+ *
+ * Four committed fixtures date a *record of something that happened* in the future --
+ * `measurement-v1-edge` and `activity-session-v1-edge` both on `2028-02-29`, and both food log
+ * entries on `2026-09-01`. They were written as "a leap day" and "next month" at a time when
+ * nothing judged a date, and the date policy now says all four are impossible: BR-009,
+ * FR-ACTIVITY-005 and PRD_FOOD 15 each forbid one of them.
+ *
+ * The fixtures are not corrected here. They are emitted into
+ * `apps/android/app/src/test/resources/contract/`, so changing them is an Android change, and
+ * this branch does not make one -- it is reported instead. Until they are regenerated, this file
+ * rebases the judged day and leaves every other byte of the instance exactly as the contract
+ * emitted it, which is what the file exists to push.
+ */
+const RECORDED_DAY = (() => {
+  const day = new Date();
+  day.setUTCDate(day.getUTCDate() - 7);
+  return day.toISOString().slice(0, 10);
+})();
+
+/** The fields `pastEventDay` judges, by the payload that carries them. */
+const RECORDED_DAY_FIELDS = ["date", "startedOn", "consumedOn"] as const;
+
+/**
+ * The instance `packages/contracts` emitted for a fixture file, by name, with any day the date
+ * policy judges moved into the past. See [RECORDED_DAY]: a fixture whose own date the server
+ * refuses cannot be pushed, and the fixture is the thing under test everywhere else.
+ */
 function fixture(file: string): Record<string, unknown> {
   const found = CONTRACT_FIXTURES.find((candidate) => candidate.file === file);
   if (found === undefined) throw new Error(`no contract fixture named ${file}`);
-  return found.value as Record<string, unknown>;
+  const value = { ...(found.value as Record<string, unknown>) };
+  for (const field of RECORDED_DAY_FIELDS) {
+    if (typeof value[field] === "string") value[field] = RECORDED_DAY;
+  }
+  return value;
 }
 
 interface Envelope {
@@ -508,7 +540,7 @@ describe("all six together", () => {
     const plan = fixture("meal-plan-entry-v1-valid.json");
 
     const response = await submitMutations(handle, context, [
-      upsert("measurement", "2026-09-01", { date: "2026-09-01", weightCg: 7_845 }),
+      upsert("measurement", RECORDED_DAY, { date: RECORDED_DAY, weightCg: 7_845 }),
       upsert("healthProfile", "me", { heightCm: 171, birthDate: "1998-11-18" }),
       upsert("activitySession", activity["id"] as string, activity),
       upsert("customExerciseDefinition", definition["id"] as string, definition),
@@ -603,7 +635,7 @@ describe("the moments the six-moment split adds", () => {
     const id = base["id"] as string;
     const payload = {
       ...base,
-      consumedOn: "2026-09-01",
+      consumedOn: RECORDED_DAY,
       // The hour that used to have no moment of its own: one in the morning is the far end of
       // the only window that crosses midnight.
       consumedAt: "01:00",

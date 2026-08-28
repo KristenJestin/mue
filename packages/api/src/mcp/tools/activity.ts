@@ -2,6 +2,7 @@ import {
   ACTIVITY_SESSION_PAYLOAD_VERSION_1,
   type ActivitySessionPayloadV1,
   localDateSchema,
+  pastEventDay,
 } from "@mue/contracts";
 import { z } from "zod";
 import {
@@ -324,7 +325,9 @@ const updateInputSchema = {
     .describe("The corrected movement. Omit to leave it as it is."),
   startedOn: localDateSchema
     .optional()
-    .describe("The corrected day, YYYY-MM-DD. Omit to leave it as it is."),
+    .describe(
+      "The corrected day, YYYY-MM-DD. A session is something that happened, so it cannot be moved into the future. Omit to leave it as it is.",
+    ),
   durationMinutes: z
     .int()
     .min(1)
@@ -493,13 +496,22 @@ async function updateHandler(context: ToolContext, args: UpdateArgs) {
     );
   }
 
+  // Rule `pastEventDay`, judged on the day the row will *hold* rather than on the argument, so
+  // a caller that edits only the duration cannot leave a session sitting in the future. The
+  // escape from a row that somehow already does is to send a corrected `startedOn`.
+  const startedOn = args.startedOn ?? stored.payload.startedOn;
+  const day = pastEventDay("startedOn", startedOn);
+  if (day !== undefined) {
+    return refuse(context, UPDATE_TOOL_NAME, invalidPayload(day.message, day.field));
+  }
+
   const payload: ActivitySessionPayloadV1 = {
     ...stored.payload,
     movement,
     customMovementName,
     environment: (args.environment ??
       stored.payload.environment) as ActivitySessionPayloadV1["environment"],
-    startedOn: args.startedOn ?? stored.payload.startedOn,
+    startedOn,
     startedAtTime: edited(
       args.startedAtTime,
       args.clearStartedAtTime,

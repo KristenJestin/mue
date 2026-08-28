@@ -13,6 +13,7 @@ import {
   MACRO_PER_100_MAX_MILLIGRAMS,
   mealSlotForLocalTime,
   mealSlotSchema,
+  pastEventDay,
   SERVINGS_MAX_THOUSANDTHS,
   SERVINGS_MIN_THOUSANDTHS,
   SERVINGS_STEP_THOUSANDTHS,
@@ -300,14 +301,6 @@ interface LineArgs {
   clear?: readonly (typeof CLEARABLE)[number][] | undefined;
   expectedRevision?: string | undefined;
   idempotencyKey?: string | undefined;
-}
-
-/** The server's own calendar day. PRD_FOOD 21.5: a line cannot be created in the future. */
-function serverLocalDate(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 /** Which of the three amount fields was given, converted onto the scale its unit selects. */
@@ -685,15 +678,14 @@ async function createHandler(context: ToolContext, args: LineArgs) {
       ),
     );
   }
-  if (args.consumedOn > serverLocalDate()) {
-    return refuse(
-      context,
-      CREATE_TOOL_NAME,
-      invalidPayload(
-        "A journal line records something that was eaten, so it cannot be dated in the future. To plan a meal ahead, that is a different thing from logging one.",
-        "consumedOn",
-      ),
-    );
+  // Rule `pastEventDay`, PRD_FOOD 15: "Aujourd'hui ou dans le passé, jamais dans le futur".
+  // The wording is the rule's now, so a journal line, a session and a weighing refuse a future
+  // day in the same sentence and with the same bound.
+  const createdDay = pastEventDay("consumedOn", args.consumedOn, {
+    hint: "To propose a meal ahead of time, use `mue.plan_meal`: that is a different thing from logging one.",
+  });
+  if (createdDay !== undefined) {
+    return refuse(context, CREATE_TOOL_NAME, invalidPayload(createdDay.message, createdDay.field));
   }
   if (args.title === undefined) {
     return refuse(
@@ -883,13 +875,12 @@ async function updateHandler(context: ToolContext, args: LineArgs) {
     return refuse(context, UPDATE_TOOL_NAME, notFound("foodLogEntry", args.id, "journal line"));
   }
 
+  // Rule `pastEventDay`, on the day the row will hold rather than on the argument, so an edit
+  // that touches only the time cannot leave a line sitting in the future.
   const consumedOn = args.consumedOn ?? stored.payload.consumedOn;
-  if (consumedOn > serverLocalDate()) {
-    return refuse(
-      context,
-      UPDATE_TOOL_NAME,
-      invalidPayload("A journal line cannot be dated in the future.", "consumedOn"),
-    );
+  const updatedDay = pastEventDay("consumedOn", consumedOn);
+  if (updatedDay !== undefined) {
+    return refuse(context, UPDATE_TOOL_NAME, invalidPayload(updatedDay.message, updatedDay.field));
   }
 
   const slot = args.slot ?? stored.payload.slot;
