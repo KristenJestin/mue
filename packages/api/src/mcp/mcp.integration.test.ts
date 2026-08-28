@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createAuth, MUE_SCOPES, OAUTH_SCOPES, revokeAgent, type AuthHandle } from "@mue/auth";
+import {
+  createAuth,
+  MUE_SCOPES,
+  OAUTH_SCOPES,
+  oauthIssuer,
+  revokeAgent,
+  type AuthHandle,
+} from "@mue/auth";
 import { createTestDatabase, schema } from "@mue/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -486,6 +493,207 @@ describe("discovery", () => {
       headers: { accept: "text/event-stream" },
     });
     expect(response.status).toBe(405);
+  });
+});
+
+/**
+ * The issuer, byte for byte.
+ *
+ * Five things name the issuer, and a disagreement between any two of them is a 401 with
+ * nothing in any log -- the failure this repository has already been bitten by:
+ *
+ *  - `authorization_servers` in the RFC 9728 protected-resource metadata, which is where
+ *    a client learns the identifier at all;
+ *  - `issuer` in the RFC 8414 authorization-server metadata, which section 3.3 of that
+ *    RFC makes a client compare against the identifier before it uses anything else in
+ *    the document;
+ *  - `issuer` in the OpenID Connect Discovery document, for the clients that ask for that
+ *    one instead;
+ *  - `iss` on an access token this server actually minted;
+ *  - `oauthIssuer(baseUrl)`, which is what `route.ts` hands `requireMcpAuth` and therefore
+ *    what every one of those tokens is verified against.
+ *
+ * They are asserted as a single object so a failure prints all five and names the odd one
+ * out, instead of stopping at whichever pair happened to be compared first.
+ */
+describe("the issuer, byte for byte", () => {
+  let accessToken = "";
+
+  beforeAll(async () => {
+    accessToken = (await newAgent("Issuer probe", "weight:read offline_access")).tokens
+      .access_token;
+  }, OAUTH_TIMEOUT_MS);
+
+  /** The `iss` claim as a resource server reads it: off the token, not off a document. */
+  function issuerClaim(token: string): unknown {
+    const payload = token.split(".")[1];
+    return (
+      JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")) as Record<
+        string,
+        unknown
+      >
+    )["iss"];
+  }
+
+  async function advertisedIssuer(): Promise<string> {
+    const resource = await json(await fetch(`${base}/.well-known/oauth-protected-resource/mcp`));
+    return (resource["authorization_servers"] as string[])[0]!;
+  }
+
+  test("is one string in every document that names it, and on the token", async () => {
+    const authServer = await json(await fetch(`${base}/.well-known/oauth-authorization-server`));
+    const openId = await json(await fetch(`${base}/.well-known/openid-configuration`));
+
+    expect({
+      authorizationServers: await advertisedIssuer(),
+      authorizationServerMetadata: authServer["issuer"],
+      openIdConfiguration: openId["issuer"],
+      accessTokenIssClaim: issuerClaim(accessToken),
+      requireMcpAuthExpects: oauthIssuer(base),
+    }).toEqual({
+      authorizationServers: base,
+      authorizationServerMetadata: base,
+      openIdConfiguration: base,
+      accessTokenIssClaim: base,
+      requireMcpAuthExpects: base,
+    });
+  });
+
+  /**
+   * F-04, stated as the property it is actually about.
+   *
+   * Codex warns `rejecting authorization server metadata URL https://<origin>/` at every
+   * initialisation, and the trailing slash in it is not ours: the test above is what says
+   * no document we write carries one. It is how Rust's `url::Url` prints itself. An issuer
+   * whose path component is empty is the one shape a URL parser rewrites -- RFC 3986
+   * section 6.2.3, "a URI that uses the generic syntax for authority with an empty path
+   * should be normalized to a path of '/'" -- so every client that holds the issuer in a
+   * URL type rather than in a string hands back the slashed form.
+   *
+   * That matters because RFC 8414 section 3.3 then compares byte for byte: "The 'issuer'
+   * value returned MUST be identical to the authorization server's issuer identifier value
+   * into which the well-known URI string was inserted to create the URL used to retrieve
+   * the metadata." A client that kept the advertised string compares `<origin>` against
+   * `<origin>` and passes. A client that re-derives it from a URL compares `<origin>/`
+   * against `<origin>` and needs the root-slash leniency that rmcp's
+   * `issuer_identifiers_match` spends its whole body on.
+   *
+   * This assertion exists so that a change moving the issuer has to come through here and
+   * read that paragraph first.
+   */
+  test("publishes the issuer in the one shape a URL parser rewrites", async () => {
+    const advertised = await advertisedIssuer();
+
+    expect(advertised).toBe(base);
+    expect(advertised.endsWith("/")).toBe(false);
+    // The divergence, pinned. Not a defect -- the reason the warning prints a slash.
+    expect(new URL(advertised).href).toBe(`${advertised}/`);
+  });
+
+  /**
+   * The slashed form has to find a document too.
+   *
+   * Both derivations start from the issuer after a URL parser has had it, which is the
+   * only form a client like Codex ever holds. RFC 8414 section 3.1 is the first: "If the
+   * issuer identifier value contains a path component, any terminating '/' MUST be removed
+   * before inserting '/.well-known/' and the well-known URI suffix between the host
+   * component and the path component." The second is what a client that resolves a
+   * relative reference produces instead of building a string.
+   */
+  test("answers at the metadata URLs derivable from the slashed issuer", async () => {
+    const parsed = new URL(await advertisedIssuer()).href;
+    expect(parsed).toBe(`${base}/`);
+
+    const derivations: Record<string, string> = {
+      "rfc 8414 section 3.1 insertion": `${parsed.replace(/\/$/, "")}/.well-known/oauth-authorization-server`,
+      "relative resolution": new URL(".well-known/oauth-authorization-server", parsed).href,
+      "openid connect discovery": new URL(".well-known/openid-configuration", parsed).href,
+    };
+
+    for (const [derivation, url] of Object.entries(derivations)) {
+      const response = await fetch(url);
+      const metadata = response.ok ? await json(response) : {};
+      expect({ derivation, status: response.status, issuer: metadata["issuer"] }).toEqual({
+        derivation,
+        status: 200,
+        issuer: base,
+      });
+    }
+  });
+
+  /**
+   * The ladder Codex actually walks, and the rung this server has to hold.
+   *
+   * rmcp -- the Rust MCP SDK Codex embeds -- refuses to fetch an `authorization_servers`
+   * entry whose host is a private address. `is_allowed_authorization_server_metadata_url`
+   * passes a host only if `is_disallowed_metadata_host` says no, and that consults
+   * `Ipv4Addr::is_private()`; the one exemption needs *both* the MCP server and the
+   * candidate to be loopback, which `192.168.1.100` is not. So on the owner's LAN our
+   * `authorization_servers` entry is skipped with that warning, every time, and always
+   * has been: the entry named `<origin>/api/auth` before the issuer moved and was skipped
+   * just the same. This is `modelcontextprotocol/rust-sdk` PR 935, an SSRF fix.
+   *
+   * What is left is `try_discover_oauth_server(base_url, None)`, which is not gated, and
+   * whose `generate_discovery_urls` derives these four from the MCP endpoint URL in this
+   * order. The fourth is the only one that can answer, and it is the entire reason Codex
+   * works here at all. It began answering the day the issuer became the origin: before
+   * that the root was a 404, discovery fell through to the legacy `<origin>/authorize`,
+   * and that 404 is the report `oauthIssuer` was written for.
+   *
+   * So this is not a nicety. It is the single rung holding a shipping client up, reached
+   * only after the documented path has been refused, and nothing else in this file would
+   * notice if it went. The first three must stay 404: `fetch_authorization_metadata` reads
+   * a non-200 as "try the next" but a 200 as final, and a 200 there would be checked
+   * against an expected issuer of `<origin>/mcp` and fail the whole discovery rather than
+   * falling through.
+   */
+  test("holds the fourth rung of the rmcp discovery ladder, which is the only one", async () => {
+    const ladder = [
+      { rung: "/.well-known/oauth-authorization-server/mcp", answers: false },
+      { rung: "/.well-known/openid-configuration/mcp", answers: false },
+      { rung: "/mcp/.well-known/openid-configuration", answers: false },
+      { rung: "/.well-known/oauth-authorization-server", answers: true },
+    ];
+
+    for (const { rung, answers } of ladder) {
+      const response = await fetch(`${base}${rung}`);
+      const metadata = response.status === 200 ? await json(response) : {};
+      expect({
+        rung,
+        answers: response.status === 200,
+        issuer: metadata["issuer"] ?? null,
+      }).toEqual({ rung, answers, issuer: answers ? base : null });
+    }
+  });
+
+  /**
+   * And the comparison that rung is then put through.
+   *
+   * Having refused the advertised string, the client has no issuer left to compare against
+   * but the one it reverses out of the URL it just fetched -- `<origin>/`, because that is
+   * what a URL type prints. rmcp accepts it through `issuer_identifiers_match`, which
+   * strips a trailing slash from either side when what remains has an empty or root path.
+   * A client that normalised nothing at all would reject this document, and MCP's
+   * 2026-07-28 authorization revision does tell clients to compare issuers by simple
+   * string comparison.
+   *
+   * The assertion is therefore the honest one: not that the two strings are equal, but
+   * that they differ by exactly the root slash and by nothing else. If a later change
+   * makes them differ by more, that leniency stops covering it.
+   */
+  test("differs from the reversed-out issuer by the root slash and nothing else", async () => {
+    const discoveryUrl = `${base}/.well-known/oauth-authorization-server`;
+    const metadata = await json(await fetch(discoveryUrl));
+
+    // What a client reverses out of the URL it fetched: that URL minus the well-known
+    // suffix, printed by a URL type.
+    const reversed = new URL(discoveryUrl.replace("/.well-known/oauth-authorization-server", "/"))
+      .href;
+    const trimRootSlash = (issuer: string) =>
+      new URL(issuer).pathname === "/" ? issuer.replace(/\/$/, "") : issuer;
+
+    expect(reversed).toBe(`${base}/`);
+    expect(trimRootSlash(reversed)).toBe(metadata["issuer"] as string);
   });
 });
 
