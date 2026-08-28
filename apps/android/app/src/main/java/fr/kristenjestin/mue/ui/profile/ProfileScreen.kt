@@ -654,7 +654,10 @@ private fun ProfileErrorPreview() {
         ProfileUiState(
             displayName = "Kris",
             heightInput = "999",
-            birthDate = LocalDate.of(2030, 1, 1),
+            // Un aperçu de l'état invalide, donc une date qui reste future quel que
+            // soit le jour où l'aperçu est rendu : 2030 cessait de démontrer ce qu'il
+            // démontre en 2030.
+            birthDate = LocalDate.of(2999, 1, 1),
             heightError = MueValidation.HEIGHT_ERROR,
             birthDateError = MueValidation.BIRTH_DATE_ERROR,
             export = ExportState.Failed(ProfileViewModel.EXPORT_ERROR),
