@@ -407,13 +407,19 @@ private fun PlanCard(
                     testTag = FoodTestTags.confirmPlan(state.key.slot),
                     onClick = onConfirm,
                 ).takeIf { state.canConfirm },
-                PlanActionSpec(
-                    label = FoodDayMessages.SWAP,
-                    iconName = MueIcons.ROTATE_CW,
-                    tint = colors.textSecondary,
-                    testTag = FoodTestTags.swapPlan(state.key.slot),
-                    onClick = onSwap,
-                ),
+                /*
+                 * `Swap` is deliberately absent while `FoodRoute.Swap` is a placeholder.
+                 *
+                 * It pushed a wordless empty `Box` — no title, no back control, the one
+                 * destination in the module a person could reach and see no way out of, escapable
+                 * only by the system gesture. `Trends` was taken out of the view switcher for
+                 * exactly this reason; this action was missed. The rule is the same and it is
+                 * written here rather than remembered.
+                 *
+                 * Little is lost meanwhile: `Dismiss` frees the moment and a proposal can be posed
+                 * again, which is swapping in two steps instead of one. `FoodDayMessages.SWAP`,
+                 * `FoodTestTags.swapPlan` and `onSwapPlan` are kept so restoring it is one line.
+                 */
                 PlanActionSpec(
                     label = FoodDayMessages.DISMISS,
                     iconName = MueIcons.CLOSE,
