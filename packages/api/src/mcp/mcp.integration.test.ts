@@ -173,7 +173,8 @@ async function authorize(clientId: string, grantedScopes: string): Promise<OAuth
   expect(authorizeResponse.status).toBe(302);
 
   const consentUrl = new URL(authorizeResponse.headers.get("location")!, base);
-  // The consent page of `apps/platform/src/routes/oauth-consent.tsx`.
+  // The consent page of `apps/platform/src/routes/consent.tsx`, mounted here at the path
+  // this suite configured for it.
   expect(consentUrl.pathname).toBe("/oauth-consent");
 
   const consent = await fetch(`${base}/api/auth/oauth2/consent`, {
@@ -780,6 +781,44 @@ describe("a client that registers itself", () => {
         const consentUrl = new URL(authorizeResponse.headers.get("location")!, base);
         expect(consentUrl.pathname).toBe("/oauth-consent");
 
+        /**
+         * The signed query repeats a parameter, and that is load-bearing.
+         *
+         * `signParams` calls `setSignedOAuthQueryParameterNames`, which *appends*
+         * `ba_param` once per signed parameter name. `verifyOAuthQueryParams` re-signs
+         * what comes back after sorting it, so ordering and percent-encoding are free --
+         * both sides finish at `URLSearchParams.toString()` -- but the number of times a
+         * key appears is part of the message.
+         *
+         * Which means anything standing between this 302 and the POST below that cannot
+         * carry a repeated key breaks the authorization. Something did: TanStack Router
+         * hands a page `stringifySearch(parseSearch(search))`, whose `encode` writes each
+         * key once, and the consent page read its query from there. A real client got
+         * `invalid_signature` under the Allow button and could not authorize at all.
+         *
+         * Asserted here, against the real server, because this file owns the server's
+         * half of that contract; that the browser's router really does collapse the key
+         * is proven with the router itself in `apps/platform/src/routes/consent.test.tsx`,
+         * which `packages/api` cannot import.
+         */
+        const signedParameterNames = new URLSearchParams(consentUrl.search).getAll("ba_param");
+        expect(signedParameterNames.length).toBeGreaterThan(1);
+
+        const collapsed = new URLSearchParams(consentUrl.search);
+        collapsed.set("ba_param", JSON.stringify(signedParameterNames));
+        const refused = await fetch(`${base}/api/auth/oauth2/consent`, {
+          method: "POST",
+          headers: ownerHeaders(),
+          body: JSON.stringify({
+            accept: true,
+            scope: "offline_access weight:read",
+            oauth_query: collapsed.toString(),
+          }),
+        });
+        expect(refused.status).toBe(400);
+        expect(await json(refused)).toEqual({ error: "invalid_signature" });
+
+        // And what the consent page hands back: the address bar, byte for byte.
         const consent = await fetch(`${base}/api/auth/oauth2/consent`, {
           method: "POST",
           headers: ownerHeaders(),
