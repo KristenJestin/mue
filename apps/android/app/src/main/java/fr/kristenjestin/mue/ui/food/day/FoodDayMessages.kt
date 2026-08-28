@@ -29,12 +29,7 @@ object FoodDayMessages {
     // region the moments (PRD_FOOD 10.1 and 17)
 
     /**
-     * PRD_FOOD 17: "aucune ligne aujourd'hui → quatre moments vides et leur bouton d'ajout", now
-     * six of them, three of which are folded to a row while they stay empty.
-     *
-     * The empty state of a moment *is* its add button, and it is an invitation rather than a
-     * report: nothing here says a moment is missing something, because a breakfast that did not
-     * happen is not an error.
+     * The words on the day's one add action, before anything has been written on it.
      *
      * **Not "Add what you ate".** That was the first thing the owner named: a moment later today
      * has not been eaten yet, and its `+` is pressed all the same — "alors que c'est parfois sur
@@ -42,12 +37,28 @@ object FoodDayMessages {
      * the module tell half its readers they were in the wrong place.
      *
      * `Add something` and [ADD_MORE]'s `Add something else` are one pair rather than two
-     * sentences, and neither claims a tense. What is being added to is the heading directly above
-     * the button — the moment names itself, so the button does not have to.
+     * sentences, and neither claims a tense. They used to sit under a moment's heading, which is
+     * what named the thing being added to; there is one action now and no heading over it, and
+     * that is the whole correction — **the moment is not chosen here any more.** The hour picks it
+     * on the sheet (FR-FOOD-007), which is what the six `+` buttons were overriding every time one
+     * of them was pressed.
      */
     const val ADD_FIRST: String = "Add something"
 
     const val ADD_MORE: String = "Add something else"
+
+    /**
+     * PRD_FOOD 17: "aucune ligne aujourd'hui" — what a day with nothing on it says about itself.
+     *
+     * It has to say something now. The empty state used to *be* the six moments and their add
+     * rows: the screen was never blank because it always drew all six, filled or not. With a
+     * heading appearing only once its moment holds something, a day nobody has written on has no
+     * headings at all, and one line is what stands between that and a screen that looks broken.
+     *
+     * A report and not an error, and not an instruction either: the action at the foot of the
+     * screen is already the invitation, and repeating it here would be the same control twice.
+     */
+    const val NOTHING_LOGGED_YET: String = "Nothing logged yet"
 
     /** What tapping a line does (PRD_FOOD FR-FOOD-008 reuses the `Add food` sheet to correct one). */
     const val EDIT_ENTRY: String = "Edit this entry"
@@ -67,16 +78,6 @@ object FoodDayMessages {
 
     const val FUTURE_DAY_DETAIL: String =
         "Its moments can carry a suggestion. An entry waits for the day itself."
-
-    /**
-     * What a moment ahead of today offers, in the row the add button holds on every other day.
-     *
-     * PRD_FOOD 10.1 wants that row "toujours présent", and PRD_FOOD 22 will not let it write a
-     * line, so it keeps its place and stops being a control. It names what the moment can hold
-     * rather than what it refuses — the day's own line above has already said that once, and four
-     * refusals under it would read as four errors.
-     */
-    const val PLANNABLE_SLOT: String = "Can hold a suggestion"
 
     // endregion
 

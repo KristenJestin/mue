@@ -353,7 +353,7 @@ class FoodViewSwitcherTest {
                 onOpenDatePicker = {},
                 onDismissDatePicker = {},
                 onDayPicked = {},
-                onAddToSlot = {},
+                onAdd = {},
                 onEditEntry = {},
                 onConfirmPlan = {},
                 onSwapPlan = {},

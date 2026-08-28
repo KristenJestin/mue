@@ -74,8 +74,9 @@ class FoodDayScreenshotTest {
      * The empty day, which is what the tab opens on before anything has been logged.
      *
      * Its pair is [theDayWhoseProteinIsUnknown], and the two are the picture of PRD_FOOD 13.2.
-     * `food-day-empty.png` must show three whole meal blocks, three folded snack rows between
-     * them, and **no figure beside any of them**;
+     * `food-day-empty.png` must show the date, one line saying nothing has been logged, the
+     * pinned `Add something` at the foot — and **no moment and no figure at all**, where it used
+     * to show six headings, three of them folded to a row;
      * `food-day-unknown-protein.png` must show a snack reading `≈ 420 kcal` and `— protein`.
      * If those two images ever look alike, the module has lost the difference between "nobody
      * wrote this down" and "this is zero", and no assertion in the suite will say so.
@@ -88,12 +89,12 @@ class FoodDayScreenshotTest {
     }
 
     /**
-     * The same untouched day at twice the font scale, which is where six moments would tell.
+     * The same untouched day at twice the font scale, which is where six moments used to tell.
      *
-     * What to look for: the three meals still read as blocks, the three snacks between them are
-     * still one row each, and no moment's name is cut. The folded row is the whole of what six
-     * moments cost an empty day — if it grows a heading of its own at this scale, the fold has
-     * stopped paying for itself.
+     * What to look for: `Add something` whole rather than cut, the band at the foot grown with
+     * the text and still clear of the line above it, and nothing at all between the date and it.
+     * The six moments cost an untouched day nothing now, which is what the fold was buying and
+     * why the fold is gone.
      */
     @Test
     fun theEmptyDayAtTwiceTheFontScale() {
@@ -129,7 +130,7 @@ class FoodDayScreenshotTest {
                         onOpenDatePicker = {},
                         onDismissDatePicker = {},
                         onDayPicked = {},
-                        onAddToSlot = {},
+                        onAdd = {},
                         onEditEntry = {},
                         onConfirmPlan = {},
                         onSwapPlan = {},

@@ -40,7 +40,13 @@ data class FoodDayUiState(
     val dateLabel: String,
     /** The same day spelled in full, for a screen reader (PRD_FOOD 18). */
     val dateDescription: String,
-    /** PRD_FOOD 10.1: the six moments, in order, filled or not. */
+    /**
+     * The six moments, in order, filled or not.
+     *
+     * All six are still built, because the six are what the domain groups by and what
+     * [MealSlotRules] answers with. What the screen draws is [visibleSlots]; keeping the whole
+     * six here is what lets a test ask about a moment that is currently drawing nothing.
+     */
     val slots: List<FoodDaySlotUiState>,
     /**
      * The day's strict sum (PRD_FOOD 13.1), unknown as soon as one line's metric is.
@@ -70,6 +76,49 @@ data class FoodDayUiState(
 
     /** PRD_FOOD 10.4 and [DailyNutritionSummary.isRecorded]: an empty day is not a day worth 0. */
     val isRecorded: Boolean get() = entryCount > 0
+
+    /**
+     * The moments the screen actually draws: the ones that hold something.
+     *
+     * **This supersedes PRD_FOOD 10.1's "toujours présent".** That section keeps every moment on
+     * screen with an add row inside it, so that adding to breakfast is always the same gesture in
+     * the same place. Six moments each drawing a heading over an invitation is what the owner was
+     * looking at when he wrote *"j'ai « lunch », et les snacks sont grisés ? […] est-ce qu'on
+     * pourrait pas imaginer juste avoir les headers […] uniquement quand il y a un élément
+     * dedans"*. His instruction wins, and [FoodDayUiState.addLabel]'s one action is what replaces
+     * the six.
+     *
+     * What is lost is named rather than glossed: adding **deliberately** to a moment other than
+     * the one the clock is in used to be a single tap on that moment's `+`. It is now the add
+     * sheet's moment override — one extra step — and it is the same step FR-FOOD-007 already
+     * required of every other way into the sheet.
+     */
+    val visibleSlots: List<FoodDaySlotUiState> get() = slots.filter(FoodDaySlotUiState::hasContent)
+
+    /** True while the day holds neither a line nor a proposal, and the screen has nothing to list. */
+    val isBlank: Boolean get() = visibleSlots.isEmpty()
+
+    /**
+     * The one add action's words (PRD_FOOD 17), which are the moment's old pair moved up a level.
+     *
+     * `Add something` and `Add something else` never claimed a tense and never named what they
+     * added to — the heading above them did. With one action for the whole day there is no
+     * heading above it, and that is the point: the moment is no longer chosen here at all. The
+     * hour decides it on the sheet (FR-FOOD-007), which is the rule the per-moment `+` was
+     * quietly overriding.
+     */
+    val addLabel: String
+        get() = if (isRecorded) FoodDayMessages.ADD_MORE else FoodDayMessages.ADD_FIRST
+
+    /**
+     * PRD_FOOD 22: whether a line may be written to this day at all.
+     *
+     * Asked of the day rather than of each moment, now that there is one action. On a day still
+     * to come the action keeps its place and stops being a control — the same reasoning the add
+     * row carried, for the same reason: a control that vanishes is a screen that reflows under
+     * the reader, and [FoodDayMessages.FUTURE_DAY] above has already said why it is inert.
+     */
+    val canAdd: Boolean get() = canLog
 
     /**
      * PRD_FOOD 22: "un jour passé peut être complété ; un jour futur ne peut pas l'être".
@@ -176,12 +225,16 @@ data class FoodDayUiState(
 }
 
 /**
- * One of PRD_FOOD 10.1's six moments: its proposal, its lines, its own total, its add button.
+ * One of PRD_FOOD 10.1's six moments: its proposal, its lines and its own total.
+ *
+ * It no longer carries an add button. The day carries one for all six
+ * ([FoodDayUiState.addLabel]), and a moment appears at all only once it holds something
+ * ([hasContent]) — so this object is a description of what was eaten rather than an offer to eat.
  *
  * [totalLabel] is null exactly while the moment holds no line. PRD_FOOD 10.1 shows a moment's
- * total "lorsqu'il contient au moins une ligne" and PRD_FOOD 10.4 forbids inventing one, so an
- * empty breakfast is a heading and an invitation — not `0 kcal`, and not `—` either. Those are
- * three different facts and they read three different ways on screen.
+ * total "lorsqu'il contient au moins une ligne" and PRD_FOOD 10.4 forbids inventing one, so a
+ * moment holding only a proposal is a heading with no figure beside it — not `0 kcal`, and not
+ * `—` either. Those are three different facts and they read three different ways on screen.
  */
 @Immutable
 data class FoodDaySlotUiState(
@@ -198,37 +251,26 @@ data class FoodDaySlotUiState(
     val plan: FoodDayPlanUiState?,
     /** PRD_FOOD 18: the moment, its count and its total announced as one unit. */
     val description: String,
-    /** The add button's own words, which change once the moment holds something. */
-    val addLabel: String,
-    /**
-     * PRD_FOOD 22: whether a line may be written into this moment at all.
-     *
-     * False on a day that has not happened. The row keeps its place — PRD_FOOD 10.1 wants an add
-     * control "toujours présent" — and stops being a control, saying instead what the moment can
-     * hold until the day arrives. Refusing after the tap would have been the other reading, and a
-     * worse one: the sheet would open, the food would be chosen, the quantity typed, and only
-     * `Save entry` would say no.
-     */
-    val canAdd: Boolean,
-    /**
-     * Whether the moment draws as a single quiet line instead of a whole block.
-     *
-     * True of an **empty snack** and of nothing else. PRD_FOOD 10.1 keeps every moment on screen
-     * whether it holds anything or not — that is what makes adding to breakfast always the same
-     * gesture in the same place — so a snack nobody has eaten in is never removed. It is folded:
-     * its heading and its add row become one row carrying both.
-     *
-     * The three meals are never folded, empty or not. A day with nothing in it is a day where
-     * breakfast, lunch and dinner are the three things worth offering, and the snacks are the
-     * three that have nothing to say yet. A proposal counts as something to say, which is why
-     * [plan] is part of the test and not just [entries].
-     */
-    val isCollapsed: Boolean,
 ) {
 
     val isEmpty: Boolean get() = entries.isEmpty()
 
     val hasTotal: Boolean get() = totalLabel != null
+
+    /**
+     * Whether this moment is drawn at all.
+     *
+     * A heading appears when its moment has something under it, and not before — which is the
+     * owner's instruction, and what removed the six greyed-out invitations he was reading. A
+     * proposal counts as something: PRD_FOOD 12 puts it *at the head of* the moment, so a dinner
+     * that has been suggested but not eaten is a dinner worth naming.
+     *
+     * This is what the **fold used to pay for**. An empty snack was drawn as one quiet row rather
+     * than a whole block, so that six moments did not make an untouched day three screens tall.
+     * A moment that is not drawn at all costs nothing, so the fold has nothing left to buy and
+     * has gone with the add rows it existed to compress.
+     */
+    val hasContent: Boolean get() = entries.isNotEmpty() || plan != null
 
     companion object {
 
@@ -258,14 +300,6 @@ data class FoodDaySlotUiState(
                     energy?.let(FoodDayFormat::spoken),
                     protein?.let(FoodDayFormat::spoken),
                 ),
-                addLabel = when {
-                    // PRD_FOOD 12: what a moment ahead of today is for, said in its own row.
-                    !canLog -> FoodDayMessages.PLANNABLE_SLOT
-                    rows.isEmpty() -> FoodDayMessages.ADD_FIRST
-                    else -> FoodDayMessages.ADD_MORE
-                },
-                canAdd = canLog,
-                isCollapsed = !slot.isMeal && rows.isEmpty() && plan == null,
             )
         }
     }

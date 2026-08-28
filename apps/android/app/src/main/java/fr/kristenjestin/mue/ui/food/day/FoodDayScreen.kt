@@ -14,13 +14,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -33,11 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealPlanKey
-import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
+import fr.kristenjestin.mue.ui.components.MuePrimaryButton
+import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
+import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.food.FoodViewScaffold
@@ -61,7 +69,7 @@ private const val DisabledStepAlpha = 0.2f
  */
 @Composable
 internal fun FoodDayRoute(
-    onAddToSlot: (LocalDate, MealSlot) -> Unit,
+    onAdd: (LocalDate) -> Unit,
     onEditEntry: (FoodLogEntryId) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
     modifier: Modifier = Modifier,
@@ -75,7 +83,12 @@ internal fun FoodDayRoute(
         onOpenDatePicker = viewModel::onShowDatePicker,
         onDismissDatePicker = viewModel::onDismissDatePicker,
         onDayPicked = viewModel::onDayPicked,
-        onAddToSlot = { slot -> onAddToSlot(state.date, slot) },
+        /*
+         * The day, and **no moment**. That is the whole of the correction: what the sheet is
+         * handed is the journal the reader is looking at, and the moment is left to the hour
+         * (FR-FOOD-007) with the override still on the sheet where the owner asked for it.
+         */
+        onAdd = { onAdd(state.date) },
         onEditEntry = onEditEntry,
         onConfirmPlan = viewModel::onConfirmPlan,
         onSwapPlan = onSwapPlan,
@@ -85,12 +98,39 @@ internal fun FoodDayRoute(
 }
 
 /**
- * The journal of one day: the date, then the six moments (PRD_FOOD 10.1).
+ * The journal of one day: the date, then the moments that hold something (PRD_FOOD 10.1).
  *
  * There is no header band, no daily summary and no permanent settings button — PRD_FOOD 7 is
- * explicit about all three, and PRD_FOOD 22 makes the absence an acceptance criterion. There is
- * no bottom-anchored action either: PRD_FOOD 10.1 puts the add button *inside* each moment,
- * always present, so the screen never grows the pinned band that ate 112 dp of scroll on
+ * explicit about all three, and PRD_FOOD 22 makes the absence an acceptance criterion.
+ *
+ * ## One add action, at the foot, where the rest of the app puts one
+ *
+ * This screen used to put an add row **inside each of the six moments**, which is what PRD_FOOD
+ * 10.1 asks for — "un bouton d'ajout toujours présent", so that adding to breakfast is always
+ * the same gesture in the same place. **The owner's instruction supersedes that**, and his
+ * reasoning is the stronger one: *"je trouve ça bizarre que le + de lunch et le + de « add
+ * something » ne soient pas le même […] vu que maintenant c'est géré via l'heure, ça a moins de
+ * sens de partir du type de repas. Un bouton commun à tous ?"*
+ *
+ * It is the same defect as the one he reported at 00:26, when the sheet offered `Breakfast` while
+ * showing its own window as 05:00–10:00. The domain was right — `MealSlot.forTime(00:26)` is
+ * `EVENING_SNACK`, the window that wraps midnight — but he had pressed **breakfast's** `+`, which
+ * passes the moment explicitly and pins it over the clock. A `+` per moment contradicts "the hour
+ * decides", which is the rule he asked for the day before.
+ *
+ * **What §10.1 loses.** Adding *deliberately* to a moment other than the one the clock is in was
+ * one tap on that moment's `+`; it is now the sheet's moment override, which is one step more.
+ * That is the whole cost, and it is paid by the reader who wants to record last night's supper
+ * this morning. It buys back the six greyed-out invitations, and it makes the sheet's own
+ * `SLOT_FIELD` — "what the hour decided, and the way to overrule it" — the single place a moment
+ * is ever chosen.
+ *
+ * **Where it went.** [MueStickyBottomAction] with a [MuePrimaryButton] inside it, which is what
+ * `Foods` and `Recipes` — the other two views of this very switcher — already do, and what
+ * `Log activity`, `Strength session` and `Add food` do behind them. The band is two parts and the
+ * list's clearance is split at the seam, exactly as `FoodsScreen` splits it: the **solid block**
+ * comes off the viewport through the `Modifier`, the **ramp** stays inside `contentPadding`.
+ * Subtracting the whole band is what left the 112 dp of scroll no thumb could reach on
  * `Log activity`.
  *
  * State is handed in whole, so every test below drives what reaches the screen rather than how a
@@ -104,7 +144,7 @@ internal fun FoodDayScreen(
     onOpenDatePicker: () -> Unit,
     onDismissDatePicker: () -> Unit,
     onDayPicked: (LocalDate) -> Unit,
-    onAddToSlot: (MealSlot) -> Unit,
+    onAdd: () -> Unit,
     onEditEntry: (FoodLogEntryId) -> Unit,
     onConfirmPlan: (MealPlanKey) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
@@ -112,36 +152,83 @@ internal fun FoodDayScreen(
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
+    val density = LocalDensity.current
+    val list = rememberLazyListState()
+    var actionHeight by remember { mutableStateOf(0.dp) }
 
-    FoodViewScaffold(modifier = modifier, topFade = MueContentTopFade) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().testTag(FoodTestTags.DAY),
-            contentPadding = PaddingValues(top = MueContentTopFade, bottom = spacing.xxxl),
-            verticalArrangement = Arrangement.spacedBy(spacing.xl),
+    Box(modifier = modifier.fillMaxSize()) {
+        FoodViewScaffold(modifier = Modifier.fillMaxSize(), topFade = MueContentTopFade) {
+            LazyColumn(
+                state = list,
+                modifier = Modifier
+                    .fillMaxSize()
+                    /*
+                     * The pinned action's clearance, split exactly where the band is split. The
+                     * viewport ends above the **solid** block, so no card comes to rest under
+                     * chrome that eats touches; the ramp is left in, because it paints over live
+                     * content and a thumb landing in the fade still has to scroll the list.
+                     */
+                    .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
+                    .testTag(FoodTestTags.DAY),
+                contentPadding = PaddingValues(
+                    top = MueContentTopFade,
+                    // Inside the scroll, so the last card rests clear of the fade.
+                    bottom = MueStickyActionRamp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(spacing.xl),
+            ) {
+                item(key = "date") {
+                    DayNavigation(
+                        state = state,
+                        onPreviousDay = onPreviousDay,
+                        onNextDay = onNextDay,
+                        onOpenDatePicker = onOpenDatePicker,
+                    )
+                }
+
+                // PRD_FOOD 22 and 12: what a day still to come is, said once, above its moments.
+                if (!state.canLog) item(key = "future") { FutureDayNote() }
+
+                /*
+                 * PRD_FOOD 17: a day nobody has written on has no headings at all now, so it says
+                 * so in one line rather than drawing nothing. Only on a day that *could* hold a
+                 * line — a future day has already explained itself directly above, and two
+                 * statements about the same emptiness read as a fault.
+                 */
+                if (state.isBlank && state.canLog) item(key = "empty") { NothingLoggedYet() }
+
+                // A moment appears when it holds something, in PRD_FOOD 10.1's order, and is
+                // never keyed by position.
+                items(items = state.visibleSlots, key = { it.slot.id }) { slot ->
+                    FoodDaySlotSection(
+                        state = slot,
+                        onEditEntry = onEditEntry,
+                        onConfirmPlan = onConfirmPlan,
+                        onSwapPlan = onSwapPlan,
+                        onDismissPlan = onDismissPlan,
+                    )
+                }
+            }
+        }
+
+        MueStickyBottomAction(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { size -> actionHeight = with(density) { size.height.toDp() } },
+            coversContent = list.canScrollForward,
         ) {
-            item(key = "date") {
-                DayNavigation(
-                    state = state,
-                    onPreviousDay = onPreviousDay,
-                    onNextDay = onNextDay,
-                    onOpenDatePicker = onOpenDatePicker,
-                )
-            }
-
-            // PRD_FOOD 22 and 12: what a day still to come is, said once, above its moments.
-            if (!state.canLog) item(key = "future") { FutureDayNote() }
-
-            // Six moments, always six, in PRD_FOOD 10.1's order and never keyed by position.
-            items(items = state.slots, key = { it.slot.id }) { slot ->
-                FoodDaySlotSection(
-                    state = slot,
-                    onAdd = { onAddToSlot(slot.slot) },
-                    onEditEntry = onEditEntry,
-                    onConfirmPlan = onConfirmPlan,
-                    onSwapPlan = onSwapPlan,
-                    onDismissPlan = onDismissPlan,
-                )
-            }
+            /*
+             * PRD_FOOD 22: on a day still to come the action keeps its place and stops being a
+             * control, rather than disappearing. A screen that reflows as the week is walked is
+             * the defect the add row's own `enabled = false` was avoiding, and the reason is
+             * unchanged — [FutureDayNote] above has already said why it is inert.
+             */
+            MuePrimaryButton(
+                label = state.addLabel,
+                enabled = state.canAdd,
+                onClick = onAdd,
+                modifier = Modifier.testTag(FoodTestTags.ADD_TO_DAY),
+            )
         }
     }
 
@@ -151,6 +238,23 @@ internal fun FoodDayScreen(
         today = state.today,
         onDismiss = onDismissDatePicker,
         onConfirm = onDayPicked,
+    )
+}
+
+/**
+ * PRD_FOOD 17: "aucune ligne aujourd'hui", now that six empty moments no longer say it.
+ *
+ * One line, in the quiet ink, stating a fact and asking for nothing — the action at the foot of
+ * the screen is the invitation, and repeating it here would be the same control drawn twice.
+ * It is deliberately not an error colour: a day nobody has eaten on yet is not a fault.
+ */
+@Composable
+private fun NothingLoggedYet() {
+    MueText(
+        text = FoodDayMessages.NOTHING_LOGGED_YET,
+        style = MueTheme.typography.body,
+        color = MueTheme.colors.textTertiary,
+        modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.DAY_EMPTY),
     )
 }
 
@@ -181,7 +285,7 @@ private fun FutureDayNote() {
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
     ) {
         // Neither is capped: at the largest font size these are the only words explaining why
-        // every add row below has stopped being a button.
+        // the action at the foot of the screen has stopped being a button.
         MueText(
             text = FoodDayMessages.FUTURE_DAY,
             style = MueTheme.typography.bodyStrong,
@@ -307,7 +411,7 @@ private fun FoodDayScreenPreview() {
             onOpenDatePicker = {},
             onDismissDatePicker = {},
             onDayPicked = {},
-            onAddToSlot = {},
+            onAdd = {},
             onEditEntry = {},
             onConfirmPlan = {},
             onSwapPlan = {},
@@ -348,7 +452,7 @@ private fun FoodDayNarrowPreview() {
             onOpenDatePicker = {},
             onDismissDatePicker = {},
             onDayPicked = {},
-            onAddToSlot = {},
+            onAdd = {},
             onEditEntry = {},
             onConfirmPlan = {},
             onSwapPlan = {},
@@ -369,7 +473,7 @@ private fun FoodDayEmptyPreview() {
             onOpenDatePicker = {},
             onDismissDatePicker = {},
             onDayPicked = {},
-            onAddToSlot = {},
+            onAdd = {},
             onEditEntry = {},
             onConfirmPlan = {},
             onSwapPlan = {},
@@ -383,9 +487,9 @@ private fun FoodDayEmptyPreview() {
  * A day still to come, which the module could not reach at all until today.
  *
  * What to look for: the date arrow on the right is live rather than faded, one line under the
- * date saying what this day is and is not, four add rows that have stopped being buttons and say
- * what their moment can hold instead — and the dinner's proposal carrying `Swap` and `Dismiss`
- * but **not** `I ate this`, because nobody has eaten Thursday.
+ * date saying what this day is and is not, **only** the moments carrying a proposal — no empty
+ * heading anywhere — the pinned action present and plainly inert, and the dinner`s proposal
+ * carrying `Swap` and `Dismiss` but **not** `I ate this`, because nobody has eaten Thursday.
  */
 @Preview(name = "Day — still to come", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
 @Composable
@@ -398,7 +502,7 @@ private fun FoodDayAheadPreview() {
             onOpenDatePicker = {},
             onDismissDatePicker = {},
             onDayPicked = {},
-            onAddToSlot = {},
+            onAdd = {},
             onEditEntry = {},
             onConfirmPlan = {},
             onSwapPlan = {},
@@ -426,7 +530,7 @@ private fun FoodDayUnknownProteinPreview() {
             onOpenDatePicker = {},
             onDismissDatePicker = {},
             onDayPicked = {},
-            onAddToSlot = {},
+            onAdd = {},
             onEditEntry = {},
             onConfirmPlan = {},
             onSwapPlan = {},

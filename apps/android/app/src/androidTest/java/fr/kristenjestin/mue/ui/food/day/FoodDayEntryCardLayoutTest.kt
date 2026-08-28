@@ -328,7 +328,7 @@ class FoodDayEntryCardLayoutTest {
                             onOpenDatePicker = {},
                             onDismissDatePicker = {},
                             onDayPicked = {},
-                            onAddToSlot = {},
+                            onAdd = {},
                             onEditEntry = {},
                             onConfirmPlan = {},
                             onSwapPlan = {},

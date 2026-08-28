@@ -1,9 +1,11 @@
 package fr.kristenjestin.mue.ui.food
 
+import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealSlot
 import org.junit.Test
 import java.time.LocalDate
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -103,6 +105,50 @@ class FoodStackTest {
 
         assertEquals(keys.distinct(), keys)
         keys.forEach { key -> assertEquals(key, FoodRoute.fromKey(key).key) }
+    }
+
+    // endregion
+
+    // region the day travels without a moment (the `Day` screen's one add action)
+
+    /**
+     * The shape the `Day` screen's one action pushes: a day, and no moment.
+     *
+     * It has to survive a `Bundle` as itself. Written as the bare `addFood` key — which is what a
+     * date-only route used to produce — it came back aimed at **today**, so a process death while
+     * logging Tuesday's supper would have moved the line to Wednesday without a word.
+     */
+    @Test
+    fun `a sheet aimed at a day and no moment survives a process death`() {
+        val sheet = FoodRoute.AddFood(date = today.minusDays(3))
+
+        val restored = FoodRoute.fromKey(sheet.key)
+
+        assertEquals(sheet, restored)
+        assertEquals(today.minusDays(3), (restored as FoodRoute.AddFood).date)
+        assertNull(restored.slot, "the hour decides the moment, not a saved key")
+    }
+
+    /** The three shapes write three different keys, and none of them reads as another. */
+    @Test
+    fun `a day, a day with a moment and a correction keep their keys apart`() {
+        val keys = listOf(
+            FoodRoute.AddFood(),
+            FoodRoute.AddFood(date = today),
+            FoodRoute.AddFood(date = today, slot = MealSlot.DINNER),
+            FoodRoute.AddFood(entryId = FoodLogEntryId("an-entry")),
+        )
+
+        assertEquals(keys.map(FoodRoute::key).distinct().size, keys.size)
+        keys.forEach { route -> assertEquals(route, FoodRoute.fromKey(route.key)) }
+    }
+
+    /** A key another build wrote is a day to forget, never a crash on the first frame. */
+    @Test
+    fun `an unreadable target degrades to a plain sheet`() {
+        val restored = FoodRoute.fromKey("addFood:not-a-day")
+
+        assertEquals(FoodRoute.AddFood(), restored)
     }
 
     // endregion

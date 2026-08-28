@@ -195,13 +195,17 @@ private fun FoodDestination(
     when (route) {
         /*
          * PRD_FOOD 10.1. The day being viewed is deliberately absent from every route below:
-         * see the note on `FoodRoute`. What the screen hands back is the day it was on, so a `+`
-         * pressed on Tuesday's lunch opens `Add food` already aimed at Tuesday's lunch.
+         * see the note on `FoodRoute`. What the screen hands back is the day it was on — and
+         * **only** the day.
+         *
+         * The moment used to travel with it, because the `+` that was pressed named one. It no
+         * longer does: `AddFood` with a date and no moment is what makes the hour decide
+         * (`FoodAddDraft.forTarget` leaves `slotPinned = false`), which is the rule the six `+`
+         * buttons were overriding every time one of them was used. The override the owner asked
+         * for is still on the sheet, in `SLOT_FIELD`.
          */
         FoodRoute.Day -> FoodDayRoute(
-            onAddToSlot = { date, slot ->
-                stack.push(FoodRoute.AddFood(date = date, slot = slot))
-            },
+            onAdd = { date -> stack.push(FoodRoute.AddFood(date = date)) },
             onEditEntry = { entryId -> stack.push(FoodRoute.AddFood(entryId = entryId)) },
             onSwapPlan = { plan -> stack.push(FoodRoute.Swap(plan)) },
             modifier = modifier,

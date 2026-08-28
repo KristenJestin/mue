@@ -40,14 +40,26 @@ internal object FoodTestTags {
     /** PRD_FOOD 22 and 12: what a day still to come says about itself. */
     const val FUTURE_DAY: String = "food:futureDay"
 
-    /** One of the six moments, always present whether it holds anything or not. */
+    /** PRD_FOOD 17: the one line a day with neither an entry nor a proposal draws. */
+    const val DAY_EMPTY: String = "food:dayEmpty"
+
+    /** One of the six moments, drawn when it holds a line or a proposal and not before. */
     fun slot(slot: MealSlot): String = "food:slot:${slot.id}"
 
     /** A moment's own total, which PRD_FOOD 10.1 only shows once it holds a line. */
     fun slotTotal(slot: MealSlot): String = "food:slotTotal:${slot.id}"
 
-    /** The add action inside a moment, which PRD_FOOD 10.1 keeps present at all times. */
-    fun addToSlot(slot: MealSlot): String = "food:addToSlot:${slot.id}"
+    /**
+     * The day's one add action, pinned at the foot of the screen.
+     *
+     * It replaces the six `addToSlot(slot)` handles this file used to publish. That is the
+     * owner's instruction over PRD_FOOD 10.1's "toujours présent" — and it is the same handle
+     * shape `CREATE_FOOD` and `CREATE_RECIPE` already have on the other two views, because it is
+     * now the same control in the same place. **No moment is named**, here or on the tap: the
+     * hour decides it on the sheet (FR-FOOD-007), which is exactly what a per-moment `+` was
+     * overriding.
+     */
+    const val ADD_TO_DAY: String = "food:addToDay"
 
     /** One journal line, in any of PRD_FOOD 10.2's three forms. */
     fun logEntry(entryId: String): String = "food:logEntry:$entryId"

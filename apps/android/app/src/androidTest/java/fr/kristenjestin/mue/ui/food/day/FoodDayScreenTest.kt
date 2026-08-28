@@ -6,6 +6,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
@@ -53,26 +54,53 @@ class FoodDayScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private var addedTo: MealSlot? = null
+    private var added: Int = 0
+    private var addedOn: LocalDate? = null
     private var edited: FoodLogEntryId? = null
     private var confirmed: MealPlanKey? = null
     private var swapped: MealPlanKey? = null
     private var dismissed: MealPlanKey? = null
     private var stepped: Int = 0
 
-    // region the six moments (PRD_FOOD 10.1 and 17)
+    // region a heading when the moment holds something (the owner, over PRD_FOOD 10.1 and 17)
 
+    /**
+     * The owner's instruction on the screen: no moment draws until it holds something.
+     *
+     * This used to assert the opposite — all six present, each with its own add row, PRD_FOOD
+     * 10.1's "toujours présent". *"J'ai « lunch », et les snacks sont grisés ? […] est-ce qu'on
+     * pourrait pas imaginer juste avoir les headers […] uniquement quand il y a un élément
+     * dedans"*. There is one action for all six now, and it is at the foot of the screen.
+     */
     @Test
-    fun theSixMomentsAreAlwaysThere() {
+    fun anUntouchedDayDrawsNoMomentAndOneAction() {
         setDay(FoodDayUiState.of(TODAY, TODAY))
 
         MealSlot.ORDERED.forEach { slot ->
-            compose.onNodeWithTag(FoodTestTags.DAY).performScrollToNode(
-                hasTestTag(FoodTestTags.slot(slot)),
-            )
-            compose.onNodeWithTag(FoodTestTags.slot(slot)).assertIsDisplayed()
-            compose.onNodeWithTag(FoodTestTags.addToSlot(slot)).assertIsDisplayed()
+            compose.onNodeWithTag(FoodTestTags.slot(slot), useUnmergedTree = true)
+                .assertDoesNotExist()
         }
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY).assertIsDisplayed()
+        compose.onNodeWithTag(FoodTestTags.DAY_EMPTY).assertIsDisplayed()
+    }
+
+    /** A moment appears the instant it holds a line, and its five neighbours stay away. */
+    @Test
+    fun aMomentAppearsOnlyOnceItHoldsSomething() {
+        setDay(
+            FoodDayUiState.of(
+                date = TODAY,
+                today = TODAY,
+                entries = listOf(FoodDayPreviewData.lunch()),
+            ),
+        )
+
+        compose.onNodeWithTag(FoodTestTags.slot(MealSlot.LUNCH)).assertIsDisplayed()
+        (MealSlot.ORDERED - MealSlot.LUNCH).forEach { slot ->
+            compose.onNodeWithTag(FoodTestTags.slot(slot), useUnmergedTree = true)
+                .assertDoesNotExist()
+        }
+        compose.onNodeWithTag(FoodTestTags.DAY_EMPTY, useUnmergedTree = true).assertDoesNotExist()
     }
 
     /** PRD_FOOD 10.4 and 17: an empty day shows no total anywhere, invented or otherwise. */
@@ -88,13 +116,34 @@ class FoodDayScreenTest {
             .assertDoesNotExist()
     }
 
-    /** PRD_FOOD 17: the empty state of a moment is an invitation and never an error. */
+    /**
+     * PRD_FOOD 17: the empty state is an invitation and never an error.
+     *
+     * The invitation is the action at the foot of the screen; the line above it is the report.
+     * Two different jobs, which the six add rows used to do at once.
+     */
     @Test
-    fun anEmptyMomentInvitesRatherThanReports() {
+    fun anEmptyDayInvitesRatherThanReports() {
         setDay(FoodDayUiState.of(TODAY, TODAY))
 
-        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.BREAKFAST))
-            .assertContentDescriptionContains(FoodDayMessages.ADD_FIRST, substring = true)
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY)
+            .assertTextEquals(FoodDayMessages.ADD_FIRST)
+        compose.onNodeWithText(FoodDayMessages.NOTHING_LOGGED_YET).assertIsDisplayed()
+    }
+
+    /** The words change once the day holds a line, and they never name a moment. */
+    @Test
+    fun theActionOffersAnotherLineOnceTheDayHoldsOne() {
+        setDay(
+            FoodDayUiState.of(
+                date = TODAY,
+                today = TODAY,
+                entries = listOf(FoodDayPreviewData.lunch()),
+            ),
+        )
+
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY)
+            .assertTextEquals(FoodDayMessages.ADD_MORE)
     }
 
     // endregion
@@ -139,26 +188,22 @@ class FoodDayScreenTest {
      * put on the *same* screen one after the other so that what is compared is what was drawn,
      * not two runs that might have differed for some other reason.
      *
-     * A day nobody wrote on shows **no total at all**: four headings, four add buttons, and not a
-     * figure anywhere. A day holding one line whose protein is unknown shows a moment that is
-     * plainly recorded — `≈ 420 kcal` beside `— protein`. Neither of them shows a `0` where
-     * nothing is known.
+     * A day nobody wrote on shows **no total at all**, and now no moment either: a date, one
+     * line saying nothing has been logged, and the action. A day holding one line whose protein
+     * is unknown shows a moment that is plainly recorded — `≈ 420 kcal` beside `— protein`.
+     * Neither of them shows a `0` where nothing is known.
      */
     @Test
     fun anEmptyDayAndAnUnknownProteinAreNotTheSameScreen() {
         setDay(emptyDayState())
 
         /*
-         * Nothing logged: no moment claims a total, and no figure is drawn anywhere. Each
-         * moment is scrolled to before it is read — a `LazyColumn` disposes what is far from
-         * the viewport, and a sweep of the tree from one position would only prove that the
-         * moments it happened to compose were empty.
+         * Nothing logged: no moment claims a total, and no figure is drawn anywhere. There is
+         * nothing to scroll to any more — an untouched day fits on one screen precisely because
+         * no moment is drawn — so the whole tree is read where it stands.
          */
-        val empty = MealSlot.ORDERED.flatMap { slot ->
-            scrollTo(FoodTestTags.slot(slot))
-            assertEquals(emptyList<MealSlot>(), momentsShowingATotal())
-            drawnText()
-        }
+        assertEquals(emptyList<MealSlot>(), momentsShowingATotal())
+        val empty = drawnText()
         assertTrue(
             "an untouched day drew an energy: $empty",
             empty.none { it.contains(FoodLabels.ENERGY_UNIT) },
@@ -252,9 +297,10 @@ class FoodDayScreenTest {
     /**
      * What a day ahead actually shows (PRD_FOOD 12 and 22).
      *
-     * It says once what it is, and each of its six moments stops offering to log. The add row
-     * keeps its place — PRD_FOOD 10.1 wants it "toujours présent" — and stops being a control,
-     * which is the difference between refusing before the tap and refusing after `Save entry`.
+     * It says once what it is, and the day's one action stops offering to log. The action keeps
+     * its place and stops being a control, which is the difference between refusing before the
+     * tap and refusing after `Save entry` — and it is now said **once** rather than by six rows
+     * that read as six errors.
      */
     @Test
     fun aDayAheadSaysSoAndRefusesToBeLogged() {
@@ -273,21 +319,13 @@ class FoodDayScreenTest {
         assertDrawn(FoodTestTags.FUTURE_DAY, FoodDayMessages.FUTURE_DAY)
         assertDrawn(FoodTestTags.FUTURE_DAY, FoodDayMessages.FUTURE_DAY_DETAIL)
 
-        MealSlot.ORDERED.forEach { slot ->
-            compose.onNodeWithTag(FoodTestTags.DAY).performScrollToNode(
-                hasTestTag(FoodTestTags.addToSlot(slot)),
-            )
-            compose.onNodeWithTag(FoodTestTags.addToSlot(slot))
-                .assertIsNotEnabled()
-                .assertContentDescriptionContains(
-                    FoodDayMessages.PLANNABLE_SLOT,
-                    substring = true,
-                )
-        }
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY)
+            .assertIsDisplayed()
+            .assertIsNotEnabled()
 
-        addedTo = null
-        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.BREAKFAST)).performClick()
-        assertTrue("a future day opened the add sheet anyway", addedTo == null)
+        added = 0
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY).performClick()
+        assertEquals("a future day opened the add sheet anyway", 0, added)
     }
 
     /** Today says none of that, and its rows are buttons as they always were. */
@@ -296,7 +334,7 @@ class FoodDayScreenTest {
         setDay(previewDayState())
 
         compose.onNodeWithTag(FoodTestTags.FUTURE_DAY).assertDoesNotExist()
-        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.BREAKFAST)).assertIsEnabled()
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY).assertIsEnabled()
     }
 
     @Test
@@ -364,14 +402,36 @@ class FoodDayScreenTest {
 
     // region what a tap does
 
+    /**
+     * The one add action carries the **day**, and nothing else.
+     *
+     * The defect it fixes: at 00:26 the sheet offered `Breakfast` while showing its own window as
+     * 05:00–10:00, because breakfast's `+` had passed breakfast explicitly and pinned it over the
+     * clock. There is no moment to pass any more — the screen's callback takes none — so
+     * `FoodAddDraft.forTarget` leaves the moment unpinned and the hour decides it (FR-FOOD-007).
+     *
+     * That the day travels is asserted here; that no moment does is asserted by the signature,
+     * which is why this test can only count taps. `FoodStackTest` covers the route the tap builds.
+     */
     @Test
-    fun addingToAMomentCarriesThatMoment() {
+    fun theAddActionCarriesTheDayAndNoMoment() {
+        setDay(previewDayState(date = YESTERDAY, today = TODAY))
+
+        compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY).performClick()
+
+        assertEquals(1, added)
+        assertEquals(YESTERDAY, addedOn)
+    }
+
+    /** One action for the six moments: no moment publishes an add control of its own. */
+    @Test
+    fun noMomentCarriesAnAddControlOfItsOwn() {
         setDay(previewDayState())
 
-        scrollTo(FoodTestTags.addToSlot(MealSlot.LUNCH))
-        compose.onNodeWithTag(FoodTestTags.addToSlot(MealSlot.LUNCH)).performClick()
-
-        assertEquals(MealSlot.LUNCH, addedTo)
+        assertEquals(
+            1,
+            compose.onAllNodesWithTag(FoodTestTags.ADD_TO_DAY).fetchSemanticsNodes().size,
+        )
     }
 
     @Test
@@ -401,6 +461,34 @@ class FoodDayScreenTest {
 
     // endregion
 
+    /**
+     * The last card of the day is reachable, band and all.
+     *
+     * `Log activity` once shipped a 112 dp strip at the foot of its scroll that no thumb could
+     * touch: the whole pinned band had been subtracted from the viewport, ramp included, so
+     * content came to rest under chrome that swallows gestures. This screen grew a band for the
+     * first time today, so it inherits the hazard and the fix — the list's own padding is the
+     * **solid block alone**, and this asserts the consequence.
+     */
+    @Test
+    fun theLastCardIsNotHidingUnderThePinnedAction() {
+        setDay(previewDayState())
+
+        scrollTo(FoodTestTags.plan(MealSlot.DINNER))
+
+        val cardBottom = compose.onNodeWithTag(FoodTestTags.plan(MealSlot.DINNER))
+            .getUnclippedBoundsInRoot()
+            .bottom
+        val actionTop = compose.onNodeWithTag(FoodTestTags.ADD_TO_DAY)
+            .getUnclippedBoundsInRoot()
+            .top
+
+        assertTrue(
+            "the last card ends at $cardBottom, under an action that starts at $actionTop",
+            cardBottom <= actionTop,
+        )
+    }
+
     // region touch targets (PRD_FOOD 18)
 
     @Test
@@ -415,7 +503,7 @@ class FoodDayScreenTest {
         assertTallEnough(FoodTestTags.confirmPlan(MealSlot.DINNER))
         assertTallEnough(FoodTestTags.swapPlan(MealSlot.DINNER))
         assertTallEnough(FoodTestTags.dismissPlan(MealSlot.DINNER))
-        assertTallEnough(FoodTestTags.addToSlot(MealSlot.DINNER))
+        assertTallEnough(FoodTestTags.ADD_TO_DAY)
     }
 
     // endregion
@@ -483,7 +571,10 @@ class FoodDayScreenTest {
                             onOpenDatePicker = {},
                             onDismissDatePicker = {},
                             onDayPicked = {},
-                            onAddToSlot = { addedTo = it },
+                            onAdd = {
+                                added += 1
+                                addedOn = day.date
+                            },
                             onEditEntry = { edited = it },
                             onConfirmPlan = { confirmed = it },
                             onSwapPlan = { swapped = it },

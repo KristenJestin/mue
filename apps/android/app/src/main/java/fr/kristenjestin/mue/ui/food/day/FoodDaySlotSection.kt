@@ -1,8 +1,6 @@
 package fr.kristenjestin.mue.ui.food.day
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,9 +65,6 @@ import java.util.Locale
  */
 private val IconTileSize: Dp = 40.dp
 
-/** The small tile of the add row: decoration inside a target, not a target of its own. */
-private val AddTileSize: Dp = 32.dp
-
 /** The glyph in front of one of a proposal's actions. */
 private val PlanActionIconSize: Dp = 14.dp
 
@@ -110,60 +105,38 @@ private const val PlanOutlineAlpha = 0.4f
 
 /**
  * One of the six moments (PRD_FOOD 10.1), in the order that section fixes: the unconfirmed
- * proposal if there is one, then the lines sorted by time, then an add button that is always
- * there.
+ * proposal if there is one, then the lines sorted by time.
  *
  * The moment's own total sits in the heading and appears only once the moment holds a line.
- * PRD_FOOD 10.4 forbids inventing one, so an empty breakfast shows **no total at all** — not a
- * zero, and not a dash either. Three facts, three readings: nothing logged, a known zero, and
- * an unknown.
+ * PRD_FOOD 10.4 forbids inventing one, so a moment holding nothing but a proposal shows **no
+ * total at all** — not a zero, and not a dash either. Three facts, three readings: nothing
+ * logged, a known zero, and an unknown.
  *
- * ## What six moments cost the day, and how it is paid
+ * ## What six moments cost the day, and what stopped paying for it
  *
- * Every moment keeps its place whether it holds anything or not, which is the property that makes
- * adding to breakfast always the same gesture in the same spot. Drawn as six full blocks, an
- * ordinary day would spend two thirds of its height on headings over empty add rows.
+ * This section used to end in an add row, and every one of the six drew one whether it held
+ * anything or not — PRD_FOOD 10.1's "toujours présent", so that adding to breakfast was always
+ * the same gesture in the same spot. Drawn as six full blocks that is two thirds of an ordinary
+ * day's height spent on headings over empty invitations, and the answer was to **fold** an empty
+ * snack down to a single quiet row.
  *
- * So an **empty snack folds**, and only a snack, and only while it is empty
- * ([FoodDaySlotUiState.isCollapsed]). Its heading and its add row become the one row that
- * carried both facts anyway — the name of the moment, and the offer to write in it — at the touch
- * size PRD_FOOD 18 requires and in the quietest ink the screen has. The three meals keep their
- * whole block, empty or not.
- *
- * The moment is not removed and does not move: the folded row sits exactly where the block would
- * have been, between the same two meals, and unfolds into a full block the instant a line or a
- * proposal lands in it.
+ * Both are gone, and the fold went with the thing it existed to compress. A moment is drawn only
+ * when it holds something ([FoodDaySlotUiState.hasContent]), so there is no empty block left to
+ * shrink; and the day carries **one** add action at its foot rather than six inside it. The
+ * owner's reason is the better one: *"vu que maintenant c'est géré via l'heure, ça a moins de
+ * sens de partir du type de repas"* — a `+` that names a moment passes that moment to the sheet
+ * and overrides the clock, which is how a tap at 00:26 on `Breakfast`'s `+` produced a sheet
+ * offering breakfast against a window reading 05:00–10:00.
  */
 @Composable
 internal fun FoodDaySlotSection(
     state: FoodDaySlotUiState,
-    onAdd: () -> Unit,
     onEditEntry: (FoodLogEntryId) -> Unit,
     onConfirmPlan: (MealPlanKey) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
     onDismissPlan: (MealPlanKey) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (state.isCollapsed) {
-        /*
-         * Two handles for one row, because the row is two things at once.
-         *
-         * `slot` is the moment, which PRD_FOOD 10.1 keeps on screen always; `addToSlot` is the add
-         * control, which the same section keeps "toujours présent". Folded, one row carries both,
-         * and collapsing the two handles into one would quietly delete the second — a moment with
-         * no reachable way in, which every assertion about `addToSlot` would then stop covering
-         * for exactly the three moments that had just been added.
-         */
-        Column(modifier = modifier.fillMaxWidth().testTag(FoodTestTags.slot(state.slot))) {
-            FoldedSlotRow(
-                state = state,
-                onClick = onAdd,
-                modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.addToSlot(state.slot)),
-            )
-        }
-        return
-    }
-
     Column(
         modifier = modifier.fillMaxWidth().testTag(FoodTestTags.slot(state.slot)),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
@@ -181,60 +154,6 @@ internal fun FoodDaySlotSection(
 
         state.entries.forEach { entry ->
             FoodDayEntryCard(state = entry, onClick = { onEditEntry(entry.id) })
-        }
-
-        AddToSlotRow(state = state, onClick = onAdd)
-    }
-}
-
-/**
- * An empty snack, in one row: its glyph, its name, and a `+`.
- *
- * The simplest expression a moment can have while still being a moment. It carries exactly what
- * the heading and the add row carried between them — which moment this is, and that a line may be
- * written into it — with nothing drawn twice. No card, no outline, no tile behind the `+`: the
- * whole point is that it should read as a place where nothing has happened, not as a control
- * competing with the meals around it.
- *
- * It is still a target, at [MueMinTouchTarget] (PRD_FOOD 18), and it still announces the moment
- * it would add to — the words `Morning snack` alone say neither that it is a button nor what it
- * does. On a day that has not happened it keeps its place and stops being a control, exactly as
- * [AddToSlotRow] does, and for the same reason: a row that vanishes is a moment that moved.
- */
-@Composable
-private fun FoldedSlotRow(
-    state: FoodDaySlotUiState,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = MueTheme.colors
-    val type = MueTheme.typography
-
-    Row(
-        modifier = modifier
-            .heightIn(min = MueMinTouchTarget)
-            .clip(MueTheme.shapes.field)
-            .clickable(enabled = state.canAdd, role = Role.Button, onClick = onClick)
-            .padding(horizontal = MueTheme.spacing.sm)
-            .announcedAs("${state.addLabel}, ${state.label}"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MueIcon(iconName = state.iconName, tint = colors.textQuiet, size = 14.dp)
-
-        MueText(
-            // Locale-independent, as in the heading: a Turkish device would otherwise turn the
-            // `i` of `Evening snack` into a dotted capital.
-            text = state.label.uppercase(Locale.ROOT),
-            style = SlotLabelStyle(type),
-            color = colors.textQuiet,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = MueTheme.spacing.sm),
-        )
-
-        // The `+` is the promise of a line, so it goes where no line may be written.
-        if (state.canAdd) {
-            MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textQuiet, size = 14.dp)
         }
     }
 }
@@ -593,63 +512,6 @@ private fun PlanAction(action: PlanActionSpec, modifier: Modifier = Modifier) {
             style = MueTheme.typography.chip,
             color = action.tint,
             modifier = Modifier.padding(start = MueTheme.spacing.xs),
-        )
-    }
-}
-
-/**
- * PRD_FOOD 10.1: "un bouton d'ajout toujours présent", and PRD_FOOD 17's empty state in one.
- *
- * A moment with nothing in it is not an error and says nothing about what is missing; it simply
- * offers the way in. The words change once the moment holds something, which is the prototype's
- * own distinction between `Add what you ate` and `Add something else`.
- */
-@Composable
-private fun AddToSlotRow(
-    state: FoodDaySlotUiState,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = MueTheme.colors
-    val spacing = MueTheme.spacing
-    val shape = MueTheme.shapes.field
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .border(BorderStroke(1.dp, colors.hairline), shape)
-            /*
-             * PRD_FOOD 22: on a day still to come the row keeps its place and stops being a
-             * control. `enabled = false` rather than a missing `clickable`, so the node is still
-             * announced as a disabled button instead of quietly becoming a paragraph — a reader
-             * who reaches it hears that it is there and cannot be used, which is the fact.
-             */
-            .clickable(enabled = state.canAdd, role = Role.Button, onClick = onClick)
-            .padding(horizontal = spacing.md, vertical = spacing.sm)
-            .testTag(FoodTestTags.addToSlot(state.slot))
-            // The words alone do not say which moment they would add to.
-            .announcedAs("${state.addLabel}, ${state.label}"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The `+` is the promise of a line, so it goes where no line may be written.
-        if (state.canAdd) {
-            Box(
-                modifier = Modifier
-                    .size(AddTileSize)
-                    .clip(MueTheme.shapes.small)
-                    .background(colors.surface),
-                contentAlignment = Alignment.Center,
-            ) {
-                MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textTertiary, size = 14.dp)
-            }
-        }
-        MueText(
-            text = state.addLabel,
-            style = MueTheme.typography.caption,
-            color = if (state.canAdd) colors.textTertiary else colors.textQuiet,
-            modifier = Modifier.padding(start = if (state.canAdd) spacing.md else 0.dp),
         )
     }
 }

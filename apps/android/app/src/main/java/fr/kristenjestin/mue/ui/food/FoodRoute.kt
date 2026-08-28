@@ -15,6 +15,7 @@ import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.RecipeId
 import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 /**
  * The screens of the Food tab (PRD_FOOD 7).
@@ -85,12 +86,20 @@ sealed interface FoodRoute {
      * already exists — FR-FOOD-008 reuses this very sheet to edit, as the Activity module's
      * `Log` route does.
      *
-     * [date] and [slot] travel together or not at all. Opening from a moment's `+` carries both;
-     * opening from anywhere else carries neither and FR-FOOD-007 lets the clock preselect the
-     * moment, which is a better default than half a target read back from a stale key.
+     * **A day may travel without a moment, and now usually does.** The `Day` screen's one add
+     * action hands over the journal being looked at and nothing else, so that FR-FOOD-007's clock
+     * decides the moment — `FoodAddDraft.forTarget` leaves it unpinned exactly when [slot] is
+     * null. A [slot] still means "this moment, whatever the hour says", which is what confirming
+     * a proposal and correcting a line both need.
      *
-     * The two readings are exclusive by construction — nothing builds one carrying both — and
-     * they use different separators, so the key itself says which of the two it is.
+     * All three shapes therefore have to survive a `Bundle`. A date-only route written as the
+     * bare [ADD_FOOD_KEY] would come back as a sheet aimed at **today** — so a process death
+     * while logging Tuesday's supper would have moved it to Wednesday, silently, in the one place
+     * nobody looks. It carries the ISO date instead, which `MealPlanKey.parseOrNull` rejects
+     * (it demands a separator and a known moment) and the branch below then reads on its own.
+     *
+     * The entry reading is exclusive by construction — nothing builds one carrying both — and it
+     * uses a different separator, so the key itself says which of the readings it is.
      */
     data class AddFood(
         val date: LocalDate? = null,
@@ -102,6 +111,8 @@ sealed interface FoodRoute {
                 entryId != null -> "$ADD_FOOD_KEY$ALTERNATE_SEPARATOR${entryId.value}"
                 date != null && slot != null ->
                     "$ADD_FOOD_KEY$ID_SEPARATOR${MealPlanKey(date, slot).aggregateId}"
+
+                date != null -> "$ADD_FOOD_KEY$ID_SEPARATOR$date"
 
                 else -> ADD_FOOD_KEY
             }
@@ -224,10 +235,18 @@ sealed interface FoodRoute {
             key == Preferences.key -> Preferences
 
             key == ADD_FOOD_KEY -> AddFood()
-            key.startsWith("$ADD_FOOD_KEY$ID_SEPARATOR") ->
-                MealPlanKey.parseOrNull(key.substringAfter(ID_SEPARATOR))
+            /*
+             * A moment and its day, or a day on its own. `parseOrNull` answers the first and
+             * refuses everything else, so the ISO date is tried after it rather than before —
+             * `LocalDate.parse` would throw on `2026-08-28:lunch` and never reach the pair.
+             * A target that reads as neither degrades to a plain sheet, which still works.
+             */
+            key.startsWith("$ADD_FOOD_KEY$ID_SEPARATOR") -> {
+                val target = key.substringAfter(ID_SEPARATOR)
+                MealPlanKey.parseOrNull(target)
                     ?.let { AddFood(date = it.plannedOn, slot = it.slot) }
-                    ?: AddFood()
+                    ?: AddFood(date = localDateOrNull(target))
+            }
 
             key.startsWith("$ADD_FOOD_KEY$ALTERNATE_SEPARATOR") ->
                 AddFood(entryId = FoodLogEntryId(key.substringAfter(ALTERNATE_SEPARATOR)))
@@ -252,6 +271,19 @@ sealed interface FoodRoute {
                 MealPlanKey.parseOrNull(key.substringAfter(ID_SEPARATOR))?.let(::Swap) ?: Day
 
             else -> Day
+        }
+
+        /**
+         * An ISO day, or null — never a throw.
+         *
+         * [fromKey]'s own contract: a key written by another build outlives the code that wrote
+         * it, and losing the day a sheet was aimed at is a better outcome than taking the first
+         * frame down. A null here gives a plain `Add food`, which opens on today.
+         */
+        private fun localDateOrNull(value: String): LocalDate? = try {
+            LocalDate.parse(value)
+        } catch (_: DateTimeParseException) {
+            null
         }
     }
 }
