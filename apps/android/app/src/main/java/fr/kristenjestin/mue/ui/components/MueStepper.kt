@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,12 +14,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.tooling.preview.Preview
@@ -136,9 +135,14 @@ fun MueStepper(
 /**
  * One end of the stepper.
  *
- * The click is published through semantics rather than left to `clickable` alone so that the
- * disabled state is *announced* as well as drawn — a control that has reached its bound should
- * say so, not merely stop responding.
+ * `clickable` and not a hand-written `semantics { onClick { … } }`. The semantics action alone
+ * *reads* correct — TalkBack's double tap fires it, and a test driving the accessibility tree
+ * sees a working button — but it installs no pointer handler, so the control does nothing at all
+ * under a finger. `FoodAddScreenTest.theCounterIsOfferedByAFoodThatDeclaresAPortion` is what
+ * caught it: `performClick` injects a real touch, and the counter never moved.
+ *
+ * `clickable` publishes the role, the click action and the disabled state by itself, so the
+ * `semantics` block below has only the name left to add.
  */
 @Composable
 private fun RowScope.StepButton(
@@ -152,21 +156,12 @@ private fun RowScope.StepButton(
     Box(
         modifier = Modifier
             .size(StepButtonSize)
-            .background(colors.surfaceStrong, CircleShape)
+            .clip(CircleShape)
+            .background(colors.surfaceStrong)
             .border(1.dp, colors.surfaceBorder, CircleShape)
             .then(testTag?.let { Modifier.testTag(it) } ?: Modifier)
-            .semantics {
-                role = Role.Button
-                contentDescription = description
-                if (enabled) {
-                    onClick {
-                        onClick()
-                        true
-                    }
-                } else {
-                    disabled()
-                }
-            },
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         MueText(
