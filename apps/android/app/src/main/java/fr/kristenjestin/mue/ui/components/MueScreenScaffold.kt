@@ -20,16 +20,41 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.theme.mueAmberGlow
 
 /** Length of the ramp a scrolling screen dissolves into under the header. */
 val MueContentTopFade: Dp = 24.dp
+
+/**
+ * Handles on the parts of the shell that are the same on every screen, so a test can measure that
+ * they really are.
+ *
+ * Declared beside the component rather than in a screen's own tag file, for the reason
+ * `ProgressTestTags` sits inside `ProgressScreen`: the tag belongs to whoever draws the node, and
+ * every one of the five tabs draws this one.
+ */
+internal object MueScaffoldTestTags {
+
+    /**
+     * The top edge of everything below the header — the number that has to match across the tabs.
+     *
+     * It is the column itself and not the first thing in it, because the first thing in it is a
+     * different composable on each of the five screens and several of them are inside a lazy list
+     * that has not composed yet when the tab arrives.
+     */
+    const val CONTENT: String = "mue:scaffoldContent"
+
+    /** The wordmark, which is the landmark the eye anchors on and therefore the one that must not move. */
+    const val WORDMARK: String = "mue:wordmark"
+}
 
 /**
  * Shared shell of the three screens: canvas, amber glow bleeding from the top edge, the
@@ -77,7 +102,29 @@ fun MueScreenScaffold(
                         top = spacing.screenTop,
                         bottom = spacing.sm,
                     )
-                    .heightIn(min = 40.dp),
+                    /*
+                     * The touch minimum, and not the 40 dp the wordmark alone needs.
+                     *
+                     * This row is the app's one fixed landmark: `MUE` is drawn at the same place
+                     * on all five tabs, so the eye anchors on it and reads any movement of it as
+                     * the page lurching. At 40 dp that only held while every [trailing] control
+                     * was a chip. The Food catalogue's settings control is a button, so it is
+                     * `MueMinTouchTarget` tall as PRD 15 requires of anything tappable, and a
+                     * 48 dp child in a 40 dp row grows the row: the wordmark dropped 4 dp and
+                     * everything under it dropped 8, on that screen and no other — "le bouton
+                     * settings dans food pousse toujours tout le truc, et du coup c'est pas beau
+                     * au switch de tab parce que tout le tab se déplace".
+                     *
+                     * Sizing the row at the touch minimum instead makes the tallest control it
+                     * can legally hold exactly the height it already is, so no trailing slot can
+                     * push it again — not this one, and not the next one somebody adds. The four
+                     * tabs that carry only a chip pay 8 dp for that, once, in a place where 8 dp
+                     * of air above the title is not a defect; what they get back is a wordmark
+                     * that does not move.
+                     *
+                     * `MueTabHeaderAlignmentTest` measures the five tabs and fails if they part.
+                     */
+                    .heightIn(min = MueMinTouchTarget),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -86,7 +133,9 @@ fun MueScreenScaffold(
                     style = MueTheme.typography.wordmark,
                     color = MueTheme.colors.textPrimary,
                     // Without this TalkBack spells the three letters out.
-                    modifier = Modifier.semantics { contentDescription = "Mue" },
+                    modifier = Modifier
+                        .testTag(MueScaffoldTestTags.WORDMARK)
+                        .semantics { contentDescription = "Mue" },
                 )
                 trailing?.invoke()
             }
@@ -95,6 +144,15 @@ fun MueScreenScaffold(
 
             Column(
                 modifier = Modifier
+                    /*
+                     * Before the padding and before the fade, so the tag reports where the
+                     * content column *begins* rather than where its gutter does. The one thing
+                     * `MueTabHeaderAlignmentTest` needs is a handle on this edge, and it cannot
+                     * come from a string: what sits at the top of the column differs on every
+                     * tab, and a control faded to nothing is still in the semantics tree with
+                     * all of its text.
+                     */
+                    .testTag(MueScaffoldTestTags.CONTENT)
                     .fillMaxWidth()
                     .weight(1f)
                     .topFade(topFade)
