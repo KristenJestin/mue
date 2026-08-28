@@ -171,11 +171,30 @@ internal fun FoodViewSwitcher(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                /*
+                 * Before the padding, deliberately.
+                 *
+                 * A semantics modifier reports the bounds of the coordinator at *its* position in
+                 * the chain, so a tag written after `.padding(...)` measures the space inside the
+                 * frame rather than the frame. Sat at the end, as it was, it reported 48 dp on a
+                 * track that was really 56 — which is a handle that cannot see the very defect
+                 * this control was reported for. Every other use of the tag is an `assertExists`,
+                 * to which the position makes no difference.
+                 */
+                .testTag(FoodTestTags.VIEW_SWITCHER)
                 .clip(MueTheme.shapes.field)
                 .background(MueTheme.colors.surface)
-                .padding(TrackPadding)
-                .selectableGroup()
-                .testTag(FoodTestTags.VIEW_SWITCHER),
+                /*
+                 * Horizontally only. The prototype's inner margin exists on all four sides, and
+                 * on three of them it still does — but taken vertically as well it was *added*
+                 * to a segment that had just been raised to the 48 dp touch minimum, which made
+                 * the track 56 dp and pushed the whole tab down by eight: "ton bouton avec la
+                 * clé à molette là, il est plus gros, du coup ça décale légèrement vers le bas
+                 * toute la tab". The margin is now drawn *inside* each segment instead, by
+                 * [ViewSegment], where it insets the fill without inflating the track.
+                 */
+                .padding(horizontal = TrackPadding)
+                .selectableGroup(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             views.forEach { view ->
@@ -248,15 +267,21 @@ private fun ViewSegment(
         modifier = modifier
             /*
              * The **segment** is the target, so the floor is on the segment and not on the frame
-             * around it. Sized off the frame instead, a 48 dp track leaves each button 40 dp once
-             * the prototype's four pixels of inner margin are taken off either side — under the
-             * minimum PRD_FOOD 18 sets, on the control whose whole job is to be tappable. The
-             * track is therefore 56 dp tall rather than the prototype's 34-odd, which is the same
-             * trade `MueBottomBar` makes against the prototype's own bar.
+             * around it: sized off the frame, a 48 dp track leaves each button 40 dp once the
+             * prototype's inner margin is taken off either side — under the minimum PRD_FOOD 18
+             * sets, on the control whose whole job is to be tappable.
+             *
+             * What follows is the ordering that keeps that target *without* the track growing to
+             * hold it. `selectable` sits **above** the vertical inset, so the hit area is the
+             * whole 48 dp; the inset below it is what the fill is drawn inside, so the amber
+             * block is the prototype's 40 dp. A target may be larger than what it draws, and here
+             * it is — which is why the track is back to 48 dp and nothing under it moved.
+             *
+             * Both facts are measured: `everySegmentIsBigEnoughToTap` reads this node's bounds
+             * (the layout node is the full 48 dp however the inset falls inside it) and
+             * `theTrackDoesNotGrowToHoldItsTouchTargets` reads the track's.
              */
             .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .background(container)
             .selectable(
                 selected = selected,
                 indication = null,
@@ -264,6 +289,9 @@ private fun ViewSegment(
                 role = Role.Tab,
                 onClick = onClick,
             )
+            .padding(vertical = TrackPadding)
+            .clip(shape)
+            .background(container)
             .padding(horizontal = MueTheme.spacing.xs)
             .testTag(FoodTestTags.view(view)),
         contentAlignment = Alignment.Center,

@@ -184,6 +184,51 @@ class FoodViewSwitcherTest {
         }
     }
 
+    /**
+     * The track holds a 48 dp target inside 48 dp of height.
+     *
+     * Raising the segments to the touch minimum was right and is not undone here — the test above
+     * still holds. What was wrong is that the frame grew with them: four dp of inner margin above
+     * and below a 48 dp button made a 56 dp track, and everything under it moved down. "ton
+     * bouton avec la clé à molette là, il est plus gros, du coup ça décale légèrement vers le bas
+     * toute la tab, le contenu, etc. Du coup c'est pas beau."
+     *
+     * So both facts are asserted at once, because either alone is satisfiable by breaking the
+     * other: every segment is at least [MueMinTouchTarget], **and** the track is no taller than
+     * one. The margin now insets the fill inside the target instead of padding the frame around
+     * it, which is the only arrangement that satisfies both.
+     */
+    @Test
+    fun theTrackDoesNotGrowToHoldItsTouchTargets() {
+        setModule()
+
+        val track = compose
+            .onNodeWithTag(FoodTestTags.VIEW_SWITCHER)
+            .getUnclippedBoundsInRoot()
+            .height
+
+        /*
+         * A dp of slack, because this is a rounding question and not a layout one: the segment is
+         * measured in whole pixels and converted back, so a 48 dp track reads as 48.000008 dp at
+         * this density. The defect being guarded against was eight dp of inner margin, not eight
+         * millionths.
+         */
+        assertTrue(
+            "the track is $track tall, over the $MueMinTouchTarget its segments need",
+            track <= MueMinTouchTarget + 1.dp,
+        )
+        offered().forEach { view ->
+            val segment = compose
+                .onNodeWithTag(FoodTestTags.view(view))
+                .getUnclippedBoundsInRoot()
+                .height
+            assertTrue(
+                "«${view.label}» is $segment tall, under $MueMinTouchTarget",
+                segment >= MueMinTouchTarget,
+            )
+        }
+    }
+
     // region what reaches the glass (the tab bar's lesson, one level down)
 
     /** The width the switcher is already right at, and the one nothing here may move. */

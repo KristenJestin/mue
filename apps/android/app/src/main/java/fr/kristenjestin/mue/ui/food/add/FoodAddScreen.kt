@@ -50,6 +50,7 @@ import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePickerField
@@ -59,6 +60,7 @@ import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
 import fr.kristenjestin.mue.ui.components.MueSplitRow
+import fr.kristenjestin.mue.ui.components.MueStepper
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -79,7 +81,8 @@ import java.time.LocalTime
 /** The moment glyph on the quiet line that names it; decoration beside its own word. */
 private val SlotFieldIconSize: Dp = 14.dp
 
-private val CloseIconSize: Dp = 18.dp
+/** The header's back arrow, at the size every other sub-screen in the module draws it. */
+private val BackIconSize: Dp = 18.dp
 
 /** The step buttons of the portion counter, at the touch minimum PRD_FOOD 18 sets. */
 private val StepButtonSize: Dp = MueMinTouchTarget
@@ -145,7 +148,17 @@ internal fun FoodAddRoute(
             onClose()
         }
     }
-    BackHandler(onBack = leave)
+    /*
+     * The gesture and the arrow are the same move.
+     *
+     * The header's control steps back to the ways in whenever there is a path to unmake, so the
+     * gesture has to as well: a screen with one visible way out must not have a second, invisible
+     * one that goes further. Once there is nothing left to step back through — the ways in
+     * themselves, or a correction, which never had an earlier stage — both leave the sheet.
+     */
+    BackHandler {
+        if (state.canReturnToPaths) viewModel.onBackToPaths() else leave()
+    }
 
     /*
      * PRD_FOOD 18's camera, read here rather than inside the panel.
@@ -192,7 +205,7 @@ internal fun FoodAddRoute(
             onQuickTitleChange = viewModel::onQuickTitleChange,
             onQuickEnergyChange = viewModel::onQuickEnergyChange,
             onQuickProteinChange = viewModel::onQuickProteinChange,
-            onServingsChange = viewModel::onServingsChange,
+            onServingsStep = viewModel::onServingsStep,
             onSlotSelected = viewModel::onSlotSelected,
             onOpenSlotPicker = viewModel::onShowSlotPicker,
             onDismissSlotPicker = viewModel::onDismissSlotPicker,
@@ -259,7 +272,8 @@ internal class FoodAddActions(
     val onQuickTitleChange: (String) -> Unit = {},
     val onQuickEnergyChange: (String) -> Unit = {},
     val onQuickProteinChange: (String) -> Unit = {},
-    val onServingsChange: (String) -> Unit = {},
+    /** FR-FOOD-004: true adds a quarter serving, false removes one (PRD_FOOD 15). */
+    val onServingsStep: (Boolean) -> Unit = {},
     /** FR-FOOD-007: the override, taken from the panel and never from the form itself. */
     val onSlotSelected: (MealSlot) -> Unit = {},
     val onOpenSlotPicker: () -> Unit = {},
@@ -296,15 +310,33 @@ internal fun FoodAddScreen(
     Box(modifier = modifier.fillMaxSize()) {
         MueSubScreenScaffold(
             title = state.screenTitle,
-            onNavigateBack = actions.onClose,
+            /*
+             * **One way out, and it goes back one step.**
+             *
+             * This header used to carry a cross that closed the whole sheet, while a second
+             * control below the title stepped back to the ways in — two exits, side by side,
+             * doing different amounts of damage, and the glyph gave no hint which was which.
+             * `Choose a food` had it right all along: a title, an arrow, one way out. So the
+             * arrow now does what the reader means by "back" from wherever they are — to the
+             * ways in when there is a path to unmake, out of the sheet when there is not — and
+             * the row below it is gone.
+             *
+             * This is also exactly what the system back gesture already did through
+             * `FoodAddRoute`'s own `BackHandler`, so the button and the gesture finally agree.
+             */
+            onNavigateBack = if (state.canReturnToPaths) {
+                actions.onBackToPaths
+            } else {
+                actions.onClose
+            },
             navigationIcon = {
                 MueIcon(
-                    iconName = MueIcons.CLOSE,
+                    iconName = MueIcons.ARROW_LEFT,
                     tint = MueTheme.colors.textSecondary,
-                    size = CloseIconSize,
+                    size = BackIconSize,
                 )
             },
-            navigationContentDescription = FoodAddMessages.CLOSE,
+            navigationContentDescription = FoodAddMessages.BACK,
         ) {
             Column(
                 modifier = Modifier
@@ -323,8 +355,14 @@ internal fun FoodAddScreen(
                      */
                     .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
                     .verticalScroll(scroll)
-                    // Inside the scroll, so the last card comes to rest clear of the fade.
-                    .padding(bottom = MueStickyActionRamp),
+                    /*
+                     * Inside the scroll at both ends, so the last card comes to rest clear of
+                     * the band's fade and the first comes to rest clear of the header's. The top
+                     * half of this pair was missing: the scaffold dissolves its first
+                     * [MueContentTopFade] and nothing reserved it, so at rest the top of
+                     * whichever card the stage opened with was invisible and unreachable.
+                     */
+                    .padding(top = MueContentTopFade, bottom = MueStickyActionRamp),
                 verticalArrangement = Arrangement.spacedBy(spacing.lg),
             ) {
                 when {
@@ -372,8 +410,12 @@ internal fun FoodAddScreen(
 /** Whichever of PRD_FOOD 7's stages the sheet is on. */
 @Composable
 private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
-    if (state.canReturnToPaths) BackToPaths(actions)
-
+    /*
+     * No `BackToPaths` row here any more. The way back to the ways in is the header's arrow,
+     * which is the only exit this sheet has and the one every other screen in the module already
+     * used. A second control saying the same thing in different words, immediately under a cross
+     * saying something else, is what the owner was looking at.
+     */
     when (state.stage) {
         FoodAddStage.PATHS -> WaysIn(actions)
 
@@ -465,51 +507,6 @@ private fun ColumnScope.WaysIn(actions: FoodAddActions) {
         testTag = FoodTestTags.ADD_QUICK,
         onClick = actions.onQuickAdd,
     )
-}
-
-/**
- * The step back to the three cards, above whatever the chosen path put on screen.
- *
- * First in the column, because it is what the reader is looking for when they realise they took
- * the wrong way in — and because anywhere below the quantity it would be under the fold on a
- * small phone at a large font size.
- *
- * A quiet row rather than a button: it undoes a choice, it does not perform the screen's action,
- * and giving it a button's weight would put it in competition with `Save entry`. The touch target
- * is still the full [MueMinTouchTarget] and the whole row is the control, arrow included, so
- * nobody has to hit the glyph.
- */
-@Composable
-private fun BackToPaths(actions: FoodAddActions) {
-    val colors = MueTheme.colors
-    Row(
-        modifier = Modifier
-            .clip(MueTheme.shapes.field)
-            .clickable(role = Role.Button, onClick = actions.onBackToPaths)
-            .heightIn(min = MueMinTouchTarget)
-            .padding(horizontal = MueTheme.spacing.sm)
-            .testTag(FoodTestTags.ADD_BACK_TO_PATHS)
-            /*
-             * One announcement rather than two: the arrow and the label are one control, and the
-             * `Day` screen's own add row is announced the same way. Cleared *after* `clickable`,
-             * which is what keeps the action and the role on the node while silencing the glyph
-             * and the text under it.
-             */
-            .clearAndSetSemantics {
-                contentDescription = FoodAddMessages.CHANGE_PATH
-                role = Role.Button
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-    ) {
-        MueIcon(iconName = MueIcons.ARROW_LEFT, tint = colors.textTertiary, size = 16.dp)
-        // Never capped: the label is the whole of what this control says it does.
-        MueText(
-            text = FoodAddMessages.CHANGE_PATH,
-            style = MueTheme.typography.caption,
-            color = colors.textSecondary,
-        )
-    }
 }
 
 /**
@@ -710,9 +707,15 @@ private fun AmountSection(state: FoodAddUiState, actions: FoodAddActions) {
 /**
  * PRD_FOOD 15: half a portion at a time, from 0.5 to 20, and the bounds disable the buttons.
  *
- * The two steps are chevrons rather than a plus and a minus because the app has never imported a
- * `minus` vector, and a drawable is not this screen's to add. Each carries its own label, so what
- * a chevron means is said rather than inferred from which way it points.
+ * The shared [MueStepper], not a pair of chevrons. The carets were chosen because the app had
+ * never imported a `minus` vector and a drawable was not this screen's to add — but the owner
+ * read them as what a chevron actually means everywhere else in the app, a disclosure: "le
+ * serving qui affiche des carets pour changer de taille, c'est trop chelou". The `−` is now set
+ * as type, exactly as `Entry`'s own step buttons have always drawn it, so no vector was needed
+ * after all.
+ *
+ * Both bounds are [FoodAmountUiState]'s, which got them from `Servings`; nothing here compares a
+ * count against a number.
  */
 @Composable
 private fun PortionCounter(
@@ -720,62 +723,18 @@ private fun PortionCounter(
     servingLabel: String,
     actions: FoodAddActions,
 ) {
-    val colors = MueTheme.colors
-    Row(
-        modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.SERVINGS_STEPPER),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
-    ) {
-        StepButton(
-            iconName = MueIcons.CHEVRON_DOWN,
-            label = FoodAddMessages.FEWER_PORTIONS,
-            enabled = amount.canRemovePortion,
-            onClick = { actions.onPortionStep(false) },
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xxs),
-        ) {
-            MueText(
-                text = FoodAddMessages.PORTIONS_LABEL,
-                style = MueTheme.typography.label,
-                color = colors.textTertiary,
-            )
-            MueText(
-                text = "${amount.portionsValue} ${FoodLabels.TIMES} $servingLabel",
-                style = MueTheme.typography.bodyStrong,
-                color = if (amount.portions == null) colors.textQuiet else colors.textPrimary,
-            )
-        }
-        StepButton(
-            iconName = MueIcons.CHEVRON_UP,
-            label = FoodAddMessages.MORE_PORTIONS,
-            enabled = amount.canAddPortion,
-            onClick = { actions.onPortionStep(true) },
-        )
-    }
-}
-
-@Composable
-private fun StepButton(
-    iconName: String,
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val colors = MueTheme.colors
-    Box(
-        modifier = Modifier
-            .size(StepButtonSize)
-            .clip(MueTheme.shapes.field)
-            .background(colors.surfaceStrong)
-            .alpha(if (enabled) 1f else DisabledStepAlpha)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        MueIcon(iconName = iconName, tint = colors.textSecondary, size = 18.dp)
-    }
+    MueStepper(
+        label = FoodAddMessages.PORTIONS_LABEL,
+        value = "${amount.portionsValue} ${FoodLabels.TIMES} $servingLabel",
+        onDecrement = { actions.onPortionStep(false) },
+        onIncrement = { actions.onPortionStep(true) },
+        decrementLabel = FoodAddMessages.FEWER_PORTIONS,
+        incrementLabel = FoodAddMessages.MORE_PORTIONS,
+        modifier = Modifier.testTag(FoodTestTags.SERVINGS_STEPPER),
+        canDecrement = amount.canRemovePortion,
+        canIncrement = amount.canAddPortion,
+        isValueSet = amount.portions != null,
+    )
 }
 
 // endregion
@@ -1118,14 +1077,36 @@ private fun ChosenRecipe(state: FoodAddUiState, actions: FoodAddActions) {
 private fun ServingsSection(state: FoodAddUiState, actions: FoodAddActions) {
     FoodSectionCard(title = FoodAddMessages.SERVINGS_SECTION) {
         Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-            MueTextField(
+            /*
+             * The same [MueStepper] the portion counter uses, and no longer a text field.
+             *
+             * It was a **required** box that opened empty, on a stage reached by tapping a
+             * recipe: "il me force à saisir un servings en input". Two things were wrong with
+             * that and both are gone — the field now opens on one serving
+             * (`FoodAddDraft.DEFAULT_SERVINGS`), and a quarter-serving step is a button rather
+             * than a decimal keyboard. `state.errors.servings` is still wired through, because a
+             * draft restored from an older build can still be carrying a number this stepper
+             * would not have produced.
+             */
+            MueStepper(
                 label = FoodAddMessages.SERVINGS_LABEL,
                 value = state.servings,
-                onValueChange = actions.onServingsChange,
+                onDecrement = { actions.onServingsStep(false) },
+                onIncrement = { actions.onServingsStep(true) },
+                decrementLabel = FoodAddMessages.FEWER_SERVINGS,
+                incrementLabel = FoodAddMessages.MORE_SERVINGS,
                 modifier = Modifier.testTag(FoodTestTags.QUANTITY_FIELD),
-                errorMessage = state.errors.servings,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                canDecrement = state.canRemoveServing,
+                canIncrement = state.canAddServing,
+                isError = state.errors.servings != null,
             )
+            state.errors.servings?.let { message ->
+                MueText(
+                    text = message,
+                    style = MueTheme.typography.micro,
+                    color = MueTheme.colors.error,
+                )
+            }
             MueText(
                 text = if (state.recipe != null) {
                     FoodAddMessages.SERVINGS_FROM_RECIPE

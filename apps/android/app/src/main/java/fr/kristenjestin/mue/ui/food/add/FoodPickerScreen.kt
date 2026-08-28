@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
@@ -158,7 +159,13 @@ internal fun FoodPickerScreen(
             value = state.query,
             onValueChange = onQueryChange,
             modifier = Modifier
-                .padding(top = spacing.md)
+                /*
+                 * The header's ramp, in full. This field is fixed chrome above the list rather
+                 * than a row inside it, so the twelve dp it used to keep left the top of the box
+                 * half-dissolved *permanently* — no amount of scrolling moves a control that
+                 * does not scroll.
+                 */
+                .padding(top = MueContentTopFade)
                 .testTag(FoodTestTags.SEARCH_FIELD),
             placeholder = FoodAddMessages.SEARCH_PLACEHOLDER,
             label = FoodAddMessages.SEARCH_LABEL,

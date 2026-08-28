@@ -25,12 +25,29 @@ internal object FoodAddMessages {
 
     // region the sheet itself (PRD_FOOD 7)
 
+    /**
+     * What the header says on the ways in — and **only** there.
+     *
+     * The sheet used to carry this one word over all five of its stages, so the scan panel and
+     * the quick-add form both announced themselves as `Add food`: "quand je rentre dans « scan a
+     * barcode », j'ai le « add food »". A header exists to say which screen this is, and a header
+     * that says the same thing on five screens has stopped doing that. Every other stage now
+     * names itself through [stageTitle], reusing the very words on the card that led there so the
+     * title is the tap the reader just made, read back.
+     */
     const val ADD_TITLE: String = "Add food"
 
     /** FR-FOOD-008 reuses this very sheet to correct a line that already exists. */
     const val EDIT_TITLE: String = "Edit entry"
 
-    const val CLOSE: String = "Close"
+    /**
+     * The single way out, named as what it does.
+     *
+     * It was `Close` on a cross, beside a second control lower down that went back one stage —
+     * two exits, two meanings, and no way to tell from the glyph which one dropped the work.
+     * There is one now, it is an arrow, and it steps back exactly as far as there is to go.
+     */
+    const val BACK: String = "Back"
 
     // endregion
 
@@ -69,12 +86,25 @@ internal object FoodAddMessages {
     const val QUICK_PATH_DESCRIPTION: String = "A name and an energy, when that is all you know"
 
     /**
-     * The way back to the three cards above, from whichever path was taken.
+     * The header of each stage, which is the card that led to it.
      *
-     * Worded against [PATHS_TITLE] on purpose — `Pick a way in.` and `Choose another way` are the
-     * same noun — so the control names the screen it returns to rather than describing a gesture.
+     * [SCAN_PATH] and [QUICK_PATH] are reused verbatim rather than reworded: the reader tapped
+     * `Scan a barcode`, so `Scan a barcode` is what the next screen should be called, and a
+     * second wording for the same place is a second thing to learn. The two stages that are not
+     * reached from a card of their own take the question their section already asks —
+     * [AMOUNT_SECTION] and [SERVINGS_SECTION] — which is the same principle one level down.
+     *
+     * [FROZEN] keeps [EDIT_TITLE]: it is only ever reached by correcting a stored line, and
+     * there is no card behind it to name.
      */
-    const val CHANGE_PATH: String = "Choose another way"
+    fun stageTitle(stage: FoodAddStage): String = when (stage) {
+        FoodAddStage.PATHS -> ADD_TITLE
+        FoodAddStage.SCAN -> SCAN_PATH
+        FoodAddStage.QUICK -> QUICK_PATH
+        FoodAddStage.AMOUNT -> AMOUNT_SECTION
+        FoodAddStage.SERVINGS -> SERVINGS_SECTION
+        FoodAddStage.FROZEN -> EDIT_TITLE
+    }
 
     // endregion
 
@@ -236,6 +266,16 @@ internal object FoodAddMessages {
      * is already gone or is about to be served.
      */
     const val SERVINGS_LABEL: String = "Servings"
+
+    /**
+     * The two ends of the servings stepper.
+     *
+     * They say "a quarter" because that is the step PRD_FOOD 15 sets and `Servings` owns — but
+     * neither string is what *applies* it: `FoodAddDraft.steppedServings` asks the domain to move
+     * the value and to say whether it may. These name the button; they do not define the rule.
+     */
+    const val FEWER_SERVINGS: String = "A quarter serving fewer"
+    const val MORE_SERVINGS: String = "A quarter serving more"
 
     /** PRD_FOOD 8.4: a recipe edited since is not a line rewritten. */
     const val SERVINGS_FROZEN: String = "Rescaled from what this entry was saved with"

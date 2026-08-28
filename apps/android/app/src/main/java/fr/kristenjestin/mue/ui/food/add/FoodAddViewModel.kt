@@ -240,7 +240,9 @@ internal class FoodAddViewModel(
                 quantity = "",
                 portionThousandths = null,
                 weighedCooked = false,
-                servings = "",
+                // Back to one serving, not to nothing: the stepper has no empty state, and a
+                // second recipe should open on the same honest default the first one did.
+                servings = FoodAddDraft.DEFAULT_SERVINGS,
             )
         }
     }
@@ -510,9 +512,17 @@ internal class FoodAddViewModel(
     // endregion
 
     /** FR-FOOD-008 on a recipe line: how many servings were eaten. */
-    fun onServingsChange(raw: String) {
+    /**
+     * FR-FOOD-004: one quarter of a serving, up or down.
+     *
+     * The typed field this replaces is gone, so there is no longer a keystroke to sanitise here:
+     * the draft moves its own value through `Servings` and hands back either the next count or
+     * itself. A step refused at a bound is therefore a no-op rather than an error, which is the
+     * behaviour the greyed-out button already promises.
+     */
+    fun onServingsStep(up: Boolean) {
         clearErrors()
-        updateDraft { it.copy(servings = number(raw)) }
+        updateDraft { it.steppedServings(up) }
     }
 
     // region when and where (PRD_FOOD 10.3, FR-FOOD-007)
@@ -753,9 +763,6 @@ internal class FoodAddViewModel(
 
     private fun now(): LocalTime = LocalTime.now(clock)
 
-    /** What the sheet was opened for, as one string a `Bundle` can hold. */
-    private fun targetOf(date: LocalDate?, slot: MealSlot?, entryId: FoodLogEntryId?): String =
-        entryId?.value ?: "${date ?: ""}/${slot?.id ?: ""}"
 
     /**
      * Everything a save attempt or a panel decides, and nothing anyone typed.
@@ -778,6 +785,19 @@ internal class FoodAddViewModel(
 
         internal const val KEY_DRAFT: String = "food.add.draft"
         internal const val KEY_TARGET: String = "food.add.target"
+
+        /**
+         * What the sheet was opened for, as one string a `Bundle` can hold.
+         *
+         * On the companion because it depends on nothing but its arguments, and because a test
+         * that wants to stand a restored draft up has to be able to write the same key the sheet
+         * would have written.
+         */
+        internal fun targetOf(
+            date: LocalDate?,
+            slot: MealSlot?,
+            entryId: FoodLogEntryId?,
+        ): String = entryId?.value ?: "${date ?: ""}/${slot?.id ?: ""}"
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 

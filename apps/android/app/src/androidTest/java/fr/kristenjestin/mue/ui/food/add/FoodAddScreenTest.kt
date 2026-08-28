@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertCountEquals
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -62,6 +64,7 @@ class FoodAddScreenTest {
     private var deleted = 0
     private var timeOpened = 0
     private var backedOut = 0
+    private var closed = 0
     private var stepped = mutableListOf<Boolean>()
 
     // region the ways in (PRD_FOOD 7)
@@ -106,41 +109,76 @@ class FoodAddScreenTest {
      * The way out of a chosen path, on the glass (PRD_FOOD 7).
      *
      * "j'ai plus accès aux 3 menus d'avant." The sheet had no step back at all: once a path was
-     * taken the three cards were unreachable until a line was saved or deleted. It is the first
-     * thing in the column because it is what a reader is looking for the moment they realise they
-     * took the wrong way in — anywhere under the quantity it would be below the fold at a large
-     * text size.
+     * taken the three cards were unreachable until a line was saved or deleted.
+     *
+     * It is now the **header's own arrow**, and there is nothing else. It used to be a second
+     * control under a cross that closed the whole sheet — "j'ai le « add food » mais avec une
+     * croix et un autre bouton en dessous pour revenir en arrière" — so the assertion is that the
+     * one exit does the step, not that a second control exists to do it.
      */
     @Test
-    fun theWayBackToThePathsIsOfferedOnceAPathIsTaken() {
+    fun theHeaderArrowStepsBackToThePathsOnceAPathIsTaken() {
         show(previewCookedState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS)
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK)
             .assertIsDisplayed()
             .performClick()
 
         assertEquals(1, backedOut)
+        assertEquals(0, closed)
     }
 
-    /** Nothing has been chosen yet on the first stage, so there is nothing to go back from. */
+    /**
+     * One exit, and it is an arrow.
+     *
+     * The cross is gone from every stage. Two ways out with two meanings, side by side and
+     * distinguished only by a glyph, is the defect; a header that offers `Close` as well as
+     * `Back` would be it returning.
+     */
     @Test
-    fun theWaysInThemselvesCarryNoWayBack() {
+    fun everyStageOffersExactlyOneWayOut() {
         show(previewPathsState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+        listOf(
+            previewPathsState(),
+            previewScanRefusedState(),
+            previewCookedState(),
+            previewQuickState(),
+            previewRecipeServingsState(),
+        ).forEach { state ->
+            showState(state)
+
+            compose.onAllNodesWithContentDescription(FoodAddMessages.BACK).assertCountEquals(1)
+            compose.onNodeWithContentDescription(FormerCloseLabel).assertDoesNotExist()
+            compose.onNodeWithText(FormerChangePathLabel).assertDoesNotExist()
+        }
+    }
+
+    /** Nothing has been chosen yet on the first stage, so back leaves the sheet instead. */
+    @Test
+    fun theWaysInThemselvesStepBackOutOfTheSheet() {
+        show(previewPathsState())
+
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK).performClick()
+
+        assertEquals(0, backedOut)
+        assertEquals(1, closed)
     }
 
     /**
      * FR-FOOD-008: a correction was not opened on the ways in and has no earlier stage.
      *
      * Offering the step there would offer to turn a weighed food into a quick add, which is the
-     * loss of the line rather than a correction of it.
+     * loss of the line rather than a correction of it. So its arrow closes the sheet.
      */
     @Test
     fun aCorrectionIsNeverOfferedTheWayBack() {
         show(previewServingsState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK).performClick()
+
+        assertEquals(0, backedOut)
+        assertEquals(1, closed)
         compose.onNodeWithTag(FoodTestTags.DELETE_BUTTON).assertExists()
     }
 
@@ -149,7 +187,40 @@ class FoodAddScreenTest {
     fun theWayBackIsANamedTargetOfTheRightSize() {
         show(previewCookedState())
 
-        assertTallEnough(FoodAddMessages.CHANGE_PATH)
+        assertTallEnough(FoodAddMessages.BACK)
+    }
+
+    /**
+     * The header names the screen it is on, and not the one it was opened from.
+     *
+     * "quand je rentre dans « scan a barcode », j'ai le « add food »" — the sheet used to carry
+     * `Add food` over all five of its stages. A title that is the same on every screen is not a
+     * title.
+     */
+    @Test
+    fun everyStageNamesItselfInTheHeader() {
+        show(previewPathsState())
+        assertHeaderTitle(FoodAddMessages.ADD_TITLE)
+
+        showState(previewScanRefusedState())
+        assertHeaderTitle(FoodAddMessages.SCAN_PATH)
+
+        showState(previewQuickState())
+        assertHeaderTitle(FoodAddMessages.QUICK_PATH)
+
+        showState(previewCookedState())
+        assertHeaderTitle(FoodAddMessages.AMOUNT_SECTION)
+
+        showState(previewRecipeServingsState())
+        assertHeaderTitle(FoodAddMessages.SERVINGS_SECTION)
+    }
+
+    /** FR-FOOD-008: a correction is one screen whatever form the line it corrects has. */
+    @Test
+    fun aCorrectionNamesItselfAnEdit() {
+        show(previewServingsState())
+
+        assertHeaderTitle(FoodAddMessages.EDIT_TITLE)
     }
 
     // endregion
@@ -576,6 +647,32 @@ class FoodAddScreenTest {
         ).assertExists()
     }
 
+    /**
+     * The string in the scaffold's header slot, told apart from the same words on a card.
+     *
+     * `How much?` and `How many servings?` are each drawn twice — once as the screen's title and
+     * once as the section's — so a bare `onNodeWithText` would find two nodes and fail on the
+     * ambiguity rather than on the fact. `MueSubScreenScaffold` marks its title a heading and the
+     * section cards below do not, which is the difference this reads.
+     */
+    private fun assertHeaderTitle(title: String) {
+        compose
+            .onNode(
+                hasText(title) and
+                    SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
+            )
+            .assertExists()
+    }
+
+    /**
+     * The two strings the sheet's second exit used to draw.
+     *
+     * Spelled out here rather than referenced, because both constants are gone from the
+     * production source — which is the point. A test that named them would keep them alive.
+     */
+    private val FormerCloseLabel: String = "Close"
+    private val FormerChangePathLabel: String = "Choose another way"
+
     private fun assertTallEnough(contentDescription: String) {
         val height = compose
             .onNodeWithContentDescription(contentDescription)
@@ -615,6 +712,7 @@ class FoodAddScreenTest {
                                 onSearchFood = { searched++ },
                                 onUseRecipe = { recipes++ },
                                 onQuickAdd = { quick++ },
+                                onClose = { closed++ },
                                 onBackToPaths = { backedOut++ },
                                 onPortionStep = { up -> stepped += up },
                                 onSlotSelected = { slotChosen = it },

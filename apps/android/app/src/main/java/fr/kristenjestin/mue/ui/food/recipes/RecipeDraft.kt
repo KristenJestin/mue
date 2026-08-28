@@ -1,5 +1,7 @@
 package fr.kristenjestin.mue.ui.food.recipes
 
+import fr.kristenjestin.mue.domain.logic.FoodValidation
+import fr.kristenjestin.mue.domain.logic.valueOrNull
 import fr.kristenjestin.mue.domain.model.Recipe
 import fr.kristenjestin.mue.domain.model.RecipeIngredient
 import fr.kristenjestin.mue.domain.model.RecipeIngredientId
@@ -31,7 +33,7 @@ internal data class RecipeDraft(
     val recipeId: String? = null,
     val name: String = "",
     val typeId: String = RecipeType.MAIN.id,
-    /** PRD_FOOD 15: a whole number from 1 to 12, typed rather than stepped. */
+    /** PRD_FOOD 15: a whole number from 1 to 12, stepped rather than typed. */
     val baseServings: String = DEFAULT_BASE_SERVINGS,
     val description: String = "",
     val prepTimeMinutes: String = "",
@@ -62,6 +64,27 @@ internal data class RecipeDraft(
         rows[index] = block(row)
         return copy(ingredients = rows)
     }
+
+    /**
+     * The base servings moved one whole serving, or this draft unchanged at a bound.
+     *
+     * `FoodValidation.validateBaseServings` owns PRD_FOOD 15's 1 to 12 and is asked twice: once
+     * to read what is currently in the field, once to say whether the neighbour is still a legal
+     * number of servings. A step that would leave the range returns `this`, which greys the
+     * button. A field holding something unreadable steps to [DEFAULT_BASE_SERVINGS] so that the
+     * control is never dead.
+     */
+    fun steppedBaseServings(up: Boolean): RecipeDraft {
+        val current = FoodValidation.validateBaseServings(baseServings).valueOrNull
+            ?: return copy(baseServings = DEFAULT_BASE_SERVINGS)
+        val moved = current + if (up) 1 else -1
+        val next = FoodValidation.validateBaseServings(moved).valueOrNull ?: return this
+        return copy(baseServings = next.toString())
+    }
+
+    /** Whether [steppedBaseServings] would move — all the stepper's buttons need to know. */
+    fun canStepBaseServings(up: Boolean): Boolean =
+        steppedBaseServings(up).baseServings != baseServings
 
     fun toJson(): String = format.encodeToString(serializer(), this)
 

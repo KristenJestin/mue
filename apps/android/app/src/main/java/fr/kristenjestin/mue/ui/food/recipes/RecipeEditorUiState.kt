@@ -45,6 +45,15 @@ internal data class RecipeEditorUiState(
     val type: RecipeType = RecipeType.MAIN,
     val baseServings: String = RecipeDraft.DEFAULT_BASE_SERVINGS,
     val baseServingsError: String? = null,
+    /**
+     * Whether the base-servings stepper may move each way (PRD_FOOD 15).
+     *
+     * Both are `RecipeDraft.canStepBaseServings`, which asks
+     * [fr.kristenjestin.mue.domain.logic.FoodValidation.validateBaseServings] whether the
+     * neighbouring number is still a legal count. The 1 and the 12 appear nowhere on this side.
+     */
+    val canAddBaseServing: Boolean = true,
+    val canRemoveBaseServing: Boolean = true,
     val description: String = "",
     val prepTime: String = "",
     val prepTimeError: String? = null,
@@ -130,6 +139,8 @@ internal data class RecipeEditorUiState(
                 type = draft.type,
                 baseServings = draft.baseServings,
                 baseServingsError = baseServings.errorMessage.orNull(showErrors),
+                canAddBaseServing = draft.canStepBaseServings(up = true),
+                canRemoveBaseServing = draft.canStepBaseServings(up = false),
                 description = draft.description,
                 prepTime = draft.prepTimeMinutes,
                 prepTimeError = FoodValidation.validatePrepTime(draft.prepTimeMinutes)

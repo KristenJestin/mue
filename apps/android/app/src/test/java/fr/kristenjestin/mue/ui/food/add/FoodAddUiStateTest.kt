@@ -244,11 +244,33 @@ class FoodAddUiStateTest {
         assertEquals(FoodAddMessages.SAVE_CHANGES, editing.saveLabel)
         assertTrue(editing.canDelete)
 
+        /*
+         * A new line names its **stage** instead, which is the whole of the title fix: `Add food`
+         * belongs to the ways in and nowhere else. What still separates the two sheets is that a
+         * correction says `Edit entry` on every stage it can reach, so its title never moves.
+         */
         val creating = previewCookedState()
         assertFalse(creating.isEditing)
-        assertEquals(FoodAddMessages.ADD_TITLE, creating.screenTitle)
+        assertEquals(FoodAddMessages.AMOUNT_SECTION, creating.screenTitle)
         assertEquals(FoodAddMessages.SAVE_ENTRY, creating.saveLabel)
         assertFalse(creating.canDelete)
+
+        assertEquals(FoodAddMessages.ADD_TITLE, previewPathsState().screenTitle)
+    }
+
+    /**
+     * Each stage of a new line says where it is (PRD_FOOD 7).
+     *
+     * "quand je rentre dans « scan a barcode », j'ai le « add food »". One title over five
+     * screens is not a title, and the two the owner met were the two furthest from `Add food`.
+     */
+    @Test
+    fun `every stage of a new line names itself`() {
+        assertEquals(FoodAddMessages.ADD_TITLE, previewPathsState().screenTitle)
+        assertEquals(FoodAddMessages.SCAN_PATH, previewScanRefusedState().screenTitle)
+        assertEquals(FoodAddMessages.QUICK_PATH, previewQuickState().screenTitle)
+        assertEquals(FoodAddMessages.AMOUNT_SECTION, previewCookedState().screenTitle)
+        assertEquals(FoodAddMessages.SERVINGS_SECTION, previewRecipeServingsState().screenTitle)
     }
 
     /**

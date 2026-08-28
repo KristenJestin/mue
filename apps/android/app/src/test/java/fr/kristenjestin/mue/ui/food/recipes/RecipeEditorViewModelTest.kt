@@ -71,7 +71,9 @@ class RecipeEditorViewModelTest {
         val written = assertNotNull(editor.recipes.saved.singleOrNull())
         assertEquals("Skyr bowl", written.recipe.name)
         assertEquals(RecipeType.BREAKFAST, written.recipe.type)
-        assertEquals(2, written.recipe.baseServings)
+        // The default the form opens on, which `fill` no longer overrides now that the count is
+        // stepped rather than typed.
+        assertEquals(RecipeDraft.DEFAULT_BASE_SERVINGS.toInt(), written.recipe.baseServings)
         assertEquals(listOf("Spoon it out.", "Add the berries."), written.recipe.steps)
         assertEquals(1, written.ingredients.size)
         assertEquals(200.0, written.ingredients.first().quantity.amount)
@@ -136,17 +138,56 @@ class RecipeEditorViewModelTest {
         assertEquals(FoodValidation.NAME_ERROR, state(editor).nameError)
     }
 
+    /**
+     * PRD_FOOD 15's 1 to 12, kept by the stepper that replaced the typed field.
+     *
+     * An impossible count can no longer be entered, so the rule is asserted where it now lives:
+     * the value stops at each end and the control says so before it is pressed.
+     */
     @Test
-    fun `an impossible serving count is refused, and says why`() = editorTest { editor ->
+    fun `the base servings stepper stops at both ends of its range`() = editorTest { editor ->
         editor.viewModel.start(null)
         fill(editor)
-        editor.viewModel.onBaseServingsChange("99")
 
-        editor.viewModel.onSave()
-        advanceUntilIdle()
+        repeat(50) { editor.viewModel.onBaseServingsStep(up = true) }
 
-        assertEquals(emptyList<RecipeDetail>(), editor.recipes.saved)
-        assertEquals(FoodValidation.BASE_SERVINGS_ERROR, state(editor).baseServingsError)
+        val ceiling = state(editor)
+        assertEquals("12", ceiling.baseServings)
+        assertFalse(ceiling.canAddBaseServing, "the stepper offered a thirteenth serving")
+        assertNull(ceiling.baseServingsError)
+
+        repeat(50) { editor.viewModel.onBaseServingsStep(up = false) }
+
+        val floor = state(editor)
+        assertEquals("1", floor.baseServings)
+        assertFalse(floor.canRemoveBaseServing, "the stepper offered a recipe serving nobody")
+        assertNull(floor.baseServingsError)
+    }
+
+    /**
+     * PRD_FOOD 15, on a draft the stepper could not have produced.
+     *
+     * A count out of range survives an update in `SavedStateHandle` from the build where the
+     * field was typed, so the refusal has to outlive the field that made it possible.
+     */
+    @Test
+    fun `a stored impossible serving count is refused, and says why`() {
+        val savedState = SavedStateHandle()
+        savedState[RecipeEditorViewModel.KEY_DRAFT] = RecipeDraft(baseServings = "99").toJson()
+        // Already started for a new recipe, so `start` restores this draft instead of replacing
+        // it — which is precisely what coming back from a process death looks like.
+        savedState[RecipeEditorViewModel.KEY_STARTED_FOR] = ""
+
+        editorTest(savedState = savedState) { editor ->
+            editor.viewModel.start(null)
+            fill(editor)
+
+            editor.viewModel.onSave()
+            advanceUntilIdle()
+
+            assertEquals(emptyList<RecipeDetail>(), editor.recipes.saved)
+            assertEquals(FoodValidation.BASE_SERVINGS_ERROR, state(editor).baseServingsError)
+        }
     }
 
     @Test
@@ -219,23 +260,50 @@ class RecipeEditorViewModelTest {
         editor.viewModel.start(null)
         editor.viewModel.onPickFood(skyr().id.value)
         advanceUntilIdle()
-        editor.viewModel.onBaseServingsChange("2")
+        // Four is the default, so two steps down is a two-serving recipe.
+        repeat(2) { editor.viewModel.onBaseServingsStep(up = false) }
         editor.viewModel.onQuantityChange(0, "200")
 
         // 200 g of a 63 kcal/100 g skyr is 126 kcal for the dish, so 63 kcal a serving.
         assertEquals("≈ 63 kcal", assertNotNull(state(editor).perServing).energyLabel)
     }
 
-    /** A serving count that does not parse divides by nothing, so the block stays unknown. */
+    /**
+     * A serving count that does not parse divides by nothing, so the block stays unknown.
+     *
+     * Only a stored draft can hold one now — the stepper always leaves a whole number behind —
+     * so that is how it is put there. The block must still refuse to invent a figure from it.
+     */
     @Test
-    fun `an unreadable serving count leaves the block unknown`() = editorTest { editor ->
-        editor.viewModel.start(null)
-        editor.viewModel.onPickFood(skyr().id.value)
-        advanceUntilIdle()
-        editor.viewModel.onQuantityChange(0, "200")
-        editor.viewModel.onBaseServingsChange("")
+    fun `an unreadable stored serving count leaves the block unknown`() {
+        val savedState = SavedStateHandle()
+        savedState[RecipeEditorViewModel.KEY_DRAFT] = RecipeDraft(baseServings = "").toJson()
+        savedState[RecipeEditorViewModel.KEY_STARTED_FOR] = ""
 
-        assertEquals(FoodLabels.UNKNOWN, assertNotNull(state(editor).perServing).energyLabel)
+        editorTest(savedState = savedState) { editor ->
+            editor.viewModel.start(null)
+            editor.viewModel.onPickFood(skyr().id.value)
+            advanceUntilIdle()
+            editor.viewModel.onQuantityChange(0, "200")
+
+            assertEquals(FoodLabels.UNKNOWN, assertNotNull(state(editor).perServing).energyLabel)
+        }
+    }
+
+    /** A stored count that cannot be read still leaves the stepper usable: it steps to a default. */
+    @Test
+    fun `stepping an unreadable stored serving count recovers the default`() {
+        val savedState = SavedStateHandle()
+        savedState[RecipeEditorViewModel.KEY_DRAFT] = RecipeDraft(baseServings = "").toJson()
+        savedState[RecipeEditorViewModel.KEY_STARTED_FOR] = ""
+
+        editorTest(savedState = savedState) { editor ->
+            editor.viewModel.start(null)
+
+            editor.viewModel.onBaseServingsStep(up = true)
+
+            assertEquals(RecipeDraft.DEFAULT_BASE_SERVINGS, state(editor).baseServings)
+        }
     }
 
     /**
@@ -508,7 +576,8 @@ class RecipeEditorViewModelTest {
     private suspend fun TestScope.fill(editor: Editor) {
         editor.viewModel.onNameChange("Skyr bowl")
         editor.viewModel.onTypeSelected(RecipeType.BREAKFAST)
-        editor.viewModel.onBaseServingsChange("2")
+        // The base servings are left at whatever the draft holds: the default is inside
+        // PRD_FOOD 15's range, and the one test that seeds an impossible count needs it kept.
         editor.viewModel.onPrepTimeChange("5")
         editor.viewModel.onStepsChange("Spoon it out.\n\nAdd the berries.")
         editor.viewModel.onPickFood(skyr().id.value)

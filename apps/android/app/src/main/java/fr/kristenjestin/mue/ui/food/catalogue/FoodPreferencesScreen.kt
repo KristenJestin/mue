@@ -31,6 +31,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
@@ -96,7 +97,13 @@ internal fun FoodPreferencesScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                /*
+                 * The header's ramp. This screen is the sharpest case of the defect: one card,
+                 * shorter than the viewport, so the scroll range is zero and the top of the
+                 * switch row was dissolved with *no* gesture able to bring it back.
+                 */
+                .padding(top = MueContentTopFade),
             verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
         ) {
             FoodSwitchRow(

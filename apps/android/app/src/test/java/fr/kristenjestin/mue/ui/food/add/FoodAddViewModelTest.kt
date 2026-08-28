@@ -360,7 +360,9 @@ class FoodAddViewModelTest {
         add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
         advanceUntilIdle()
 
-        add.viewModel.onServingsChange("1,5")
+        // Two quarter-steps up from the serving the form now opens on.
+        add.viewModel.onServingsStep(up = true)
+        add.viewModel.onServingsStep(up = true)
         add.viewModel.save()
         advanceUntilIdle()
 
@@ -399,7 +401,7 @@ class FoodAddViewModelTest {
         add.viewModel.onRecipeChosen(RecipePreviewData.CURRY_ID)
         advanceUntilIdle()
 
-        add.viewModel.onServingsChange("1")
+        // Nothing to set: the field opens on one serving, which is what this line asserted.
         add.viewModel.save()
         advanceUntilIdle()
 
@@ -408,9 +410,16 @@ class FoodAddViewModelTest {
         assertEquals(FoodLabels.UNKNOWN, FoodLabels.energy(saved.nutrients.energy))
     }
 
-    /** PRD_FOOD 15: the servings are bounded, and a refusal lands beside the field. */
+    /**
+     * PRD_FOOD 15: the servings are bounded, and the stepper cannot leave the range.
+     *
+     * The count is no longer typed, so this is where the bound is now kept — a step that would
+     * leave the range does not move, and the control says so before it is pressed. Pressing far
+     * past both ends is the point: the assertion is that the value *stops*, not that it wraps or
+     * drifts.
+     */
     @Test
-    fun `a servings count outside its range refuses the save beside the field`() = addTest(
+    fun `the servings stepper stops at both ends of its range`() = addTest(
         catalogue = RecipePreviewData.catalogue(),
         recipes = RecipePreviewData.details(),
     ) { add ->
@@ -418,15 +427,65 @@ class FoodAddViewModelTest {
         add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
         advanceUntilIdle()
 
-        add.viewModel.onServingsChange("40")
-        add.viewModel.save()
+        repeat(100) { add.viewModel.onServingsStep(up = true) }
         advanceUntilIdle()
 
-        assertTrue(add.logs.saved.isEmpty())
-        assertEquals(
-            FoodValidation.CONSUMED_SERVINGS_ERROR,
-            state(add).errors.servings,
+        val ceiling = state(add)
+        assertEquals(FoodLabels.servings(Servings.ofConsumedOrNull(10.0)), ceiling.servings)
+        assertFalse(ceiling.canAddServing, "the stepper offered to pass PRD_FOOD 15's ceiling")
+        assertTrue(ceiling.canRemoveServing)
+
+        repeat(100) { add.viewModel.onServingsStep(up = false) }
+        advanceUntilIdle()
+
+        val floor = state(add)
+        assertEquals(FoodLabels.servings(Servings.ofConsumedOrNull(0.25)), floor.servings)
+        assertFalse(floor.canRemoveServing, "the stepper offered to pass PRD_FOOD 15's floor")
+        assertTrue(floor.canAddServing)
+    }
+
+    /**
+     * PRD_FOOD 15, on a draft the stepper could not have produced.
+     *
+     * A count out of range is no longer reachable by hand, but a draft written by an older build
+     * — where the field was typed — survives an update in `SavedStateHandle`. The refusal has to
+     * outlive the text field that made it possible, and it still lands beside the field.
+     */
+    @Test
+    fun `a stored servings count outside its range refuses the save beside the field`() {
+        val savedState = SavedStateHandle()
+        /*
+         * Already started for this target, so `start` resumes the draft below instead of
+         * replacing it — which is what coming back from a process death actually looks like.
+         */
+        savedState[FoodAddViewModel.KEY_TARGET] =
+            FoodAddViewModel.targetOf(TODAY, MealSlot.DINNER, null)
+        savedState[FoodAddViewModel.KEY_DRAFT] = FoodAddDraft.toJson(
+            FoodAddDraft(
+                kindId = FoodLogKind.RECIPE.id,
+                recipeId = RecipePreviewData.SALMON_ID.value,
+                slotId = MealSlot.DINNER.id,
+                servings = "40",
+            ),
         )
+
+        addTest(
+            catalogue = RecipePreviewData.catalogue(),
+            recipes = RecipePreviewData.details(),
+            savedState = savedState,
+        ) { add ->
+            add.viewModel.start(TODAY, MealSlot.DINNER, null)
+            advanceUntilIdle()
+
+            add.viewModel.save()
+            advanceUntilIdle()
+
+            assertTrue(add.logs.saved.isEmpty())
+            assertEquals(
+                FoodValidation.CONSUMED_SERVINGS_ERROR,
+                state(add).errors.servings,
+            )
+        }
     }
 
     /** PRD_FOOD 7: a path chosen is a path that can be unchosen, the recipe included. */
@@ -437,7 +496,7 @@ class FoodAddViewModelTest {
         add.viewModel.start(TODAY, MealSlot.DINNER, null)
         add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
         advanceUntilIdle()
-        add.viewModel.onServingsChange("2")
+        add.viewModel.onServingsStep(up = true)
 
         add.viewModel.onBackToPaths()
         advanceUntilIdle()
@@ -445,25 +504,26 @@ class FoodAddViewModelTest {
         val state = state(add)
         assertEquals(FoodAddStage.PATHS, state.stage)
         assertNull(state.recipe)
-        assertEquals("", state.servings)
+        // Back to the default rather than to nothing: the stepper has no empty state.
+        assertEquals(FoodAddDraft.DEFAULT_SERVINGS, state.servings)
     }
 
-    /** Two recipes are two amounts of food: a count typed against one must not survive the other. */
+    /** Two recipes are two amounts of food: a count set against one must not survive the other. */
     @Test
-    fun `choosing another recipe clears the servings typed against the first`() = addTest(
+    fun `choosing another recipe resets the servings set against the first`() = addTest(
         recipes = RecipePreviewData.details(),
     ) { add ->
         add.viewModel.start(TODAY, MealSlot.DINNER, null)
         add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
         advanceUntilIdle()
-        add.viewModel.onServingsChange("3")
+        repeat(8) { add.viewModel.onServingsStep(up = true) }
 
         add.viewModel.onRecipeChosen(RecipePreviewData.CURRY_ID)
         advanceUntilIdle()
 
         val state = state(add)
         assertEquals(RecipePreviewData.CURRY_NAME, assertNotNull(state.recipe).name)
-        assertEquals("", state.servings)
+        assertEquals(FoodAddDraft.DEFAULT_SERVINGS, state.servings)
     }
 
     /** FR-FOOD-002 after FR-FOOD-004: a food chosen afterwards is a food line, not a recipe one. */

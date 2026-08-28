@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.domain.model.ReferenceUnit
 import fr.kristenjestin.mue.ui.components.MueBottomSheet
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
@@ -166,7 +167,18 @@ internal fun FoodEditorScreen(
                     // left over live content so a thumb in the fade still scrolls.
                     .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
                     .verticalScroll(scroll)
-                    .padding(bottom = MueStickyActionRamp),
+                    /*
+                     * The header's own ramp, reserved the same way and for the same reason as
+                     * the band's below. `MueSubScreenScaffold` dissolves the top
+                     * [MueContentTopFade] of this column so that rows *leaving* the screen melt
+                     * under the title instead of being cut off — but at rest there is nothing
+                     * leaving, so without this the top of `ProvenanceCard` was simply invisible,
+                     * and no scroll could reach it because the scroll was already at zero: "le
+                     * header, par exemple avec « new food », cache un bout, genre là je peux pas
+                     * scroll plus haut". Inside the scroll, so the ramp still bites once the
+                     * form does move.
+                     */
+                    .padding(top = MueContentTopFade, bottom = MueStickyActionRamp),
                 verticalArrangement = Arrangement.spacedBy(spacing.lg),
             ) {
                 ProvenanceCard(state)

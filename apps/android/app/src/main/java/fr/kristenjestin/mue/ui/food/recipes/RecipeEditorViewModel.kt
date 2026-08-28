@@ -180,8 +180,13 @@ internal class RecipeEditorViewModel(
 
     fun onTypeSelected(type: RecipeType) = edit { it.copy(typeId = type.id) }
 
-    fun onBaseServingsChange(raw: String) =
-        edit { it.copy(baseServings = digits(raw, MAX_SERVINGS_DIGITS)) }
+    /**
+     * PRD_FOOD 15: one whole serving each way.
+     *
+     * The digit-sanitising this replaces has no job left — a stepper cannot produce a `12x` —
+     * and the range now answers for itself through `RecipeDraft.steppedBaseServings`.
+     */
+    fun onBaseServingsStep(up: Boolean) = edit { it.steppedBaseServings(up) }
 
     fun onPrepTimeChange(raw: String) =
         edit { it.copy(prepTimeMinutes = digits(raw, MAX_PREP_TIME_DIGITS)) }
@@ -418,9 +423,6 @@ internal class RecipeEditorViewModel(
 
         /** Long enough to browse, short enough that a 3 484-entry catalogue never all arrives. */
         internal const val PICKER_LIMIT: Int = 40
-
-        /** PRD_FOOD 15 stops a recipe at twelve servings; two boxes is all the field can hold. */
-        private const val MAX_SERVINGS_DIGITS = 2
 
         /** PRD_FOOD 15 sets no preparation time; four digits stops a mistyped one at 1 440. */
         private const val MAX_PREP_TIME_DIGITS = 4

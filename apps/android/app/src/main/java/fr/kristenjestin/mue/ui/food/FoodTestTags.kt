@@ -115,9 +115,6 @@ internal object FoodTestTags {
     const val SCANNER_PREVIEW: String = "food:scannerPreview"
     const val BARCODE_FIELD: String = "food:barcodeField"
 
-    /** The step back to the four paths, from whichever one was taken (PRD_FOOD 7). */
-    const val ADD_BACK_TO_PATHS: String = "food:addBackToPaths"
-
     /**
      * FR-FOOD-004: the recipe a line is being built from, on the sheet.
      *
@@ -177,6 +174,15 @@ internal object FoodTestTags {
     const val RECIPE_PICKER: String = "food:recipePicker"
 
     const val RECIPE_DETAIL: String = "food:recipeDetail"
+
+    /**
+     * The facts block, which is the first thing the card draws.
+     *
+     * It exists so `FoodSubScreenHeaderTest` can measure where the content column actually
+     * begins — the one assertion that cannot be made from a string, because a control faded to
+     * nothing is still in the semantics tree with all of its text.
+     */
+    const val RECIPE_FACTS: String = "food:recipeFacts"
     const val RECIPE_SERVINGS: String = "food:recipeServings"
     const val RECIPE_PER_SERVING: String = "food:recipePerServing"
     const val LOG_RECIPE: String = "food:logRecipe"

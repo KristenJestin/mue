@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
@@ -117,7 +118,9 @@ internal fun RecipePickerScreen(
             value = state.query,
             onValueChange = onQueryChange,
             modifier = Modifier
-                .padding(top = spacing.md)
+                // The header's ramp, in full — the food picker's twin, and the same reason: a
+                // fixed search field cannot be scrolled out from under a fade.
+                .padding(top = MueContentTopFade)
                 .testTag(FoodTestTags.RECIPE_SEARCH),
             placeholder = FoodAddMessages.RECIPE_SEARCH_PLACEHOLDER,
             label = FoodAddMessages.RECIPE_SEARCH_LABEL,

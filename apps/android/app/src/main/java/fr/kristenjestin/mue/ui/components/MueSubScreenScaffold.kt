@@ -53,6 +53,27 @@ private val NavigationChromeSize = 40.dp
  *
  * The bottom tab bar stays outside this scaffold, exactly as for [MueScreenScaffold]: contract
  * decision 2 keeps it visible on both sub-screens.
+ *
+ * ## [topFade] is a reservation, not just a decoration — read this before adding a screen
+ *
+ * Unlike [MueScreenScaffold], whose fade is **opt-in** and defaults to zero, this scaffold turns
+ * it on for every caller. That default is the convenience that made six Food screens wrong at
+ * once: the ramp masks the top [MueContentTopFade] of the content column, and a caller that does
+ * not *reserve* that height inside its own scroll simply loses it. At rest the scroll offset is
+ * zero, so there is nothing above to be dissolved and what dissolves instead is the first real
+ * control — with no gesture able to recover it, because the scroll is already at its top. The
+ * owner met it as "le header, par exemple avec « new food », cache un bout, genre là je peux pas
+ * scroll plus haut", and on `Food preferences`, whose single card is shorter than the viewport,
+ * the scroll range was zero and the loss was total.
+ *
+ * So a caller whose content scrolls **must** pad the *inside* of its scroll by
+ * [MueContentTopFade] — `contentPadding = PaddingValues(top = MueContentTopFade, …)` on a
+ * `LazyColumn`, or `.verticalScroll(state).padding(top = MueContentTopFade)` on a `Column`. The
+ * padding has to be inside the scroll and not around it: outside, the ramp would sit over dead
+ * space and stop dissolving anything, which is the decoration without the reservation. It is the
+ * mirror image of the clearance every one of these screens already keeps for
+ * [MueStickyBottomAction] at the other end, and `ActivityHistoryScreen` is the screen that had it
+ * right first. A caller whose content does not scroll at all should pass `topFade = 0.dp`.
  */
 @Composable
 fun MueSubScreenScaffold(

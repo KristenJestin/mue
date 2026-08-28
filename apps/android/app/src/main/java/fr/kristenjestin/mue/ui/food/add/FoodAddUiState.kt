@@ -378,6 +378,15 @@ internal data class FoodAddUiState(
     val quick: FoodQuickUiState?,
     val servings: String,
     /**
+     * Whether the servings stepper may move each way (FR-FOOD-004, PRD_FOOD 15).
+     *
+     * Both answers come from `FoodAddDraft.canStepServings`, which asks `Servings` for the step
+     * and `FoodValidation` whether the result is still a count. Nothing on this side of the
+     * domain compares a number against `0.25` or `10`.
+     */
+    val canAddServing: Boolean,
+    val canRemoveServing: Boolean,
+    /**
      * What the source is worth before any quantity is typed.
      *
      * Per 100 g or ml for a catalogue food (PRD_FOOD 8.2), per serving for a recipe (PRD_FOOD
@@ -469,10 +478,18 @@ internal data class FoodAddUiState(
             return FoodAddUiState(
                 stage = stage,
                 isEditing = draft.isEditing,
+                /*
+                 * A correction is one screen and says so; a new line names the stage it is on.
+                 *
+                 * The sheet used to say `Add food` on all five of its stages, which is what the
+                 * owner met on two of them: the scan panel and the quick-add form both claimed
+                 * to be the screen he had just left. `FoodAddStage` is the only thing that knows
+                 * where the sheet is, so the title is asked of it.
+                 */
                 screenTitle = if (draft.isEditing) {
                     FoodAddMessages.EDIT_TITLE
                 } else {
-                    FoodAddMessages.ADD_TITLE
+                    FoodAddMessages.stageTitle(stage)
                 },
                 date = date,
                 today = today,
@@ -507,6 +524,8 @@ internal data class FoodAddUiState(
                     protein = draft.quickProtein,
                 ).takeIf { stage == FoodAddStage.QUICK },
                 servings = draft.servings,
+                canAddServing = draft.canStepServings(up = true),
+                canRemoveServing = draft.canStepServings(up = false),
                 per100 = food?.let {
                     FoodNutrientsUiState.of(FoodAddMessages.per100Label(it), it.per100)
                 } ?: chosenRecipe?.let {

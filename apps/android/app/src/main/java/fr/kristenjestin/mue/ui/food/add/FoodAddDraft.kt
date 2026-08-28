@@ -89,8 +89,17 @@ internal data class FoodAddDraft(
     val quickTitle: String = "",
     val quickEnergy: String = "",
     val quickProtein: String = "",
-    /** FR-FOOD-008 on a recipe line: how many servings were eaten. */
-    val servings: String = "",
+    /**
+     * FR-FOOD-008 on a recipe line: how many servings were eaten.
+     *
+     * Defaulted to one rather than left blank. It was a required field that opened empty, so
+     * choosing a recipe led straight to a refusal to save until a number had been typed — "il me
+     * force à saisir un servings en input. Premièrement on peut renseigner 1 par défaut". One
+     * serving is the commonest answer by a distance, it is what the per-serving figures above the
+     * field are already stated for, and it is inside the range `FoodValidation` enforces, so the
+     * form opens on something true and saveable instead of on an error waiting to happen.
+     */
+    val servings: String = DEFAULT_SERVINGS,
     /**
      * FR-FOOD-003: the scan path was taken, and no food has come out of it yet.
      *
@@ -176,10 +185,34 @@ internal data class FoodAddDraft(
         quickTitle = "",
         quickEnergy = "",
         quickProtein = "",
-        servings = "",
+        servings = DEFAULT_SERVINGS,
         scanning = false,
         scanBarcode = "",
     )
+
+    /**
+     * The servings field moved one step, or this draft unchanged at a bound.
+     *
+     * Every part of the arithmetic belongs to `Servings`: the quarter is
+     * [Servings.CONSUMED_STEP_THOUSANDTHS], and whether the result is still a serving count is
+     * [FoodValidation.validateConsumedServings]'s answer, not a comparison written here. A step
+     * that would leave the range returns `this`, which is what greys the button out.
+     *
+     * A value that does not parse at all — which only a stored draft from an older build can be —
+     * steps to one serving rather than nowhere, so the control is never dead.
+     */
+    fun steppedServings(up: Boolean): FoodAddDraft {
+        val current = FoodValidation.validateConsumedServings(servings).valueOrNull
+            ?: return copy(servings = DEFAULT_SERVINGS)
+        val step = Servings.CONSUMED_STEP_THOUSANDTHS * if (up) 1 else -1
+        val moved = Servings.ofThousandthsOrNull((current.thousandths + step).toLong())
+            ?.let { FoodValidation.validateConsumedServings(it.count).valueOrNull }
+            ?: return this
+        return copy(servings = FoodLabels.servings(moved))
+    }
+
+    /** Whether [steppedServings] would move, which is the only thing the buttons need to know. */
+    fun canStepServings(up: Boolean): Boolean = steppedServings(up).servings != servings
 
     /**
      * Whether this draft holds anything the person actually wrote.
@@ -196,7 +229,15 @@ internal data class FoodAddDraft(
             quickTitle.isNotBlank() ||
             quickEnergy.isNotBlank() ||
             quickProtein.isNotBlank() ||
-            servings.isNotBlank() ||
+            /*
+             * Against the default rather than against blankness. The field now opens holding one
+             * serving, so `isNotBlank` would call every untouched recipe line "work in progress"
+             * and put the sheet back to reopening on a stage nobody chose — the very complaint
+             * ("j'ai plus accès aux 3 menus d'avant") this property was written to end. Moving
+             * the stepper *is* typing by this rule's own logic, and moving it back to one is
+             * indistinguishable from never having touched it, which is the right answer.
+             */
+            servings != DEFAULT_SERVINGS ||
             // Thirteen digits off a jar is typing by any measure, and losing them to a `Close`
             // pressed by accident would mean reading the label again. A code the *camera* put
             // there counts the same: what makes it worth keeping is that it is on screen and
@@ -204,6 +245,16 @@ internal data class FoodAddDraft(
             scanBarcode.isNotBlank()
 
     companion object {
+
+        /**
+         * What the servings field opens on: one whole serving.
+         *
+         * Rendered by [FoodLabels] from `Servings.ONE` rather than written as `"1"`, so the
+         * string is the one the rest of the module would print for the same quantity — the
+         * comparison in `hasTypedContent` and the stepper's own output both have to match it
+         * exactly, and a hand-typed literal would be a second spelling waiting to disagree.
+         */
+        val DEFAULT_SERVINGS: String = FoodLabels.servings(Servings.ONE)
 
         /** `HH:mm`, which is what [FoodValidation.validateConsumedAt] reads back. */
         fun format(time: LocalTime): String =
@@ -276,7 +327,12 @@ internal data class FoodAddDraft(
                 quickProtein = entry.nutrients.protein
                     ?.let { FoodLabels.macro(it, approximate = false).substringBefore(' ') }
                     .orEmpty(),
-                servings = entry.consumedServings?.let(FoodLabels::servings).orEmpty(),
+                /*
+                 * A line that counts no servings — anything but a recipe — falls back to the
+                 * default rather than to an empty string, so that a field this stage never shows
+                 * cannot make a freshly loaded correction look edited.
+                 */
+                servings = entry.consumedServings?.let(FoodLabels::servings) ?: DEFAULT_SERVINGS,
             )
         }
 
