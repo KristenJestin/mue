@@ -600,6 +600,28 @@ class FoodAddScreenTest {
         compose.onNodeWithTag(FoodTestTags.SERVINGS_STEPPER).assertDoesNotExist()
     }
 
+    /**
+     * PRD_FOOD 18: the count is announced as a **value**, not as two unexplained buttons.
+     *
+     * `MueStepper` puts the label on the readout as its name and the count as its
+     * `stateDescription` — the arrangement `MueEffortSlider` uses to publish its own number — so a
+     * reader lands on one node that says `Usual portions, 1.5 × 1 apple` instead of on a bare
+     * figure sitting between a `−` and a `+` whose relationship to it has to be guessed.
+     */
+    @Test
+    fun theCounterAnnouncesItsCountAsAValue() {
+        show(previewPortionsState())
+
+        compose
+            .onNode(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "1.5 ${FoodLabels.TIMES} 1 apple",
+                ),
+            )
+            .assertContentDescriptionContains(FoodAddMessages.PORTIONS_LABEL)
+    }
+
     // endregion
 
     // region touch targets (PRD_FOOD 18)
