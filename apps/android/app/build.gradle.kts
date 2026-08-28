@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 android {
@@ -71,6 +72,31 @@ kotlin {
     jvmToolchain(17)
 }
 
+/*
+ * How the recorded profile gets into the APK.
+ *
+ * `saveInSrc` keeps the result under version control at
+ * `app/src/release/generated/baselineProfiles/`, which is the difference between a profile and a
+ * hope: a checked-in file is one every build packages and one a reviewer can read, where a
+ * regenerated-on-demand file is whatever the last machine to run the emulator happened to record.
+ *
+ * `automaticGenerationDuringBuild` stays **off**, and it is the load-bearing line in this block.
+ * Turned on, every `assembleRelease` would install the app and run an instrumentation on every
+ * attached device — and the device attached to this machine beside the emulator is the owner's
+ * own phone, over wireless debugging. Regeneration is a deliberate act, run against a named
+ * serial, and `:benchmark`'s `BaselineProfileGenerator` says how.
+ */
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    /*
+     * The profile is a *rule*, so R8 keeps and lays out the classes it names even when it can see
+     * no other reference to them. Off, R8 is free to move a startup class away from the classes
+     * it is loaded beside, and the profile then names methods in pages the loader has to seek to.
+     */
+    dexLayoutOptimization = true
+}
+
 // Room stores its generated schemas here so migrations can be verified in tests.
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
@@ -110,6 +136,30 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
+
+    /*
+     * What actually installs the baseline profile on the phone.
+     *
+     * The profile `:benchmark` records is packaged as `assets/dexopt/baseline.prof`, and on a
+     * device that got the APK from Play the Play installer hands it to ART by itself. On every
+     * other route — a sideload, an `adb install`, an update pushed to the owner's own phone —
+     * nothing does, and the profile sits in the APK doing nothing at all. `ProfileInstaller` is
+     * the library that writes it into ART's own store on first run, through the `androidx.startup`
+     * initialiser it declares in its own manifest, so there is no call site for it here.
+     *
+     * It drags in `androidx.startup:startup-runtime` and nothing else; neither touches
+     * `kotlinx-serialization`, so the `force` block below is unchanged by it. Checked with
+     * `dependencies --configuration releaseRuntimeClasspath`, not assumed.
+     */
+    implementation(libs.androidx.profileinstaller)
+
+    /*
+     * The producer of that profile. This is not a code dependency in either direction: `:app`
+     * does not compile against `:benchmark`, and the only artefact that crosses is the text file
+     * of class and method names the `androidx.baselineprofile` plugin copies into
+     * `src/release/generated/baselineProfiles/`.
+     */
+    baselineProfile(project(":benchmark"))
 
     // An activity draft is a nested structure, so `SavedStateHandle` holds it as one JSON
     // string rather than as a flat set of Bundle keys. A sync payload is stored the same way.

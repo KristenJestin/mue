@@ -31,3 +31,9 @@ plugins {
 
 rootProject.name = "Mue"
 include(":app")
+
+// The macrobenchmark module (`com.android.test`). It ships nothing: it exists to drive the
+// installed app from outside its own process, which is the only way to time a frame that a
+// composition rule inside the process would perturb, and to record the baseline profile the
+// app is packaged with.
+include(":benchmark")
