@@ -96,6 +96,9 @@ test("an agent is listed with its scopes and last use", async () => {
   expect(mine?.discovered).toBe(true);
   expect(mine?.scopes).toContain("weight:read");
   expect(mine?.lastUsedAt).not.toBeNull();
+  // Section 15.3 asks the Web administration to show when an identity appeared, not
+  // only when it was last used.
+  expect(mine?.registeredAt).not.toBeNull();
 });
 
 test("revoking it disables the client and stamps every live token", async () => {

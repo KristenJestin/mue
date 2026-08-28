@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConsentRouteImport } from './routes/consent'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SettingsAgentsRouteImport } from './routes/settings.agents'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const SignInRoute = SignInRouteImport.update({
   path: '/sign-in',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsAgentsRoute = SettingsAgentsRouteImport.update({
+  id: '/settings/agents',
+  path: '/settings/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/consent': typeof ConsentRoute
   '/sign-in': typeof SignInRoute
+  '/settings/agents': typeof SettingsAgentsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/consent': typeof ConsentRoute
   '/sign-in': typeof SignInRoute
+  '/settings/agents': typeof SettingsAgentsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/consent': typeof ConsentRoute
   '/sign-in': typeof SignInRoute
+  '/settings/agents': typeof SettingsAgentsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/consent' | '/sign-in'
+  fullPaths: '/' | '/consent' | '/sign-in' | '/settings/agents'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/consent' | '/sign-in'
-  id: '__root__' | '/' | '/consent' | '/sign-in'
+  to: '/' | '/consent' | '/sign-in' | '/settings/agents'
+  id: '__root__' | '/' | '/consent' | '/sign-in' | '/settings/agents'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConsentRoute: typeof ConsentRoute
   SignInRoute: typeof SignInRoute
+  SettingsAgentsRoute: typeof SettingsAgentsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignInRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/agents': {
+      id: '/settings/agents'
+      path: '/settings/agents'
+      fullPath: '/settings/agents'
+      preLoaderRoute: typeof SettingsAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConsentRoute: ConsentRoute,
   SignInRoute: SignInRoute,
+  SettingsAgentsRoute: SettingsAgentsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -63,6 +63,12 @@ export interface AgentSummary {
   readonly disabled: boolean;
   /** Discovered through a Client ID Metadata Document rather than registered. */
   readonly discovered: boolean;
+  /**
+   * When the client row was written -- that is, when the owner's pairing window let
+   * this agent register. Better Auth leaves the column nullable, so a row created by
+   * a path that did not stamp it reads as unknown rather than as the epoch.
+   */
+  readonly registeredAt: Date | null;
   readonly lastUsedAt: Date | null;
 }
 
@@ -83,6 +89,7 @@ export async function listAgents(handle: DatabaseHandle): Promise<AgentSummary[]
       scopes: oauthClient.scopes,
       disabled: oauthClient.disabled,
       discoveryId: oauthClient.clientDiscoveryId,
+      registeredAt: oauthClient.createdAt,
       lastUsedAt: lastUse.lastUsedAt,
     })
     .from(oauthClient)
@@ -95,6 +102,7 @@ export async function listAgents(handle: DatabaseHandle): Promise<AgentSummary[]
     scopes: row.scopes ?? [],
     disabled: row.disabled === true,
     discovered: row.discoveryId !== null,
+    registeredAt: row.registeredAt,
     lastUsedAt: row.lastUsedAt === null ? null : new Date(row.lastUsedAt),
   }));
 }
