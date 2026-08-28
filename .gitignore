@@ -31,3 +31,6 @@ docs/
 # en HTTPS sur le réseau de la maison (§16). Une clé privée ne se versionne pas, et
 # celle-ci signe tout ce que ce PC prétend être.
 /certs/
+
+# journaux du launcher
+.logs/
