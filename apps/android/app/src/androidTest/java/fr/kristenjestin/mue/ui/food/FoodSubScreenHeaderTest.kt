@@ -19,8 +19,6 @@ import fr.kristenjestin.mue.ui.food.add.previewRecipeServingsState
 import fr.kristenjestin.mue.ui.food.catalogue.FoodCatalogueMessages
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorActions
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorScreen
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesScreen
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesUiState
 import fr.kristenjestin.mue.ui.food.catalogue.previewFoodEditorState
 import fr.kristenjestin.mue.ui.food.recipes.RecipeDetailScreen
 import fr.kristenjestin.mue.ui.food.recipes.RecipeEditorActions
@@ -28,6 +26,10 @@ import fr.kristenjestin.mue.ui.food.recipes.RecipeEditorScreen
 import fr.kristenjestin.mue.ui.food.recipes.RecipeMessages
 import fr.kristenjestin.mue.ui.food.recipes.previewRecipeDetailState
 import fr.kristenjestin.mue.ui.food.recipes.previewRecipeEditorState
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesMessages
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesScreen
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesUiState
+import fr.kristenjestin.mue.ui.profile.ProfileTestTags
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -177,6 +179,11 @@ class FoodSubScreenHeaderTest {
      *
      * This is the screen where the loss was total: not merely hard to reach, but unreachable by
      * any gesture at all.
+     *
+     * It is a `Profile` screen now, and the assertion stayed here anyway. This suite is the record
+     * of one defect met on six screens at once, and six is what it has to keep measuring — a
+     * screen that changed tabs did not stop being one of them. The imports say where it lives; the
+     * ramp it has to clear is `MueSubScreenScaffold`'s, which is the same on either tab.
      */
     @Test
     fun theFoodPreferencesClearItsHeader() {
@@ -189,8 +196,8 @@ class FoodSubScreenHeaderTest {
         }
 
         assertClearsHeader(
-            back = compose.onNodeWithContentDescription(FoodCatalogueMessages.BACK),
-            firstContent = compose.onNodeWithTag(FoodTestTags.HIDE_ENERGY_TOGGLE),
+            back = compose.onNodeWithContentDescription(FoodPreferencesMessages.BACK),
+            firstContent = compose.onNodeWithTag(ProfileTestTags.HIDE_ENERGY_TOGGLE),
         )
     }
 

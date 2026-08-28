@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -161,6 +162,12 @@ fun MueSubScreenScaffold(
 
             Column(
                 modifier = Modifier
+                    /*
+                     * Before the padding and before the fade, exactly as on [MueScreenScaffold]:
+                     * the tag has to report where the content column *begins* rather than where
+                     * its gutter does, or the two edges could not be compared.
+                     */
+                    .testTag(MueScaffoldTestTags.SUB_SCREEN_CONTENT)
                     .fillMaxWidth()
                     .weight(1f)
                     .subScreenTopFade(topFade)

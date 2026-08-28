@@ -193,11 +193,6 @@ sealed interface FoodRoute {
                 ?: "$PLAN_MEAL_KEY$ID_SEPARATOR$date"
     }
 
-    /** PRD_FOOD 6.7: the module's occasional settings live here and nowhere on a screen. */
-    data object Preferences : FoodRoute {
-        override val key: String = "preferences"
-    }
-
     companion object {
         private const val ADD_FOOD_KEY = "addFood"
         private const val RECIPE_DETAIL_KEY = "recipeDetail"
@@ -261,6 +256,13 @@ sealed interface FoodRoute {
          * what lets a key be *renamed* — `swap` became `planMeal` and both still resolve, to the
          * same screen. A half-readable sheet degrades the same way: a target whose date will not
          * parse gives a plain `Add food`, which still works.
+         *
+         * `preferences` is the first key to be **retired** rather than renamed: `Food preferences`
+         * left this stack for `Profile`'s, so there is nowhere in this module to redirect it to.
+         * It falls through to [Day], and [rooted] then drops it as a second view — a stack saved
+         * by yesterday's build as `[foods, preferences]` restores as `[foods]`, the very view the
+         * sheet was open over. The reader loses the sheet and keeps their place, which is what
+         * the total fallback was written for.
          */
         fun fromKey(key: String): FoodRoute = when {
             key == Day.key -> Day
@@ -269,7 +271,6 @@ sealed interface FoodRoute {
             key == Foods.key -> Foods
             key == FoodPicker.key -> FoodPicker
             key == RecipePicker.key -> RecipePicker
-            key == Preferences.key -> Preferences
 
             key == ADD_FOOD_KEY -> AddFood()
             /*

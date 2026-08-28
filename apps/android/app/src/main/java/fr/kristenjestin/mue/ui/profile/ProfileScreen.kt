@@ -91,6 +91,32 @@ private const val HAPTICS_BODY =
 private const val NOT_SET = "Not set"
 
 /**
+ * The screens `Profile` holds: its own, and the two reached from it.
+ *
+ * It replaces the single saved boolean this tab used while `Server settings` was the only
+ * sub-screen. A second one landed — `Food preferences`, which used to be a sheet in the Food
+ * tab's stack — and a second boolean beside the first would have admitted a state that cannot
+ * exist, both open at once, with nothing in the type to say which of the two the back handler
+ * should close.
+ *
+ * Each route carries the string it crosses a `Bundle` as, exactly as `ActivityRoute` and
+ * `FoodRoute` do, and [fromKey] is **total** for their reason: a key saved by one build and read
+ * back by another outlives the code that wrote it, and landing on the root is a better outcome
+ * than taking the first frame down. `foodPreferences` is what a build before this one has never
+ * written, and `root` is what it reads back as.
+ */
+internal enum class ProfileRoute(val key: String) {
+    ROOT("root"),
+    SERVER_SETTINGS("serverSettings"),
+    FOOD_PREFERENCES("foodPreferences"),
+    ;
+
+    companion object {
+        fun fromKey(key: String): ProfileRoute = entries.firstOrNull { it.key == key } ?: ROOT
+    }
+}
+
+/**
  * `Profile`: the health profile, the BMI it feeds, the preferences and the CSV export.
  *
  * The bottom tab bar is drawn by the navigation layer, above this screen, so that it never
@@ -100,33 +126,53 @@ private const val NOT_SET = "Not set"
 fun ProfileScreen(modifier: Modifier = Modifier) {
     /*
      * Sync PRD 9.1 puts `Data & sync` inside `Profile`, and 9.1's `Server settings` is a screen
-     * of its own. That makes `Profile` the third tab holding more than one screen, and it models
-     * the stack the way the other two do rather than adopting a library for it: one saved
-     * boolean, one `AnimatedContent`, and a `BackHandler` nested inside the shell's so back
-     * closes the sub-screen before it ever reaches the tab selection.
+     * of its own; PRD_FOOD 6.7's `Food preferences` is now the second. That makes `Profile` the
+     * third tab holding more than one screen, and it models the stack the way the other two do
+     * rather than adopting a library for it: one saved key, one `AnimatedContent`, and a
+     * `BackHandler` nested inside the shell's so back closes the sub-screen before it ever
+     * reaches the tab selection.
+     *
+     * A key and not the route itself, which is what `MueApp` does with the Activity tab's: a
+     * `String` crosses a `Bundle` on its own, where an enum constant that a later build renames
+     * comes back as a deserialisation failure on the first frame.
      */
-    var serverSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    var routeKey by rememberSaveable { mutableStateOf(ProfileRoute.ROOT.key) }
+    val route = ProfileRoute.fromKey(routeKey)
 
-    BackHandler(enabled = serverSettingsOpen) { serverSettingsOpen = false }
+    BackHandler(enabled = route != ProfileRoute.ROOT) { routeKey = ProfileRoute.ROOT.key }
 
     // Resolved outside `transitionSpec`, which runs outside composition.
     val deeper = profileStackTransition(deeper = true)
     val shallower = profileStackTransition(deeper = false)
 
     AnimatedContent(
-        targetState = serverSettingsOpen,
+        targetState = route,
         modifier = modifier,
-        transitionSpec = { if (targetState) deeper else shallower },
+        transitionSpec = { if (targetState != ProfileRoute.ROOT) deeper else shallower },
         label = "profileStack",
-    ) { settingsOpen ->
-        if (settingsOpen) {
-            ServerSettingsRoute(
-                onNavigateBack = { serverSettingsOpen = false },
+    ) { current ->
+        val back = { routeKey = ProfileRoute.ROOT.key }
+        when (current) {
+            ProfileRoute.SERVER_SETTINGS -> ServerSettingsRoute(
+                onNavigateBack = back,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            ProfileRoot(
-                onOpenServerSettings = { serverSettingsOpen = true },
+
+            /*
+             * PRD_FOOD 6.7 and 13.2, on the tab that already holds the app's preferences.
+             *
+             * The screen came here whole rather than the button alone: leaving it in `FoodRoute`
+             * would have made this tab push onto another tab's stack, so the bar would say `Food`
+             * while this handler was the one that had to close it.
+             */
+            ProfileRoute.FOOD_PREFERENCES -> FoodPreferencesRoute(
+                onBack = back,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            ProfileRoute.ROOT -> ProfileRoot(
+                onOpenServerSettings = { routeKey = ProfileRoute.SERVER_SETTINGS.key },
+                onOpenFoodPreferences = { routeKey = ProfileRoute.FOOD_PREFERENCES.key },
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -155,7 +201,11 @@ private fun profileStackTransition(deeper: Boolean): ContentTransform {
 }
 
 @Composable
-private fun ProfileRoot(onOpenServerSettings: () -> Unit, modifier: Modifier = Modifier) {
+private fun ProfileRoot(
+    onOpenServerSettings: () -> Unit,
+    onOpenFoodPreferences: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -205,6 +255,7 @@ private fun ProfileRoot(onOpenServerSettings: () -> Unit, modifier: Modifier = M
         onExport = viewModel::exportWeightData,
         onSyncNow = syncViewModel::syncNow,
         onOpenServerSettings = onOpenServerSettings,
+        onOpenFoodPreferences = onOpenFoodPreferences,
         modifier = modifier,
         showNotificationSettings = !notifications.isGranted && !notifications.canRequest,
         onOpenNotificationSettings = {
@@ -227,6 +278,7 @@ internal fun ProfileScreen(
     syncState: DataSyncUiState = DataSyncUiState(),
     onSyncNow: () -> Unit = {},
     onOpenServerSettings: () -> Unit = {},
+    onOpenFoodPreferences: () -> Unit = {},
     today: LocalDate = LocalDate.now(),
     showNotificationSettings: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
@@ -298,6 +350,19 @@ internal fun ProfileScreen(
                     checked = state.hapticsEnabled,
                     onCheckedChange = onHapticsEnabledChange,
                     modifier = Modifier.testTag(ProfileTestTags.HAPTICS_TOGGLE),
+                )
+
+                /*
+                 * PRD_FOOD 6.7's options, in the section this app keeps its options in.
+                 *
+                 * They used to be behind a wrench in the Food catalogue's header — the one
+                 * trailing control in the app that was a button rather than a chip, and the one
+                 * that made the wordmark move. Here the door costs Food's header nothing and
+                 * costs this screen a card in a section that already exists.
+                 */
+                FoodPreferencesCard(
+                    onOpen = onOpenFoodPreferences,
+                    modifier = Modifier.padding(top = spacing.md),
                 )
 
                 if (showNotificationSettings) {

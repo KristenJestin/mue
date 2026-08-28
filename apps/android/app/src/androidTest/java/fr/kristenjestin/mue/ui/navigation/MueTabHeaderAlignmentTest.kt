@@ -1,12 +1,16 @@
 package fr.kristenjestin.mue.ui.navigation
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
+import fr.kristenjestin.mue.ui.components.MueHeaderChip
 import fr.kristenjestin.mue.ui.components.MueScaffoldTestTags
+import fr.kristenjestin.mue.ui.components.MueScreenScaffold
+import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
 import fr.kristenjestin.mue.ui.food.FoodRoute
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -26,7 +30,7 @@ import org.junit.Test
  * ## What was wrong, measured
  *
  * `MueScreenScaffold`'s header row was `heightIn(min = 40.dp)`, which held for exactly as long as
- * every screen's trailing slot was a chip. The Food catalogue's is a *button*, and a button is
+ * every screen's trailing slot was a chip. The Food catalogue's was a *button*, and a button is
  * [fr.kristenjestin.mue.ui.theme.MueMinTouchTarget] — 48 dp — because PRD 15 says anything
  * tappable is. A 48 dp child in a 40 dp row grows the row, and this test measured the result on
  * `Foods` and on no other screen in the app:
@@ -41,6 +45,16 @@ import org.junit.Test
  * and everything under it 8 dp down. Sizing the row at the touch minimum instead means the tallest
  * control it may legally hold is exactly the height it already is, so no trailing slot can push it
  * again.
+ *
+ * ## The button has since gone, and the floor has not
+ *
+ * `Food preferences` moved to `Profile`, taking the wrench with it, so no trailing slot in the app
+ * is taller than a chip today and the five tabs would agree at 40 dp again. The floor stays
+ * because it was never only about that button: `MueSubScreenScaffold`'s header row is a 48 dp back
+ * control between the same paddings, so at 40 dp a tab and a screen reached from a tab opened
+ * their content 8 dp apart and every push stepped the page. That seam had nobody measuring it
+ * until [aSubScreenOpensItsContentWhereATabDoes], which is now the test that fails if the line
+ * goes back.
  *
  * ## The 60 dp this test does *not* claim away
  *
@@ -159,6 +173,65 @@ class MueTabHeaderAlignmentTest {
         println(
             "food band: switcher ${switcher.top}..${switcher.bottom}, " +
                 "content $withoutABand without a band, $withABand with one",
+        )
+    }
+
+    /**
+     * A screen reached *from* a tab opens its content where the tab's does.
+     *
+     * This is the assertion that decides whether `MueScreenScaffold`'s 48 dp floor is still
+     * earned now that the control it was raised for has gone to `Profile`. It is: the floor was
+     * about the Food catalogue's wrench, but the *number* is `MueSubScreenScaffold`'s, whose
+     * header row is a 48 dp back control between the same paddings. At 40 dp the two scaffolds
+     * disagreed by eight, so every push — `Foods` into `Food editor`, `Activity` into
+     * `Log activity`, `Profile` into `Server settings` — stepped the page by the same amount the
+     * complaint was about, in the other direction. Nobody had measured that seam, so nothing
+     * noticed; reverting the floor now would put it back.
+     *
+     * The two scaffolds are raised directly rather than through [MueApp], because what is being
+     * measured is the shells and not any screen's use of them: one of them shows nothing at all,
+     * which is the point — a difference this finds cannot be blamed on content.
+     */
+    @Test
+    fun aSubScreenOpensItsContentWhereATabDoes() {
+        val subScreen = mutableStateOf(false)
+        compose.setContent {
+            MueTheme {
+                if (subScreen.value) {
+                    MueSubScreenScaffold(
+                        title = "Food preferences",
+                        onNavigateBack = {},
+                        navigationIcon = {},
+                        content = {},
+                    )
+                } else {
+                    MueScreenScaffold(
+                        trailing = { MueHeaderChip("Health profile") },
+                        content = {},
+                    )
+                }
+            }
+        }
+
+        val tab = compose.onNodeWithTag(MueScaffoldTestTags.CONTENT)
+            .getUnclippedBoundsInRoot()
+            .top
+
+        subScreen.value = true
+        compose.waitForIdle()
+
+        val sub = compose.onNodeWithTag(MueScaffoldTestTags.SUB_SCREEN_CONTENT)
+            .getUnclippedBoundsInRoot()
+            .top
+
+        println("header seam: tab content top $tab, sub-screen content top $sub")
+        assertEquals(
+            "a sub-screen opens its content at $sub where a tab opens it at $tab — the two " +
+                "header rows are different heights, so the page steps on every push. " +
+                "`MueScreenScaffold`'s row has to keep its `heightIn(min = MueMinTouchTarget)`: " +
+                "`MueSubScreenScaffold`'s back control is that tall and cannot be shorter.",
+            tab,
+            sub,
         )
     }
 

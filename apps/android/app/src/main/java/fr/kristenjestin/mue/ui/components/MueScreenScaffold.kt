@@ -54,6 +54,15 @@ internal object MueScaffoldTestTags {
 
     /** The wordmark, which is the landmark the eye anchors on and therefore the one that must not move. */
     const val WORDMARK: String = "mue:wordmark"
+
+    /**
+     * The same edge on a screen reached *from* a tab, so the seam between the two can be measured.
+     *
+     * A distinct name rather than [CONTENT] on both scaffolds: the two are on screen together for
+     * the length of a push, and a matcher that could not tell them apart would fail on the
+     * ambiguity rather than on the geometry it was written for.
+     */
+    const val SUB_SCREEN_CONTENT: String = "mue:subScreenContent"
 }
 
 /**
@@ -105,24 +114,39 @@ fun MueScreenScaffold(
                     /*
                      * The touch minimum, and not the 40 dp the wordmark alone needs.
                      *
+                     * ## Why it was raised
+                     *
                      * This row is the app's one fixed landmark: `MUE` is drawn at the same place
                      * on all five tabs, so the eye anchors on it and reads any movement of it as
                      * the page lurching. At 40 dp that only held while every [trailing] control
-                     * was a chip. The Food catalogue's settings control is a button, so it is
+                     * was a chip. The Food catalogue's settings control was a button, so it was
                      * `MueMinTouchTarget` tall as PRD 15 requires of anything tappable, and a
                      * 48 dp child in a 40 dp row grows the row: the wordmark dropped 4 dp and
                      * everything under it dropped 8, on that screen and no other — "le bouton
                      * settings dans food pousse toujours tout le truc, et du coup c'est pas beau
                      * au switch de tab parce que tout le tab se déplace".
                      *
-                     * Sizing the row at the touch minimum instead makes the tallest control it
-                     * can legally hold exactly the height it already is, so no trailing slot can
-                     * push it again — not this one, and not the next one somebody adds. The four
-                     * tabs that carry only a chip pay 8 dp for that, once, in a place where 8 dp
-                     * of air above the title is not a defect; what they get back is a wordmark
-                     * that does not move.
+                     * ## Why it stays now that the button is gone
                      *
-                     * `MueTabHeaderAlignmentTest` measures the five tabs and fails if they part.
+                     * That control has since moved to `Profile`, so no trailing slot in the app
+                     * is taller than a chip today and the five tabs would agree at 40 dp again.
+                     * The floor is **not** reverted, for a reason that never depended on it and
+                     * that the raise fixed by accident:
+                     * [MueSubScreenScaffold]'s header row is a 48 dp back control between the
+                     * same paddings, so at 40 dp a tab and a screen reached *from* a tab opened
+                     * their content 8 dp apart — and every push out of Food, Activity or Profile
+                     * stepped the page in exactly the way the complaint was about, only in the
+                     * other direction. At the touch minimum the two are the same height and the
+                     * seam is invisible.
+                     *
+                     * It is also what keeps the next trailing control from pushing anything: the
+                     * tallest one this row may legally hold is the height it already is. The four
+                     * tabs carrying a chip pay 8 dp for that, once, in a place where 8 dp of air
+                     * above the title is not a defect.
+                     *
+                     * `MueTabHeaderAlignmentTest` measures the five tabs and fails if they part;
+                     * `aSubScreenOpensItsContentWhereATabDoes` measures the seam and is the one
+                     * that fails if this line goes back to 40.
                      */
                     .heightIn(min = MueMinTouchTarget),
                 horizontalArrangement = Arrangement.SpaceBetween,

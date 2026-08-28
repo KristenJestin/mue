@@ -240,11 +240,11 @@ internal object FoodTestTags {
 
     // endregion
 
-    // region preferences (PRD_FOOD 6.7 and FR-FOOD-010)
-
-    const val PREFERENCES: String = "food:preferences"
-    const val OPEN_PREFERENCES: String = "food:openPreferences"
-    const val HIDE_ENERGY_TOGGLE: String = "food:hideEnergyToggle"
-
-    // endregion
+    /*
+     * The preferences region that used to close this file is gone, along with the screen and the
+     * button it handled. `Food preferences` is a `Profile` screen now (PRD_FOOD 6.7 is satisfied
+     * either way — it asks that the options live in the preferences, not that they live here), so
+     * its three handles moved to `ProfileTestTags` with the nodes they name. A tag belongs to
+     * whoever draws the node.
+     */
 }

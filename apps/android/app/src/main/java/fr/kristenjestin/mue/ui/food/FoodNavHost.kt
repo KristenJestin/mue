@@ -28,7 +28,6 @@ import fr.kristenjestin.mue.ui.food.add.FoodPickerRoute
 import fr.kristenjestin.mue.ui.food.add.RecipePickerRoute
 import fr.kristenjestin.mue.ui.food.add.foodAddViewModel
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodsRoute
 import fr.kristenjestin.mue.ui.food.day.FoodDayRoute
 import fr.kristenjestin.mue.ui.food.recipes.RecipeDetailRoute
@@ -51,9 +50,14 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * the animation, because `transitionSpec` runs outside composition.
  *
  * Only `Trends` still draws [FoodPlaceholder]; the day, the add sheet — which now also plans —
- * the catalogue, the preferences and the three recipe screens all have screens behind them. They
- * landed one directory at a time, and the routes, the tags and the icons they needed were already
- * here, so none of them had to reopen a file another was editing.
+ * the catalogue and the three recipe screens all have screens behind them. They landed one
+ * directory at a time, and the routes, the tags and the icons they needed were already here, so
+ * none of them had to reopen a file another was editing.
+ *
+ * `Preferences` used to be an eighth sheet here. It is not a Food route any more: PRD_FOOD 6.7's
+ * options live in `Profile`, in the stack that tab already keeps for `Server settings`, and this
+ * module neither draws the door nor knows the screen exists. Its key is retired rather than
+ * redirected — see [FoodRoute.Companion.fromKey].
  */
 @Composable
 fun FoodNavHost(modifier: Modifier = Modifier) {
@@ -243,7 +247,6 @@ private fun FoodDestination(
                 onEditorPrefillChange(prefill)
                 stack.push(FoodRoute.FoodEditor())
             },
-            onOpenPreferences = { stack.push(FoodRoute.Preferences) },
             modifier = modifier,
         )
 
@@ -393,12 +396,6 @@ private fun FoodDestination(
             onSearchFood = {},
             onUseRecipe = { stack.push(FoodRoute.RecipePicker) },
             onCreateFood = {},
-            modifier = modifier,
-        )
-
-        /* PRD_FOOD 6.7 and 13.2: the module's occasional settings, and nowhere else. */
-        FoodRoute.Preferences -> FoodPreferencesRoute(
-            onBack = { stack.pop() },
             modifier = modifier,
         )
     }

@@ -81,11 +81,17 @@ internal val LocalFoodViewSelection = staticCompositionLocalOf<FoodViewSelection
  * else. A sheet calls `MueSubScreenScaffold` and therefore cannot show one, which is the right
  * answer without a single condition being written: a sheet is a modal over a view, and switching
  * views from inside one would leave the sheet with nothing behind it.
+ *
+ * **There is no `trailing` slot.** It existed for exactly one control — the wrench that opened
+ * `Food preferences` from the catalogue — and that control now lives in `Profile`, beside the
+ * app's other preferences. `Day` and `Recipes` never passed one, so the parameter went from one
+ * caller to none, and a slot nothing fills is an invitation to put a second 48 dp button back in
+ * the row this module has already had to defend twice. What Food's header holds is the wordmark
+ * and the switcher; anything else belongs to the content below it or to another screen.
  */
 @Composable
 internal fun FoodViewScaffold(
     modifier: Modifier = Modifier,
-    trailing: @Composable (() -> Unit)? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     topFade: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
@@ -93,7 +99,6 @@ internal fun FoodViewScaffold(
     val selection = LocalFoodViewSelection.current
     MueScreenScaffold(
         modifier = modifier,
-        trailing = trailing,
         verticalArrangement = verticalArrangement,
         topFade = topFade,
         header = selection?.let { current ->

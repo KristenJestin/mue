@@ -170,7 +170,6 @@ class FoodCatalogueRowLayoutTest {
                             onSourceChange = {},
                             onOpenFood = {},
                             onCreateFood = {},
-                            onOpenPreferences = {},
                         )
                     }
                 }

@@ -25,9 +25,9 @@ import fr.kristenjestin.mue.ui.food.add.previewRecipeServingsState
 import fr.kristenjestin.mue.ui.food.add.previewScanRefusedState
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorActions
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorScreen
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesScreen
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesUiState
 import fr.kristenjestin.mue.ui.food.catalogue.previewFoodEditorState
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesScreen
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesUiState
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -128,6 +128,15 @@ class FoodSheetConsistencyScreenshotTest {
         capture("new-food-scale2")
     }
 
+    /**
+     * A `Profile` screen now, pictured by this suite anyway.
+     *
+     * The suite is the record of five reported defects, and this screen is where one of them was
+     * total — one card shorter than its own viewport, so no gesture could reach what the ramp had
+     * dissolved. Moving the picture out with the package would leave that pair unwatched and buy a
+     * second copy of the harness above. What it shows is `MueSubScreenScaffold`'s ramp, which is
+     * the same component on either tab.
+     */
     @Test
     fun theFoodPreferencesAtBothFontScales() {
         show(1f) {

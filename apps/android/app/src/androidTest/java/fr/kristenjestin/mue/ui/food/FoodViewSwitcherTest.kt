@@ -425,7 +425,6 @@ class FoodViewSwitcherTest {
                 onSourceChange = {},
                 onOpenFood = {},
                 onCreateFood = {},
-                onOpenPreferences = {},
                 modifier = Modifier.fillMaxSize(),
             )
 
