@@ -27,7 +27,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -83,12 +82,6 @@ private val SlotFieldIconSize: Dp = 14.dp
 
 /** The header's back arrow, at the size every other sub-screen in the module draws it. */
 private val BackIconSize: Dp = 18.dp
-
-/** The step buttons of the portion counter, at the touch minimum PRD_FOOD 18 sets. */
-private val StepButtonSize: Dp = MueMinTouchTarget
-
-/** How far a step button fades when the counter has reached PRD_FOOD 15's end of the range. */
-private const val DisabledStepAlpha = 0.2f
 
 /**
  * The viewfinder's height (FR-FOOD-003).
