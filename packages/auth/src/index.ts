@@ -1,5 +1,5 @@
 export { createAuth, type AuthHandle, type CreateAuthOptions, type MueAuth } from "./auth";
-export { readAuthConfig, type AuthConfig, type Env } from "./config";
+export { oauthIssuer, readAuthConfig, type AuthConfig, type Env } from "./config";
 export { MUE_SCOPES, OAUTH_SCOPES, SCOPE_DESCRIPTIONS, isMueScope, type MueScope } from "./scopes";
 export {
   createPinnedMetadataFetch,

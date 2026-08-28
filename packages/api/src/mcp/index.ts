@@ -35,6 +35,18 @@ export {
   MUE_MCP_SERVER_INFO,
   PRD_REQUESTED_PROTOCOL_VERSION,
 } from "./protocol";
+export {
+  CLIENT_REGISTRATION_PATH,
+  createClientRegistrationApp,
+  createPairingWindow,
+  DEFAULT_PAIRING_MINUTES,
+  MAX_PAIRING_MINUTES,
+  nativeApplicationType,
+  PAIRING_PATH,
+  type ClientRegistrationOptions,
+  type PairingState,
+  type PairingWindow,
+} from "./registration";
 export { createMcpApp, createOAuthDiscoveryApp, MCP_PATH, type McpRouteOptions } from "./route";
 export { buildMcpServer, type BuildMcpServerOptions } from "./server";
 export type {

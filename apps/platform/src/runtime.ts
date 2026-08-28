@@ -1,5 +1,10 @@
 import { createApiApp } from "@mue/api";
-import { createMcpApp, createOAuthDiscoveryApp } from "@mue/api/mcp";
+import {
+  createClientRegistrationApp,
+  createMcpApp,
+  createOAuthDiscoveryApp,
+  createPairingWindow,
+} from "@mue/api/mcp";
 import { type AuthHandle, createAuth } from "@mue/auth";
 import { Hono } from "hono";
 import type { ServerEntry } from "@tanstack/react-start/server-entry";
@@ -40,10 +45,13 @@ export interface PlatformRuntimeOptions {
 /**
  * Everything TanStack Start delegates, in one Hono tree.
  *
- * Order is by specificity, not by preference: discovery owns `/.well-known/*`, MCP
- * owns `/mcp`, and the API router owns `/api/auth/*` and the guarded `/api/v1/*`.
- * The three claim disjoint paths, so this is documentation rather than precedence —
- * but it is the order a reader needs to check that claim.
+ * Order is by specificity: discovery owns `/.well-known/*`, MCP owns `/mcp`, client
+ * registration owns `POST /api/auth/oauth2/register` and the pairing switch, and the
+ * API router owns the rest of `/api/auth/*` and the guarded `/api/v1/*`.
+ *
+ * The first three claim disjoint paths, so for them this is documentation rather than
+ * precedence. The fourth is not: client registration deliberately claims two paths out
+ * from under `createApiApp`, and being registered first is what makes that work.
  *
  * Health is deliberately not here: `createEdgeApp` registers `/health/live` and
  * `/health/ready` before this router so an operational probe can never be shadowed
@@ -53,6 +61,19 @@ function createDelegatedRouter(handle: AuthHandle): Hono {
   const app = new Hono();
   app.route("/", createOAuthDiscoveryApp(handle));
   app.route("/", createMcpApp({ auth: handle }));
+  // Order is precedence here, and the one place in this file where it is.
+  // `createApiApp` hands every `/api/auth/*` request to Better Auth, which has
+  // been told to accept an unauthenticated RFC 7591 registration; this router
+  // claims `POST /api/auth/oauth2/register` first and refuses it unless the
+  // owner has opened a pairing window. Moving it below `createApiApp` opens
+  // client registration to the whole network -- see `mcp/registration.ts`.
+  //
+  // The window is created here, once per process, because that is what makes a
+  // restart close it.
+  app.route(
+    "/",
+    createClientRegistrationApp({ auth: handle.auth, pairing: createPairingWindow() }),
+  );
   app.route("/", createApiApp({ auth: handle.auth, database: handle.database }));
   return app;
 }

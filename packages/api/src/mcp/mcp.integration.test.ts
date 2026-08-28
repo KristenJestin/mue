@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createAuth, MUE_SCOPES, OAUTH_SCOPES, revokeAgent, type AuthHandle } from "@mue/auth";
 import { createTestDatabase, schema } from "@mue/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  discoverAuthorizationServerMetadata,
+  discoverOAuthProtectedResourceMetadata,
+  type OAuthClientProvider,
+} from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type {
   OAuthClientInformation,
@@ -11,7 +15,16 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { createMcpApp, createOAuthDiscoveryApp, MUE_TOOLS } from "./index";
+import {
+  createClientRegistrationApp,
+  createMcpApp,
+  createOAuthDiscoveryApp,
+  createPairingWindow,
+  MAX_PAIRING_MINUTES,
+  MUE_TOOLS,
+  PAIRING_PATH,
+  type PairingWindow,
+} from "./index";
 import { MUE_MCP_PROTOCOL_VERSION, PRD_REQUESTED_PROTOCOL_VERSION } from "./protocol";
 
 /**
@@ -56,6 +69,13 @@ let server: ReturnType<typeof Bun.serve>;
 let base = "";
 let cookie = "";
 let userId = "";
+/**
+ * The pairing window RFC 7591 registration sits behind. Held here rather than
+ * driven only over HTTP so a test can assert the *closed* default, which is the
+ * state that matters: it is what stands between an open registration endpoint
+ * and a network the owner does not control.
+ */
+const pairing: PairingWindow = createPairingWindow();
 
 interface Agent {
   readonly clientId: string;
@@ -302,6 +322,11 @@ beforeAll(async () => {
 
   app = new Hono();
   app.route("/", createOAuthDiscoveryApp(handle));
+  // Ahead of the `/api/auth/*` passthrough, exactly as `apps/platform/src/runtime.ts`
+  // mounts it: Better Auth has been told to accept an unauthenticated RFC 7591
+  // registration, and this router is the thing that refuses one outside a pairing
+  // window. Mounted after the passthrough it would never see a request.
+  app.route("/", createClientRegistrationApp({ auth: handle.auth, pairing }));
   app.all("/api/auth/*", (c) => handle.auth.handler(c.req.raw));
   app.route("/", createMcpApp({ auth: handle }));
 
@@ -354,11 +379,13 @@ describe("discovery", () => {
 
     const metadata = await json(response);
     expect(metadata["resource"]).toBe(`${base}/mcp`);
-    expect(metadata["authorization_servers"]).toEqual([`${base}/api/auth`]);
+    // The origin, not `${base}/api/auth`. The endpoints did not move -- the *issuer*
+    // did, and this field carries the issuer. See `oauthIssuer` in `@mue/auth`.
+    expect(metadata["authorization_servers"]).toEqual([base]);
   });
 
   test("publishes authorization-server metadata with PKCE and the Mue scopes", async () => {
-    const response = await fetch(`${base}/.well-known/oauth-authorization-server/api/auth`);
+    const response = await fetch(`${base}/.well-known/oauth-authorization-server`);
     expect(response.status).toBe(200);
 
     const metadata = await json(response);
@@ -369,6 +396,89 @@ describe("discovery", () => {
     expect(metadata["client_id_metadata_document_supported"]).toBe(true);
   });
 
+  /**
+   * The two documents live at the origin root, and say so.
+   *
+   * A real client sent its human to `https://<origin>/authorize` and got a 404. It had
+   * not failed to read the metadata; it had failed to *find* it. The issuer carried
+   * Better Auth's base path, so RFC 8414 put the document at
+   * `/.well-known/oauth-authorization-server/api/auth` and OpenID Connect Discovery at
+   * `/api/auth/.well-known/openid-configuration`. The client looked at the origin, saw
+   * two 404s, and fell back to the origin defaults that RFC 8414 never promised.
+   *
+   * Serving the same document at the origin *as well* was the cheap repair and is the
+   * wrong one: RFC 8414 section 3.3 makes a client verify that `issuer` equals the
+   * identifier it inserted into the well-known path, so a root document announcing
+   * `issuer: <origin>/api/auth` is one a strict client rejects -- later, and with a
+   * worse message, than the 404 it replaced. So the issuer moved instead, and these
+   * assertions are the pair that has to hold together: the document is at the root,
+   * *and* it names the root.
+   */
+  test("serves both discovery documents at the origin, naming the origin as issuer", async () => {
+    for (const path of [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/openid-configuration",
+    ]) {
+      const response = await fetch(`${base}${path}`);
+      const metadata = await json(response);
+      expect({ path, status: response.status, issuer: metadata["issuer"] }).toEqual({
+        path,
+        status: 200,
+        issuer: base,
+      });
+    }
+  });
+
+  /**
+   * An issuer identifies a server; it does not locate its endpoints. Moving the issuer
+   * to the origin must not have moved anything, and this is the assertion that would
+   * catch it if a later change tried to "tidy" the endpoints to match the issuer.
+   */
+  test("keeps the endpoints under the Better Auth base path, where they are", async () => {
+    const metadata = await json(await fetch(`${base}/.well-known/oauth-authorization-server`));
+    expect(metadata["authorization_endpoint"]).toBe(`${base}/api/auth/oauth2/authorize`);
+    expect(metadata["token_endpoint"]).toBe(`${base}/api/auth/oauth2/token`);
+    expect(metadata["jwks_uri"]).toBe(`${base}/api/auth/jwks`);
+    expect(metadata["registration_endpoint"]).toBe(`${base}/api/auth/oauth2/register`);
+
+    // And the advertised authorization endpoint is the one that answers.
+    const probe = await fetch(`${metadata["authorization_endpoint"] as string}`, {
+      redirect: "manual",
+    });
+    expect(probe.status).not.toBe(404);
+  });
+
+  /**
+   * The client's own discovery code, not a hand-written URL.
+   *
+   * `discoverOAuthProtectedResourceMetadata` and `discoverAuthorizationServerMetadata`
+   * are what the MCP SDK runs inside `auth()`; driving them directly is the difference
+   * between asserting that a path answers and asserting that a client finds it.
+   */
+  test("a real MCP client's discovery reaches the authorization endpoint from /mcp alone", async () => {
+    const resource = await discoverOAuthProtectedResourceMetadata(`${base}/mcp`);
+    expect(resource.authorization_servers).toEqual([base]);
+
+    const metadata = await discoverAuthorizationServerMetadata(resource.authorization_servers![0]!);
+    expect(metadata?.issuer).toBe(base);
+    expect(metadata?.authorization_endpoint).toBe(`${base}/api/auth/oauth2/authorize`);
+  });
+
+  /**
+   * The failure that started this, reproduced from the other end.
+   *
+   * When a client has no protected-resource metadata -- it is optional, and plenty of
+   * clients skip it -- the SDK treats the server's own origin as the authorization
+   * server and discovers from there. That path used to end in `undefined`, and
+   * `startAuthorization` then builds `new URL('/authorize', authorizationServerUrl)`:
+   * the exact 404 the owner was sent to. With the issuer at the origin it resolves.
+   */
+  test("a client that knows only the origin still finds the authorization endpoint", async () => {
+    const metadata = await discoverAuthorizationServerMetadata(base);
+    expect(metadata).toBeDefined();
+    expect(metadata?.authorization_endpoint).toBe(`${base}/api/auth/oauth2/authorize`);
+  });
+
   test("refuses the historical SSE stream: section 8.3 implements it nowhere", async () => {
     const response = await fetch(`${base}/mcp`, {
       method: "GET",
@@ -376,6 +486,336 @@ describe("discovery", () => {
     });
     expect(response.status).toBe(405);
   });
+});
+
+/**
+ * The redirect URI the owner's client actually asked for, and why one registration
+ * cannot cover it.
+ *
+ * The suffix is minted per session. `UW4qsoeKLHI2` is the one that appeared in his
+ * logs; the next run invents another. Every assertion in this block is about that.
+ */
+const SESSION_REDIRECT = "http://127.0.0.1:33418/callback/UW4qsoeKLHI2";
+
+async function openPairingWindow(): Promise<Response> {
+  return fetch(`${base}${PAIRING_PATH}`, { method: "POST", headers: ownerHeaders() });
+}
+
+async function closePairingWindow(): Promise<Response> {
+  return fetch(`${base}${PAIRING_PATH}`, { method: "DELETE", headers: ownerHeaders() });
+}
+
+/** An RFC 7591 registration exactly as the MCP SDK sends one: JSON, no credential. */
+async function registerDynamically(metadata: Record<string, unknown>): Promise<Response> {
+  return fetch(`${base}/api/auth/oauth2/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(metadata),
+  });
+}
+
+function nativeClientMetadata(redirectUri: string, name: string): Record<string, unknown> {
+  return {
+    client_name: name,
+    redirect_uris: [redirectUri],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    // Deliberately no `application_type`. No shipping MCP client sends one, and the
+    // server has to cope with that rather than the other way round.
+    token_endpoint_auth_method: "none",
+  };
+}
+
+describe("the redirect URI a client actually asks for", () => {
+  /**
+   * Better Auth's matcher, proven rather than assumed.
+   *
+   * `findRegisteredRedirectUri` relaxes the *port* of a loopback redirect and nothing
+   * else -- `reg.pathname === req.pathname` is in the condition. That is RFC 8252
+   * section 7.3 read correctly: a native client cannot reserve a port, so the port is
+   * unpredictable and the path is not. These two tests pin both halves, because the
+   * first is the reason a hand-registered client fails and the second is the reason
+   * the server must not be "fixed" to match paths loosely.
+   */
+  test("relaxes the port of a loopback redirect, as RFC 8252 section 7.3 allows", async () => {
+    const clientId = await createOAuthClient("Port-varying client");
+    const url = new URL(`${base}/api/auth/oauth2/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", "http://127.0.0.1:55555/callback");
+    url.searchParams.set("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("scope", "openid weight:read");
+
+    const response = await fetch(url, { headers: { cookie }, redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!, base).pathname).toBe("/oauth-consent");
+  });
+
+  test("refuses a path the registration did not declare, which is what breaks the client", async () => {
+    // Registered `/callback`, as `MCP.md` told the owner to. The client asks for
+    // `/callback/UW4qsoeKLHI2`.
+    const clientId = await createOAuthClient("Path-varying client");
+    const url = new URL(`${base}/api/auth/oauth2/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", SESSION_REDIRECT);
+    url.searchParams.set("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("scope", "openid weight:read");
+
+    const response = await fetch(url, { headers: { cookie }, redirect: "manual" });
+    expect(response.status).toBe(302);
+    // Not the consent page: the server error page, because an unregistered redirect
+    // must never receive the error either (RFC 6749 section 4.1.2.1).
+    const location = new URL(response.headers.get("location")!, base);
+    expect(location.pathname).not.toBe("/oauth-consent");
+    expect(location.searchParams.get("error")).toBe("invalid_redirect");
+  });
+});
+
+describe("dynamic client registration behind a pairing window", () => {
+  test("is closed by default, and refuses in the shape an OAuth client reads", async () => {
+    expect(pairing.state().open).toBe(false);
+
+    const response = await registerDynamically(
+      nativeClientMetadata(SESSION_REDIRECT, "Uninvited client"),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+
+    const body = await json(response);
+    expect(body["error"]).toBe("invalid_token");
+    // The refusal has to be actionable: the owner reading his client's log needs to
+    // learn that a window exists, not that registration is "disabled".
+    expect(body["error_description"]).toContain(PAIRING_PATH);
+  });
+
+  test("cannot be opened by anyone but the owner", async () => {
+    const response = await fetch(`${base}${PAIRING_PATH}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+    });
+    expect(response.status).toBe(401);
+    expect(pairing.state().open).toBe(false);
+  });
+
+  test("accepts the per-session loopback redirect once the owner opens it", async () => {
+    const opened = await openPairingWindow();
+    expect(opened.status).toBe(200);
+    expect((await json(opened))["open"]).toBe(true);
+
+    try {
+      const response = await registerDynamically(
+        nativeClientMetadata(SESSION_REDIRECT, "Dynamically registered client"),
+      );
+      expect(response.status).toBe(201);
+
+      const registered = await json(response);
+      expect(typeof registered["client_id"]).toBe("string");
+      expect(registered["redirect_uris"]).toEqual([SESSION_REDIRECT]);
+
+      // The row Better Auth stored, not just what it echoed back.
+      const rows = await handle.database.db
+        .select({ redirectUris: schema.oauthClient.redirectUris })
+        .from(schema.oauthClient)
+        .where(eq(schema.oauthClient.clientId, registered["client_id"] as string));
+      expect(rows[0]?.redirectUris).toEqual([SESSION_REDIRECT]);
+    } finally {
+      await closePairingWindow();
+    }
+  });
+
+  /**
+   * Without the inference in `registration.ts` this is a 400 and every MCP client on
+   * the planet stops here: Better Auth defaults a dynamic registration to
+   * `application_type: "web"`, and a web client may not use an http loopback redirect.
+   */
+  test("reads an http loopback redirect as the native client it is", async () => {
+    await openPairingWindow();
+    try {
+      const response = await registerDynamically(
+        nativeClientMetadata("http://localhost:41234/oauth/callback/aBc123", "Loopback client"),
+      );
+      expect({ status: response.status, error: (await json(response))["error"] ?? null }).toEqual({
+        status: 201,
+        error: null,
+      });
+    } finally {
+      await closePairingWindow();
+    }
+  });
+
+  test("does not invent an application type for a redirect that is not loopback", async () => {
+    await openPairingWindow();
+    try {
+      const response = await registerDynamically(
+        nativeClientMetadata("http://192.168.1.50:8080/callback", "Off-host client"),
+      );
+      expect(response.status).toBe(400);
+      expect((await json(response))["error"]).toBe("invalid_redirect_uri");
+    } finally {
+      await closePairingWindow();
+    }
+  });
+
+  test("closes on DELETE, and the next registration is refused again", async () => {
+    await openPairingWindow();
+    const closed = await closePairingWindow();
+    expect(closed.status).toBe(200);
+    expect((await json(closed))["open"]).toBe(false);
+
+    const response = await registerDynamically(
+      nativeClientMetadata(SESSION_REDIRECT, "Late client"),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  test("closes by itself, so a window left open does not stay open", () => {
+    let now = 1_000_000;
+    const window = createPairingWindow(() => now);
+
+    expect(window.state().open).toBe(false);
+    window.open(10);
+    expect(window.state().open).toBe(true);
+
+    now += 9 * 60_000;
+    expect(window.state().open).toBe(true);
+
+    now += 2 * 60_000;
+    expect(window.state().open).toBe(false);
+  });
+
+  test("caps how long the owner can hold it open", () => {
+    let now = 0;
+    const window = createPairingWindow(() => now);
+    window.open(60 * 24);
+
+    now = MAX_PAIRING_MINUTES * 60_000 + 1;
+    expect(window.state().open).toBe(false);
+  });
+});
+
+/**
+ * The whole thing, end to end, as the owner's client would do it: no configured
+ * `client_id`, a redirect path minted for this session, and nothing driven by hand
+ * except the two steps a human performs in a browser.
+ */
+describe("a client that registers itself", () => {
+  test(
+    "discovers, registers, authorizes and calls a tool",
+    async () => {
+      await openPairingWindow();
+
+      let authorizationUrl: URL | undefined;
+      let tokens: OAuthTokens | undefined;
+      let clientInformation: OAuthClientInformation | undefined;
+      let verifier = "";
+      const sessionRedirect = `http://127.0.0.1:33418/callback/${crypto.randomUUID().slice(0, 12)}`;
+
+      const provider: OAuthClientProvider = {
+        get redirectUrl() {
+          return sessionRedirect;
+        },
+        get clientMetadata(): OAuthClientMetadata {
+          return {
+            client_name: "Self-registering client",
+            redirect_uris: [sessionRedirect],
+            grant_types: ["authorization_code", "refresh_token"],
+            response_types: ["code"],
+            token_endpoint_auth_method: "none",
+          };
+        },
+        clientInformation() {
+          return clientInformation;
+        },
+        saveClientInformation(next) {
+          clientInformation = next;
+        },
+        tokens() {
+          return tokens;
+        },
+        saveTokens(next) {
+          tokens = next;
+        },
+        redirectToAuthorization(url) {
+          authorizationUrl = url;
+        },
+        saveCodeVerifier(next) {
+          verifier = next;
+        },
+        codeVerifier() {
+          return verifier;
+        },
+      };
+
+      const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+        authProvider: provider,
+      });
+      const client = new Client({ name: "mue-self-registering", version: "0.0.0" });
+
+      try {
+        // The 401 on `/mcp` is what starts discovery, registration and authorization.
+        await expect(client.connect(asTransport(transport))).rejects.toThrow();
+
+        // Registration happened, unprompted, against the endpoint that did not exist.
+        expect(clientInformation?.client_id).toBeDefined();
+
+        // And the client built the URL the owner's client got a 404 on -- this time
+        // pointing at the endpoint that answers.
+        expect(authorizationUrl).toBeDefined();
+        expect(`${authorizationUrl!.origin}${authorizationUrl!.pathname}`).toBe(
+          `${base}/api/auth/oauth2/authorize`,
+        );
+        expect(authorizationUrl!.searchParams.get("redirect_uri")).toBe(sessionRedirect);
+        expect(authorizationUrl!.searchParams.get("code_challenge_method")).toBe("S256");
+        expect(authorizationUrl!.searchParams.get("resource")).toBe(`${base}/mcp`);
+
+        const authorizeResponse = await fetch(authorizationUrl!.toString(), {
+          headers: { cookie },
+          redirect: "manual",
+        });
+        expect(authorizeResponse.status).toBe(302);
+
+        const consentUrl = new URL(authorizeResponse.headers.get("location")!, base);
+        expect(consentUrl.pathname).toBe("/oauth-consent");
+
+        const consent = await fetch(`${base}/api/auth/oauth2/consent`, {
+          method: "POST",
+          headers: ownerHeaders(),
+          body: JSON.stringify({
+            accept: true,
+            scope: "offline_access weight:read",
+            oauth_query: consentUrl.search.replace(/^\?/, ""),
+          }),
+        });
+        expect(consent.status).toBe(200);
+
+        const redirect = new URL((await json(consent))["url"] as string);
+        // The code comes back on the exact per-session path the client minted.
+        expect(`${redirect.origin}${redirect.pathname}`).toBe(sessionRedirect);
+        const code = redirect.searchParams.get("code");
+        expect(code).not.toBeNull();
+
+        await transport.finishAuth(code!);
+        expect(tokens?.access_token).toBeDefined();
+        expect(tokens?.refresh_token).toBeDefined();
+      } finally {
+        await transport.close();
+        await closePairingWindow();
+      }
+
+      // The point of all of it: the token works on `/mcp`.
+      const connected = await connect({ clientId: clientInformation!.client_id, tokens: tokens! });
+      try {
+        const listed = await connected.listTools();
+        expect(listed.tools.map((tool) => tool.name)).toContain("mue.list_weight_measurements");
+      } finally {
+        await connected.close();
+      }
+    },
+    OAUTH_TIMEOUT_MS,
+  );
 });
 
 describe("a real MCP client", () => {

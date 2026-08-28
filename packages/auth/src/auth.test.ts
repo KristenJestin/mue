@@ -171,7 +171,11 @@ describe("the Web cookie", () => {
 
 describe("the MCP authorization server", () => {
   test("advertises PKCE and the section 15.2 scopes", async () => {
-    const response = await call("/api/auth/.well-known/oauth-authorization-server");
+    // At the origin root, because `oauthIssuer` made the issuer the origin. It
+    // used to be `/api/auth/.well-known/oauth-authorization-server`, which is
+    // where OpenID Connect Discovery puts it for an issuer carrying a path --
+    // correct, and looked for by nobody.
+    const response = await call("/.well-known/oauth-authorization-server");
     expect(response.status).toBe(200);
     const metadata = (await response.json()) as {
       code_challenge_methods_supported: string[];
@@ -179,6 +183,45 @@ describe("the MCP authorization server", () => {
     };
     expect(metadata.code_challenge_methods_supported).toContain("S256");
     for (const scope of MUE_SCOPES) expect(metadata.scopes_supported).toContain(scope);
+  });
+
+  /**
+   * RFC 8414 section 3.3: a client derives the metadata URL from the issuer and
+   * then checks that the document names that same issuer. Both documents have to
+   * pass that check from the origin, which is the whole reason the issuer moved
+   * rather than the documents being copied to a second location.
+   */
+  test("names the origin as its issuer, at both discovery paths", async () => {
+    for (const path of [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/openid-configuration",
+    ]) {
+      const response = await call(path);
+      const metadata = (await response.json()) as { issuer: string };
+      expect({ path, status: response.status, issuer: metadata.issuer }).toEqual({
+        path,
+        status: 200,
+        issuer: BASE_URL,
+      });
+    }
+  });
+
+  /**
+   * The endpoints stay under Better Auth's base path. An issuer is a name, not a
+   * directory, and a client reads the endpoint out of the document rather than
+   * assuming it sits beside the issuer.
+   */
+  test("keeps its endpoints under the auth base path", async () => {
+    const metadata = (await (await call("/.well-known/oauth-authorization-server")).json()) as {
+      authorization_endpoint: string;
+      token_endpoint: string;
+      registration_endpoint?: string;
+    };
+    expect(metadata.authorization_endpoint).toBe(`${BASE_URL}/api/auth/oauth2/authorize`);
+    expect(metadata.token_endpoint).toBe(`${BASE_URL}/api/auth/oauth2/token`);
+    // Present at all only because dynamic registration is enabled; a client with
+    // no pre-configured `client_id` reads this field or gives up.
+    expect(metadata.registration_endpoint).toBe(`${BASE_URL}/api/auth/oauth2/register`);
   });
 
   test("publishes the protected resource metadata for /mcp", async () => {

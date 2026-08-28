@@ -5,7 +5,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, jwt } from "better-auth/plugins";
 import { fetchClientMetadataResource } from "./cimd-transport";
-import { readAuthConfig, type AuthConfig } from "./config";
+import { oauthIssuer, readAuthConfig, type AuthConfig } from "./config";
 import { OAUTH_SCOPES } from "./scopes";
 
 /**
@@ -64,8 +64,20 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
        */
       bearer(),
 
-      /** Signing keys for the access tokens an agent presents on /mcp. */
-      jwt(),
+      /**
+       * Signing keys for the access tokens an agent presents on /mcp -- and the
+       * one option that decides where OAuth discovery lives.
+       *
+       * Better Auth reads `jwt.issuer` as *the* issuer of the whole provider: it
+       * is the `issuer` field of both metadata documents, the `iss` claim of
+       * every token it signs, and -- through `issuerPath` in the provider's
+       * `onRequest` hook -- the paths those documents are served under. Left
+       * unset it is Better Auth's own base URL, `<origin>/api/auth`, and
+       * `oauthIssuer` in ./config.ts explains at length what that cost a real
+       * client. Nothing else here changes: the endpoints stay under the base
+       * path, because an issuer identifies a server and does not locate it.
+       */
+      jwt({ jwt: { issuer: oauthIssuer(config.baseUrl) } }),
 
       // @ts-expect-error better-auth 1.7.1 ships an endpoint metadata type that
       // `exactOptionalPropertyTypes` rejects: an OpenAPI parameter declares
@@ -79,6 +91,37 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
         consentPage: config.consentPage,
         resource: config.mcpResource,
         scopes: [...OAUTH_SCOPES],
+
+        /**
+         * RFC 7591 dynamic client registration, at `<base>/oauth2/register`.
+         *
+         * It is not a convenience. A shipping MCP client mints a fresh loopback
+         * redirect path per session -- `http://127.0.0.1:33418/callback/UW4qso…`
+         * -- and RFC 8252 section 7.3 relaxes the *port* of a loopback redirect,
+         * never the path. Better Auth implements exactly that relaxation and
+         * nothing wider (`findRegisteredRedirectUri`, quoted in
+         * `packages/api/src/mcp/registration.ts`), so a client registered once by
+         * hand is refused on its next run. Such a client can only ever work by
+         * registering the URI it is about to use, which is what this endpoint is
+         * for. The alternative on offer -- a Client ID Metadata Document -- needs
+         * a `client_id` that is a globally routable HTTPS URL, and `./ssrf.ts`
+         * refuses every address a home network has.
+         *
+         * `allowUnauthenticatedClientRegistration` is what makes it usable: the
+         * MCP SDK's `registerClient` sends a bare JSON POST with no credential
+         * of any kind, so a token- or session-backed mode would close the
+         * endpoint to every client it exists for.
+         *
+         * That is deliberately *not* the same as leaving it open. Section 16 is
+         * explicit -- "Le caractère privé du réseau ne remplace ni
+         * l'authentification ni le chiffrement" -- so being on the owner's WiFi
+         * authorises nothing. The endpoint is closed by
+         * `packages/api/src/mcp/registration.ts` and opens only while the owner
+         * has deliberately opened a pairing window, the way a device is paired.
+         * Better Auth never sees a request outside one.
+         */
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
       }),
 
       /**
