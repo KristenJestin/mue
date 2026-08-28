@@ -15,6 +15,7 @@ import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.LoggedAmount
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Quantity
@@ -60,6 +61,20 @@ internal data class FoodAddDraft(
      * ingredients cannot cross a `Bundle`.
      */
     val recipeId: String? = null,
+    /**
+     * PRD_FOOD 12: this sheet is posing a **proposal** rather than writing a journal line.
+     *
+     * One flag and not a second draft, because the two share everything that matters: a recipe,
+     * a serving count and a moment. What it switches off is the half a proposal has no room for
+     * — PRD_FOOD 8.5 gives `MealPlanEntry` no hour, no quantity in grams and no quick add, and
+     * §8.5 is explicit that "un aliment simple se journalise directement et n'est pas planifié".
+     *
+     * It lives in the draft rather than being re-derived from [consumedOn] against today, and the
+     * difference is `Swap`: replacing **today's** dinner proposal is a planning gesture on a day
+     * the journal would also accept, so a date alone cannot say which of the two the sheet is.
+     * It also has to survive a process death, which is what the draft is for.
+     */
+    val planning: Boolean = false,
     /** ISO-8601. PRD_FOOD 15 refuses a future day, and the sheet is opened on a day already. */
     val consumedOn: String = "",
     /** `HH:mm` (PRD_FOOD 10.3), stored to the minute like the line it becomes. */
@@ -272,12 +287,22 @@ internal data class FoodAddDraft(
             slot: MealSlot?,
             today: LocalDate,
             now: LocalTime,
+            /** PRD_FOOD 12: a proposal is being posed rather than a line written. */
+            planning: Boolean = false,
         ): FoodAddDraft {
             val day = date ?: today
             val moment = slot ?: MealSlotRules.slotFor(MealSlotRules.normalize(now))
             val time = MealSlotRules.defaultTime(moment, day, today, now)
             return FoodAddDraft(
+                planning = planning,
                 consumedOn = day.toString(),
+                /*
+                 * A proposal carries **no hour at all** (PRD_FOOD 8.5), and the clock's moment is
+                 * not its moment either. The time is still written so the field round-trips if
+                 * this draft is ever read as a journal one, but the moment is left unpinned
+                 * unless a slot was carried in: `plannedSlot` below decides it from the dish and
+                 * from the day, which is the only honest answer where there is no "now".
+                 */
                 consumedAt = format(time),
                 slotId = moment.id,
                 slotPinned = slot != null,
@@ -720,4 +745,80 @@ internal fun FoodAddDraft.resolve(
             }
         }
     }
+}
+
+/**
+ * Which moment this proposal lands on (PRD_FOOD 12).
+ *
+ * The one function both the screen and the write ask, so the moment printed on the sheet and the
+ * moment stored in `(plannedOn, slot)` are the same value by construction rather than by two
+ * agreeing derivations.
+ *
+ * A moment chosen by hand wins outright — [FoodAddDraft.slotPinned] is what the override panel
+ * and `Swap` both set. Otherwise [MealSlotRules.plannedSlotFor] answers from the dish's own type
+ * and the moments the day already holds, because a day still to come has no clock to ask. Before
+ * a recipe has been chosen there is no dish to ask about either, so the draft's own value stands;
+ * it is never saved in that state, since PRD_FOOD 8.5 gives a proposal no meaning without one.
+ */
+internal fun FoodAddDraft.plannedSlot(
+    recipe: FoodAddRecipe?,
+    taken: Set<MealSlot> = emptySet(),
+): MealSlot {
+    if (slotPinned || recipe == null) return slot
+    return MealSlotRules.plannedSlotFor(recipe.detail.recipe.type, taken)
+}
+
+/** Either the proposal that would be posed, or the refusals that stopped it (PRD_FOOD 15). */
+internal sealed interface MealPlanResolution {
+
+    data class Ready(val entry: MealPlanEntry) : MealPlanResolution
+
+    data class Refused(val errors: FoodAddErrors) : MealPlanResolution
+}
+
+/**
+ * The proposal this draft would pose, or the fields that refuse it (PRD_FOOD 12 and 15).
+ *
+ * Three facts and no more, which is exactly what FR-PLAN-001 asks the manual path to present:
+ * a date, a moment and a number of servings — over a recipe, because §8.5 admits nothing else.
+ *
+ * Every bound is [FoodValidation]'s. The day goes through `validatePlannedOn`, which is the
+ * planning rule and **not** the journal's: today or later, up to `MealPlanEntry.MAX_DAYS_AHEAD`.
+ * The count goes through `validateConsumedServings`, deliberately the very same counter a
+ * consumption uses — PRD_FOOD 15 gives `plannedServings` no range of its own, and inventing a
+ * second one would let a proposal be posed that could never be confirmed.
+ *
+ * Nothing is computed here. A proposal carries no nutritional value at all (PRD_FOOD 12: it
+ * "n'entre dans aucun total tant qu'elle n'est pas confirmée"), so there is nothing to freeze —
+ * which is the whole difference between this and `FoodAddDraft.resolve`.
+ */
+internal fun FoodAddDraft.resolvePlan(
+    recipe: FoodAddRecipe?,
+    slot: MealSlot,
+    today: LocalDate,
+): MealPlanResolution {
+    val day = date(today)
+    val dateError = FoodValidation.validatePlannedOn(day, today).errorMessage
+    val counted = FoodValidation.validateConsumedServings(servings)
+
+    /*
+     * A missing recipe is refused with no message of its own. PRD_FOOD 15 puts a refusal "à côté
+     * du champ concerné", and there is no field here to put one beside: the stage that asks for
+     * servings is only reached once a recipe has been chosen, so this branch is the unreachable
+     * one that must still not write a row.
+     */
+    if (recipe == null || dateError != null || counted !is Validated.Valid) {
+        return MealPlanResolution.Refused(
+            FoodAddErrors(servings = counted.errorMessage, date = dateError),
+        )
+    }
+
+    return MealPlanResolution.Ready(
+        MealPlanEntry(
+            plannedOn = day,
+            slot = slot,
+            recipeId = recipe.id,
+            plannedServings = counted.value,
+        ),
+    )
 }

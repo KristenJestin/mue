@@ -9,6 +9,7 @@ import fr.kristenjestin.mue.domain.logic.errorMessage
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogKind
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Servings
@@ -147,6 +148,21 @@ internal data class FoodAddSlotUiState(
     val hoursLabel: String,
     val iconName: String,
     val selected: Boolean,
+    /**
+     * PRD_FOOD 8.5: this moment already holds a proposal, so choosing it will replace one.
+     *
+     * Only ever true while planning. On a journal line it would be meaningless — a moment takes
+     * as many entries as anyone cares to write — and saying "already suggested" beside a moment
+     * somebody is about to log an apple into would be a warning about nothing.
+     */
+    val isTaken: Boolean = false,
+    /**
+     * What sits under the moment's name in the panel: its hours, and whether it is spoken for.
+     *
+     * Composed here rather than in the sheet, so the one control that shows it draws a string it
+     * was handed instead of assembling one — and so both readings are provable on the JVM.
+     */
+    val description: String = hoursLabel,
 )
 
 /**
@@ -342,6 +358,15 @@ internal data class FoodQuickUiState(
 internal data class FoodAddUiState(
     val stage: FoodAddStage,
     val isEditing: Boolean,
+    /**
+     * PRD_FOOD 12: the sheet is posing a proposal, not writing a line.
+     *
+     * The whole of the difference is named on the fields it touches — [showsTime] is false, the
+     * one way in is the recipe, [contribution] stays null and [saveLabel] says `Plan this meal`.
+     * There is no second screen and no second ViewModel: a proposal is a recipe, a serving count
+     * and a moment, and this sheet already asks for all three.
+     */
+    val isPlanning: Boolean,
     val screenTitle: String,
     val date: LocalDate,
     val today: LocalDate,
@@ -406,6 +431,16 @@ internal data class FoodAddUiState(
     val isTimePickerVisible: Boolean,
     /** Whether the override panel is open. Closed is the ordinary state, and the default. */
     val isSlotPickerVisible: Boolean,
+    /**
+     * PRD_FOOD 8.5 and FR-PLAN-001: the moment is already spoken for, and the write is waiting
+     * for an answer.
+     *
+     * "Proposer sur un moment déjà pourvu demande une confirmation dans l'interface, puis
+     * remplace." The confirmation is the interface's business and not the repository's —
+     * `MealPlanRepository.save` is a single upsert onto the row `(date, moment)` already names,
+     * so by the time it is called the decision has been taken.
+     */
+    val isReplaceConfirmVisible: Boolean,
     val isLoading: Boolean,
 ) {
 
@@ -413,6 +448,26 @@ internal data class FoodAddUiState(
     val isFoodMissing: Boolean get() = stage == FoodAddStage.FROZEN
 
     val canDelete: Boolean get() = isEditing
+
+    /**
+     * Whether the hour is asked for at all (PRD_FOOD 8.5 against PRD_FOOD 10.3).
+     *
+     * A journal line carries a local time and is ordered by it; a proposal carries **no time
+     * field whatsoever**. So the clock disappears from the planning sheet rather than being
+     * shown and ignored, and with it [slotTimeNote], which exists only to explain a disagreement
+     * between an hour and a moment that a proposal cannot have.
+     */
+    val showsTime: Boolean get() = !isPlanning
+
+    /**
+     * The moment as something to **choose** rather than as something derived (FR-PLAN-001).
+     *
+     * On the journal side FR-FOOD-007 derives it from the hour and PRD_FOOD 10.3 refuses to ask
+     * the same fact twice, which is why it is a quiet line there. Planning has no hour to derive
+     * it from and FR-PLAN-001 requires the manual path to "présente ces trois choix" — the date,
+     * the moment and the servings — so here it is a field, opening the very same panel.
+     */
+    val asksForSlot: Boolean get() = isPlanning
 
     /**
      * Whether the sheet can go back to PRD_FOOD 7's ways in.
@@ -459,7 +514,17 @@ internal data class FoodAddUiState(
             justDeleted: Boolean = false,
             isTimePickerVisible: Boolean = false,
             isSlotPickerVisible: Boolean = false,
+            isReplaceConfirmVisible: Boolean = false,
             isLoading: Boolean = false,
+            /**
+             * PRD_FOOD 12: the proposals already on the day being planned.
+             *
+             * Two things read them and nothing else does: which moment a fresh proposal opens on
+             * (a taken one is not offered first), and which moments the override panel marks as
+             * spoken for. Empty on every journal path, where a moment takes as many lines as it
+             * is given.
+             */
+            plans: List<MealPlanEntry> = emptyList(),
             /** FR-FOOD-003. [FoodScanState.Idle] on every stage that is not the scan. */
             scan: FoodScanState = FoodScanState.Idle,
             /** PRD_FOOD 15: the barcode's refusal appears after an attempt, not while typing. */
@@ -474,10 +539,19 @@ internal data class FoodAddUiState(
             val stage = stageOf(draft, food, original)
             val amount = food?.let { amountOf(draft, it) }
             val chosenRecipe = recipe.takeIf { stage == FoodAddStage.SERVINGS }
+            val planning = draft.planning
+            val taken = MealSlotRules.plannedSlots(plans)
+            /*
+             * The one derivation of the moment, shared with the write (`FoodAddDraft.plannedSlot`).
+             * On a journal line it is the draft's own value untouched; while planning it is the
+             * dish's type against the day's free moments, because there is no clock to ask.
+             */
+            val slot = if (planning) draft.plannedSlot(chosenRecipe, taken) else draft.slot
 
             return FoodAddUiState(
                 stage = stage,
                 isEditing = draft.isEditing,
+                isPlanning = planning,
                 /*
                  * A correction is one screen and says so; a new line names the stage it is on.
                  *
@@ -486,33 +560,50 @@ internal data class FoodAddUiState(
                  * to be the screen he had just left. `FoodAddStage` is the only thing that knows
                  * where the sheet is, so the title is asked of it.
                  */
-                screenTitle = if (draft.isEditing) {
-                    FoodAddMessages.EDIT_TITLE
-                } else {
-                    FoodAddMessages.stageTitle(stage)
+                screenTitle = when {
+                    draft.isEditing -> FoodAddMessages.EDIT_TITLE
+                    planning -> FoodAddMessages.planStageTitle(stage)
+                    else -> FoodAddMessages.stageTitle(stage)
                 },
                 date = date,
                 today = today,
                 dateLabel = FoodDayFormat.dayLabel(date, today, locale),
                 dateDescription = FoodDayFormat.dayDescription(date, today, locale),
-                slot = draft.slot,
+                slot = slot,
                 slotFieldValue = FoodAddMessages.slotWithHours(
-                    label = draft.slot.label,
-                    hours = hoursOf(draft.slot, locale),
+                    label = slot.label,
+                    hours = hoursOf(slot, locale),
                 ),
-                slotFieldDescription = FoodAddMessages.changeSlotDescription(draft.slot.label),
-                slots = MealSlot.ORDERED.map { slot ->
+                slotFieldDescription = FoodAddMessages.changeSlotDescription(slot.label),
+                slots = MealSlot.ORDERED.map { option ->
+                    val hours = hoursOf(option, locale)
+                    val isTaken = planning && option in taken
                     FoodAddSlotUiState(
-                        slot = slot,
-                        label = slot.label,
-                        hoursLabel = hoursOf(slot, locale),
-                        iconName = FoodIcons.forSlot(slot),
-                        selected = slot == draft.slot,
+                        slot = option,
+                        label = option.label,
+                        hoursLabel = hours,
+                        iconName = FoodIcons.forSlot(option),
+                        selected = option == slot,
+                        isTaken = isTaken,
+                        /*
+                         * PRD_FOOD 8.5's "au maximum une proposition" made visible **before** the
+                         * choice rather than only after it. Six moments is more than a planning
+                         * screen can usefully draw at once, so this panel is where the shape of
+                         * the planned day is read: which moments are spoken for, in one column,
+                         * without a second screen listing all six.
+                         */
+                        description = if (isTaken) {
+                            FoodAddMessages.slotAlreadyPlanned(hours)
+                        } else {
+                            hours
+                        },
                     )
                 },
                 time = time,
                 timeLabel = FoodDayFormat.time(time, locale),
-                slotTimeNote = slotTimeNote(draft.slot, time, locale),
+                // A proposal carries no hour, so there is no disagreement between one and a
+                // moment to explain (PRD_FOOD 8.5).
+                slotTimeNote = if (planning) null else slotTimeNote(slot, time, locale),
                 food = food?.let(::foodOf),
                 recipe = chosenRecipe?.let(::recipeOf),
                 amount = amount,
@@ -531,20 +622,31 @@ internal data class FoodAddUiState(
                 } ?: chosenRecipe?.let {
                     FoodNutrientsUiState.of(FoodAddMessages.PER_SERVING_SECTION, it.perServing)
                 },
-                contribution = contributionOf(draft, food, original, recipe, stage),
-                errors = errors,
-                saveLabel = if (draft.isEditing) {
-                    FoodAddMessages.SAVE_CHANGES
+                /*
+                 * PRD_FOOD 12: "une proposition n'entre dans aucun total tant qu'elle n'est pas
+                 * confirmée". The per-serving card above stays — it is what the recipe is worth,
+                 * a fact about the preparation — but `In this entry` is withheld, because there
+                 * is no entry: the figure would be the one the day's totals are forbidden to
+                 * include, printed under a heading that says it already counts.
+                 */
+                contribution = if (planning) {
+                    null
                 } else {
-                    FoodAddMessages.SAVE_ENTRY
+                    contributionOf(draft, food, original, recipe, stage)
+                },
+                errors = errors,
+                saveLabel = when {
+                    planning -> FoodAddMessages.PLAN_MEAL
+                    draft.isEditing -> FoodAddMessages.SAVE_CHANGES
+                    else -> FoodAddMessages.SAVE_ENTRY
                 },
                 saveDescription = FoodAddMessages.saveDescription(
-                    label = if (draft.isEditing) {
-                        FoodAddMessages.SAVE_CHANGES
-                    } else {
-                        FoodAddMessages.SAVE_ENTRY
+                    label = when {
+                        planning -> FoodAddMessages.PLAN_MEAL
+                        draft.isEditing -> FoodAddMessages.SAVE_CHANGES
+                        else -> FoodAddMessages.SAVE_ENTRY
                     },
-                    slot = draft.slot,
+                    slot = slot,
                     dateLabel = FoodDayFormat.dayLabel(date, today, locale),
                 ),
                 saveError = saveError,
@@ -552,6 +654,7 @@ internal data class FoodAddUiState(
                 justDeleted = justDeleted,
                 isTimePickerVisible = isTimePickerVisible,
                 isSlotPickerVisible = isSlotPickerVisible,
+                isReplaceConfirmVisible = isReplaceConfirmVisible,
                 isLoading = isLoading,
             )
         }

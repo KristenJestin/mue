@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.domain.logic
 
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
+import fr.kristenjestin.mue.domain.model.RecipeType
 import java.time.LocalDate
 import java.time.LocalTime
 import org.junit.Test
@@ -346,5 +347,107 @@ class MealSlotRulesPlanTest {
         val lines = MealSlotRules.entriesIn(emptyList(), MealSlot.LUNCH)
         assertEquals(Nutrients.ZERO, NutritionMath.total(lines))
         assertEquals(MealSlot.LUNCH, proposal.slot)
+    }
+}
+
+/**
+ * Which moment a **proposal** opens on, when there is no clock to deduce one from.
+ *
+ * This is the one question planning asks that the journal never has to. PRD_FOOD 8.5 gives
+ * `MealPlanEntry` a moment and no time at all, so `slotFor` — the whole of FR-FOOD-007 — has
+ * nothing to read: a meal planned for next Thursday was not eaten at any hour, and the hour it
+ * was *planned at* is a fact about the planner.
+ *
+ * The two things that do exist decide it instead: the dish's own `RecipeType` (PRD_FOOD 11 puts
+ * one on every recipe, and PRD_FOOD 8.5 makes a proposal always reference one), and the moments
+ * the day already holds (PRD_FOOD 8.5 again: at most one proposal each).
+ */
+class MealSlotRulesPlanningTest {
+
+    @Test
+    fun `a breakfast recipe opens on breakfast`() {
+        assertEquals(MealSlot.BREAKFAST, MealSlotRules.plannedSlotFor(RecipeType.BREAKFAST))
+    }
+
+    /**
+     * PRD_FOOD 8.3: lunch and dinner are the same dish at two hours, so `MAIN` maps to a pair and
+     * not to one moment. The earlier of the two is the default, because a day is planned forwards.
+     */
+    @Test
+    fun `a main opens on lunch, and on dinner once lunch is spoken for`() {
+        assertEquals(MealSlot.LUNCH, MealSlotRules.plannedSlotFor(RecipeType.MAIN))
+        assertEquals(
+            MealSlot.DINNER,
+            MealSlotRules.plannedSlotFor(RecipeType.MAIN, taken = setOf(MealSlot.LUNCH)),
+        )
+    }
+
+    @Test
+    fun `a snack opens on the afternoon snack, then on the two others in turn`() {
+        assertEquals(MealSlot.SNACK, MealSlotRules.plannedSlotFor(RecipeType.SNACK))
+        assertEquals(
+            MealSlot.MORNING_SNACK,
+            MealSlotRules.plannedSlotFor(RecipeType.SNACK, taken = setOf(MealSlot.SNACK)),
+        )
+        assertEquals(
+            MealSlot.EVENING_SNACK,
+            MealSlotRules.plannedSlotFor(
+                RecipeType.SNACK,
+                taken = setOf(MealSlot.SNACK, MealSlot.MORNING_SNACK),
+            ),
+        )
+    }
+
+    /**
+     * A default never falls outside the family the recipe's type names.
+     *
+     * A breakfast recipe whose two moments are both taken opens on breakfast again — and asks to
+     * replace it (FR-PLAN-001) — rather than sliding into dinner. A wrong default near the truth
+     * costs one tap; one that is nowhere near it is simply confusing.
+     */
+    @Test
+    fun `a type whose moments are all taken falls back to its own first, never to another family`() {
+        val everyBreakfastMoment = setOf(MealSlot.BREAKFAST, MealSlot.MORNING_SNACK)
+
+        assertEquals(
+            MealSlot.BREAKFAST,
+            MealSlotRules.plannedSlotFor(RecipeType.BREAKFAST, taken = everyBreakfastMoment),
+        )
+    }
+
+    /** Every type offers at least one moment, so the default can never be absent. */
+    @Test
+    fun `each recipe type names at least one moment`() {
+        RecipeType.entries.forEach { type ->
+            assertTrue(MealSlotRules.plannableSlotsFor(type).isNotEmpty(), type.id)
+        }
+    }
+
+    /**
+     * PRD_FOOD 8.5: a **confirmed** proposal still occupies its moment.
+     *
+     * The row is keyed `(date, moment)` whether or not `I ate this` has been pressed, so a
+     * planning sheet that read only the pending ones would call a moment free and then silently
+     * overwrite a confirmed row — and with it the link to the journal line it created.
+     */
+    @Test
+    fun `a confirmed proposal still holds its moment`() {
+        val confirmedLunch = listOf(planOf(slot = MealSlot.LUNCH, consumedLogEntryId = "entry-1"))
+
+        // `pendingPlans` would call this day free; the row exists all the same.
+        assertTrue(MealSlotRules.pendingPlans(confirmedLunch).isEmpty())
+        assertEquals(setOf(MealSlot.LUNCH), MealSlotRules.plannedSlots(confirmedLunch))
+        assertEquals(
+            MealSlot.DINNER,
+            MealSlotRules.plannedSlotFor(
+                RecipeType.MAIN,
+                MealSlotRules.plannedSlots(confirmedLunch),
+            ),
+        )
+    }
+
+    @Test
+    fun `a day with no proposal holds no moment`() {
+        assertTrue(MealSlotRules.plannedSlots(emptyList()).isEmpty())
     }
 }

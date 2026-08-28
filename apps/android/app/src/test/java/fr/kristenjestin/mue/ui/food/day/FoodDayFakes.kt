@@ -79,10 +79,21 @@ internal class FakeMealPlanRepository(
     plans: List<MealPlanEntry> = emptyList(),
 ) : MealPlanRepository {
 
+    /**
+     * Every proposal actually written, in order (PRD_FOOD 12).
+     *
+     * The list and not just the final state, because FR-PLAN-001's rule is about a **write**:
+     * posing on an occupied moment replaces rather than duplicates, and a fake that only answered
+     * reads could not tell one upsert from two.
+     */
+    val saved = mutableListOf<MealPlanEntry>()
     val deleted = mutableListOf<MealPlanKey>()
     val consumed = mutableListOf<Pair<MealPlanKey, FoodLogEntryId?>>()
 
     private val state = MutableStateFlow(plans)
+
+    /** What the store holds for one day right now, for an assertion that is not about a flow. */
+    fun onDay(date: LocalDate): List<MealPlanEntry> = state.value.filter { it.plannedOn == date }
 
     override fun observeDay(date: LocalDate): Flow<List<MealPlanEntry>> =
         state.map { all -> all.filter { it.plannedOn == date } }
@@ -93,6 +104,7 @@ internal class FakeMealPlanRepository(
         state.value.firstOrNull { it.key == key }
 
     override suspend fun save(entry: MealPlanEntry) {
+        saved += entry
         state.value = state.value.filterNot { it.key == entry.key } + entry
     }
 

@@ -70,6 +70,14 @@ private const val DisabledStepAlpha = 0.2f
 @Composable
 internal fun FoodDayRoute(
     onAdd: (LocalDate) -> Unit,
+    /**
+     * PRD_FOOD 12: the same action, on a day the journal cannot take.
+     *
+     * A second callback rather than a flag on [onAdd], because they open two different routes and
+     * the choice between them is a fact about the day — which is what this screen holds and the
+     * host does not.
+     */
+    onPlan: (LocalDate) -> Unit,
     onEditEntry: (FoodLogEntryId) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
     modifier: Modifier = Modifier,
@@ -87,8 +95,13 @@ internal fun FoodDayRoute(
          * The day, and **no moment**. That is the whole of the correction: what the sheet is
          * handed is the journal the reader is looking at, and the moment is left to the hour
          * (FR-FOOD-007) with the override still on the sheet where the owner asked for it.
+         *
+         * On a day still to come there is no hour to leave it to, and no journal to write into
+         * either — so the same gesture opens the planning sheet instead. The branch is here
+         * rather than on the button, because `FoodDayScreen` below is handed a state and a set
+         * of callbacks and decides nothing about routes.
          */
-        onAdd = { onAdd(state.date) },
+        onAdd = { if (state.isPlanning) onPlan(state.date) else onAdd(state.date) },
         onEditEntry = onEditEntry,
         onConfirmPlan = viewModel::onConfirmPlan,
         onSwapPlan = onSwapPlan,
@@ -218,10 +231,15 @@ internal fun FoodDayScreen(
             coversContent = list.canScrollForward,
         ) {
             /*
-             * PRD_FOOD 22: on a day still to come the action keeps its place and stops being a
-             * control, rather than disappearing. A screen that reflows as the week is walked is
-             * the defect the add row's own `enabled = false` was avoiding, and the reason is
-             * unchanged — [FutureDayNote] above has already said why it is inert.
+             * One control, in one place, on every day the module can reach (PRD_FOOD 10.1 and
+             * 12). On a day the journal takes it writes a line; on a day still to come it poses a
+             * proposal, and [FoodDayUiState.addLabel] says which.
+             *
+             * It used to be inert past today, which is what left `MealPlanEntry` unreachable from
+             * the interface: the note above promised that a future day's moments could carry a
+             * suggestion, and the only control on the screen was greyed out. `enabled` still
+             * exists for the day beyond both rules — a screen that reflows as the week is walked
+             * is worse than a button that stays put — but no route reaches such a day.
              */
             MuePrimaryButton(
                 label = state.addLabel,
@@ -261,10 +279,10 @@ private fun NothingLoggedYet() {
 /**
  * What a day ahead of today is for, and what it is not (PRD_FOOD 12 and 22).
  *
- * Two sentences and no control. The moments below already say what each of them can hold, and a
- * refusal repeated five times on one screen reads as five errors rather than as one fact about the
- * day. It is deliberately not an error colour: nothing has gone wrong — the reader has simply
- * walked forward into a part of the module that keeps proposals rather than entries.
+ * Two sentences and no control of its own. The action at the foot of the screen is the control,
+ * and it now does the thing this note describes; repeating an invitation here would be the same
+ * offer drawn twice. It is deliberately not an error colour: nothing has gone wrong — the reader
+ * has simply walked forward into a part of the module that keeps proposals rather than entries.
  *
  * Announced as one sentence, so a screen reader hears the fact and its consequence together
  * instead of two fragments (PRD_FOOD 18).
@@ -488,8 +506,9 @@ private fun FoodDayEmptyPreview() {
  *
  * What to look for: the date arrow on the right is live rather than faded, one line under the
  * date saying what this day is and is not, **only** the moments carrying a proposal — no empty
- * heading anywhere — the pinned action present and plainly inert, and the dinner`s proposal
- * carrying `Swap` and `Dismiss` but **not** `I ate this`, because nobody has eaten Thursday.
+ * heading anywhere — the pinned action reading `Plan something else` and live, and the dinner's
+ * proposal carrying `Swap` and `Dismiss` but **not** `I ate this`, because nobody can have eaten
+ * Thursday.
  */
 @Preview(name = "Day — still to come", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
 @Composable

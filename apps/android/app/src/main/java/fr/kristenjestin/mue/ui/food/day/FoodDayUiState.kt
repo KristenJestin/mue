@@ -108,17 +108,39 @@ data class FoodDayUiState(
      * quietly overriding.
      */
     val addLabel: String
-        get() = if (isRecorded) FoodDayMessages.ADD_MORE else FoodDayMessages.ADD_FIRST
+        get() = when {
+            /*
+             * PRD_FOOD 12: on a day the journal cannot take, the same action plans. It says so,
+             * because a button that wrote a proposal while promising an entry would be the exact
+             * inverse of the mistake `ADD_FIRST` was written to end.
+             *
+             * The pair turns on whether anything is *drawn* rather than on [isRecorded], which
+             * counts journal lines and is always zero here. A day already carrying a proposal has
+             * something on it, and `Plan something else` is what a reader looking at one expects.
+             */
+            isPlanning -> if (isBlank) FoodDayMessages.PLAN_FIRST else FoodDayMessages.PLAN_MORE
+            isRecorded -> FoodDayMessages.ADD_MORE
+            else -> FoodDayMessages.ADD_FIRST
+        }
 
     /**
-     * PRD_FOOD 22: whether a line may be written to this day at all.
+     * Whether the one action at the foot of the screen poses a **proposal** (PRD_FOOD 12).
      *
-     * Asked of the day rather than of each moment, now that there is one action. On a day still
-     * to come the action keeps its place and stops being a control — the same reasoning the add
-     * row carried, for the same reason: a control that vanishes is a screen that reflows under
-     * the reader, and [FoodDayMessages.FUTURE_DAY] above has already said why it is inert.
+     * A day the journal refuses and a proposal may sit on leaves the action one honest meaning,
+     * so it takes it rather than going grey. The two predicates are the domain's own and are read
+     * in the only order that can be true at once: a day is never both.
      */
-    val canAdd: Boolean get() = canLog
+    val isPlanning: Boolean get() = !canLog && canPlan
+
+    /**
+     * Whether the day's one action does anything at all.
+     *
+     * It used to be [canLog] alone, which is what made a future day a screen with a dead button
+     * under a note explaining that its moments "can carry a suggestion" — a sentence with no
+     * gesture behind it anywhere in the module. It is now either rule: write a line, or pose a
+     * proposal. Beyond the sixtieth day ahead neither holds, and no route reaches such a day.
+     */
+    val canAdd: Boolean get() = canLog || canPlan
 
     /**
      * PRD_FOOD 22: "un jour passé peut être complété ; un jour futur ne peut pas l'être".

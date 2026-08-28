@@ -106,6 +106,90 @@ internal object FoodAddMessages {
         FoodAddStage.FROZEN -> EDIT_TITLE
     }
 
+    /**
+     * The same header when the sheet is posing a proposal (PRD_FOOD 12).
+     *
+     * Only the first stage is renamed, and deliberately: a planning sheet has exactly two stages
+     * — choose the recipe, then say how many servings and which moment — and the second asks the
+     * identical question the journal's does, so giving it a second name would be two words for
+     * one screen. [stageTitle] answers everything else, so a stage that cannot be reached while
+     * planning still has a title rather than a blank header.
+     */
+    fun planStageTitle(stage: FoodAddStage): String = when (stage) {
+        FoodAddStage.PATHS -> PLAN_TITLE
+        else -> stageTitle(stage)
+    }
+
+    // endregion
+
+    // region planning (PRD_FOOD 12 and FR-PLAN-001)
+
+    /**
+     * What the sheet is called on a day that has not happened yet.
+     *
+     * Not `Add food`, which would promise a journal line PRD_FOOD 22 forbids on such a day, and
+     * not a coach's word either — PRD_FOOD 12 is explicit that there is no vocabulary of
+     * suggestion-as-advice here. A meal is being planned; that is all it says.
+     */
+    const val PLAN_TITLE: String = "Plan a meal"
+
+    const val PLAN_EYEBROW: String = "What are you planning?"
+
+    /**
+     * PRD_FOOD 8.5: "Une proposition référence toujours une recette ; un aliment simple se
+     * journalise directement et n'est pas planifié."
+     *
+     * So the four ways in become one, and the sentence says why rather than leaving three cards
+     * quietly missing. Naming the rule is what stops it reading as an unfinished screen.
+     */
+    const val PLAN_PATHS_TITLE: String = "A suggestion is always a recipe."
+
+    const val PLAN_ONLY_RECIPES: String =
+        "A single food goes straight into the journal, on the day itself."
+
+    const val PLAN_RECIPE_PATH_DESCRIPTION: String =
+        "One of your saved preparations, for a moment of this day"
+
+    /** The action at the foot of a planning sheet, and what it writes. */
+    const val PLAN_MEAL: String = "Plan this meal"
+
+    const val PLAN_FAILED: String = "Couldn't plan it. Nothing was changed."
+
+    /**
+     * PRD_FOOD 17, on the one refusal that has no field to sit beside: the recipe went while the
+     * sheet was open.
+     *
+     * `RecipeRepository.delete` frees the proposals that referenced a recipe, and it can run under
+     * an open planning sheet. Without this the primary button would refuse in silence.
+     */
+    const val PLAN_RECIPE_GONE: String =
+        "That recipe is no longer available. Choose another one."
+
+    /**
+     * FR-PLAN-001: "Un moment déjà pourvu demande confirmation avant de remplacer sa proposition."
+     *
+     * The moment is named in the title, because the answer depends on *which* one — somebody who
+     * meant Thursday's lunch and is being asked about Thursday's dinner has learned something
+     * from the question.
+     */
+    fun replacePlanTitle(slot: MealSlot): String = "${slot.label} already has a suggestion"
+
+    const val REPLACE_PLAN_BODY: String =
+        "A moment carries one suggestion at a time. This one takes its place; " +
+            "the journal and both recipes stay as they are."
+
+    const val REPLACE_PLAN_CONFIRM: String = "Replace it"
+
+    const val CANCEL: String = "Cancel"
+
+    /**
+     * A moment's hours, and the fact that something is already proposed in it (PRD_FOOD 8.5).
+     *
+     * The hours stay: a moment is defined by them, and a planning panel that dropped them would
+     * be the only place in the module naming a moment without saying what it is.
+     */
+    fun slotAlreadyPlanned(hours: String): String = "$hours · Already suggested"
+
     // endregion
 
     // region the food, and how much of it (FR-FOOD-006)

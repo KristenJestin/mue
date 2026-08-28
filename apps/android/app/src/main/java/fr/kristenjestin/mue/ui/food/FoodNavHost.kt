@@ -50,7 +50,7 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * showing, as the Activity tab's own stack does. The direction of each is resolved once, above
  * the animation, because `transitionSpec` runs outside composition.
  *
- * Only `Trends` and `Swap` still draw [FoodPlaceholder]; the day, the add sheet, the food picker,
+ * Only `Trends` still draws [FoodPlaceholder]; the day, the add sheet — which now also plans —
  * the catalogue, the preferences and the three recipe screens all have screens behind them. They
  * landed one directory at a time, and the routes, the tags and the icons they needed were already
  * here, so none of them had to reopen a file another was editing.
@@ -206,8 +206,21 @@ private fun FoodDestination(
          */
         FoodRoute.Day -> FoodDayRoute(
             onAdd = { date -> stack.push(FoodRoute.AddFood(date = date)) },
+            /*
+             * PRD_FOOD 12: the same action at the foot of the screen, on a day the journal cannot
+             * take. It is one gesture with two destinations rather than two controls, because a
+             * day still to come leaves it only one honest meaning — and the day screen is what
+             * knows which day it is on.
+             */
+            onPlan = { date -> stack.push(FoodRoute.PlanMeal(date = date)) },
             onEditEntry = { entryId -> stack.push(FoodRoute.AddFood(entryId = entryId)) },
-            onSwapPlan = { plan -> stack.push(FoodRoute.Swap(plan)) },
+            /*
+             * FR-PLAN-002, and `Swap` is back on the card because this is somewhere real to go.
+             * Replacing a proposal *is* posing one, so it opens the same sheet, aimed at the
+             * moment being replaced — which pins it, so the derivation from the dish does not
+             * quietly move the meal to another moment.
+             */
+            onSwapPlan = { plan -> stack.push(FoodRoute.PlanMeal(plan.plannedOn, plan.slot)) },
             modifier = modifier,
         )
 
@@ -362,7 +375,26 @@ private fun FoodDestination(
             modifier = modifier,
         )
 
-        is FoodRoute.Swap -> FoodPlaceholder(modifier)
+        /*
+         * PRD_FOOD 12 and FR-PLAN-001, on the sheet that already asks for all three facts.
+         *
+         * The same composable as `AddFood`, told to plan, so a proposal's servings pass through
+         * the very stepper a consumption's do and PRD_FOOD 15's counter exists once. `onSearchFood`
+         * and `onCreateFood` are unreachable from here — §8.5 admits no plain food into a
+         * proposal, so the planning sheet offers the recipe path alone — and are wired to nothing
+         * rather than to a screen that would write the wrong kind of thing.
+         */
+        is FoodRoute.PlanMeal -> FoodAddRoute(
+            date = route.date,
+            slot = route.slot,
+            entryId = null,
+            planning = true,
+            onClose = { stack.pop() },
+            onSearchFood = {},
+            onUseRecipe = { stack.push(FoodRoute.RecipePicker) },
+            onCreateFood = {},
+            modifier = modifier,
+        )
 
         /* PRD_FOOD 6.7 and 13.2: the module's occasional settings, and nowhere else. */
         FoodRoute.Preferences -> FoodPreferencesRoute(

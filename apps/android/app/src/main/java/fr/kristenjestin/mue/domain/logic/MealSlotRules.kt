@@ -3,6 +3,7 @@ package fr.kristenjestin.mue.domain.logic
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
+import fr.kristenjestin.mue.domain.model.RecipeType
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
@@ -151,4 +152,66 @@ object MealSlotRules {
      */
     fun plansBySlot(plans: List<MealPlanEntry>): Map<MealSlot, MealPlanEntry?> =
         MealSlot.ORDERED.associateWith { slot -> planIn(plans, slot) }
+
+    /**
+     * The moments of a day that already hold a proposal — free or not, in one set.
+     *
+     * A **confirmed** proposal counts. PRD_FOOD 8.5 makes `(date, moment)` the primary key, so
+     * the row is there whether or not `I ate this` has been pressed, and posing another proposal
+     * on that moment still replaces it. Filtering to the pending ones here would have told the
+     * planning sheet a moment was free and then silently overwritten a confirmed row.
+     */
+    fun plannedSlots(plans: List<MealPlanEntry>): Set<MealSlot> =
+        plans.mapTo(mutableSetOf(), MealPlanEntry::slot)
+
+    /**
+     * Which moment a proposal opens on, when there is **no "now" to deduce one from**.
+     *
+     * [slotFor] is the journal's answer and it cannot be reused here: a line carries the hour it
+     * was written at, and a proposal for next Thursday carries no hour at all — PRD_FOOD 8.5 gives
+     * `MealPlanEntry` a moment and no time. Taking the current clock would put every meal planned
+     * during an evening into `Dinner`, whatever the dish and whatever day it is for, which is a
+     * default derived from a fact about the *planner* rather than about the plan.
+     *
+     * So the two things that do exist decide it:
+     *
+     * 1. **what the dish is.** PRD_FOOD 11 puts a `type de moment` on every recipe, and PRD_FOOD
+     *    8.5 makes a proposal always reference one — a plain food is logged directly and is never
+     *    planned. A breakfast recipe therefore opens on `Breakfast`;
+     * 2. **what the day already holds.** A moment carries at most one proposal, so a candidate
+     *    already taken is not offered first: planning two mains for one day lands the second on
+     *    `Dinner` rather than asking to replace the lunch just posed.
+     *
+     * [RecipeType] has three values and the day six moments, so the mapping is a **preference
+     * order** rather than a bijection — `Main` is lunch or dinner, which is the same dish at two
+     * hours (PRD_FOOD 8.3), and only the day's own state can say which of the two is meant here.
+     * When every candidate is taken the first is returned anyway: PRD_FOOD FR-PLAN-001 answers an
+     * occupied moment with a confirmation and a replacement, never with a refusal, and the
+     * override is one tap away in either case.
+     *
+     * This chooses a value and constrains nothing, exactly as PRD_FOOD 10.3's windows do for the
+     * journal: any of the six stays reachable in one gesture.
+     */
+    fun plannedSlotFor(type: RecipeType, taken: Set<MealSlot> = emptySet()): MealSlot {
+        val candidates = plannableSlotsFor(type)
+        return candidates.firstOrNull { it !in taken } ?: candidates.first()
+    }
+
+    /**
+     * The moments a recipe of this type is proposed into, best first.
+     *
+     * Exhaustive over [RecipeType] rather than a map, so a fourth type could not be added without
+     * somebody saying where its dishes belong. Each list stays inside the family the type names —
+     * a snack recipe never falls through to `Dinner` — because a wrong default that is *near*
+     * the truth is corrected in one tap, and one that is not is simply confusing.
+     */
+    fun plannableSlotsFor(type: RecipeType): List<MealSlot> = when (type) {
+        RecipeType.BREAKFAST -> listOf(MealSlot.BREAKFAST, MealSlot.MORNING_SNACK)
+        RecipeType.MAIN -> listOf(MealSlot.LUNCH, MealSlot.DINNER)
+        RecipeType.SNACK -> listOf(
+            MealSlot.SNACK,
+            MealSlot.MORNING_SNACK,
+            MealSlot.EVENING_SNACK,
+        )
+    }
 }

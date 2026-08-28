@@ -153,5 +153,85 @@ class FoodStackTest {
 
     // endregion
 
+    // region planning (PRD_FOOD 12)
+
+    /**
+     * PRD_FOOD 8.5's identity, as a route key: the day, a colon, the moment.
+     *
+     * The separator is `MealPlanKey`'s own, which is the colon `aggregateIdSchema` accepts — the
+     * route writes the identity through `MealPlanKey.aggregateId` rather than spelling a second
+     * encoding of the same pair, so the slash that could never have been sent cannot come back
+     * through a navigation key either.
+     */
+    @Test
+    fun `a proposal being posed survives a process death, with or without its moment`() {
+        val aheadOfToday = today.plusDays(3)
+        val routes = listOf(
+            FoodRoute.PlanMeal(aheadOfToday),
+            FoodRoute.PlanMeal(aheadOfToday, MealSlot.DINNER),
+        )
+
+        routes.forEach { route ->
+            assertEquals(route, FoodRoute.fromKey(route.key))
+            assertTrue(route.key.none { it == '/' }, route.key)
+        }
+        assertEquals(routes.map(FoodRoute::key).distinct().size, routes.size)
+    }
+
+    /**
+     * `FoodRoute.Swap` was a wordless placeholder, and its key still resolves — to the screen
+     * that finally does the job.
+     *
+     * A stack saved by yesterday's build carries `swap:2026-08-30:dinner`. Read by this one it
+     * names the same day and the same moment, and lands on the planning sheet aimed at them,
+     * rather than being dropped back to `Day`.
+     */
+    @Test
+    fun `a swap saved by an older build reopens as the sheet that replaces it`() {
+        val restored = FoodRoute.fromKey("swap:2026-08-30:dinner")
+
+        assertEquals(
+            FoodRoute.PlanMeal(LocalDate.of(2026, 8, 30), MealSlot.DINNER),
+            restored,
+        )
+    }
+
+    /** A proposal has to be posed on a day, so a key with no readable one is dropped. */
+    @Test
+    fun `a planning key with no readable day degrades to the journal`() {
+        assertEquals(FoodRoute.Day, FoodRoute.fromKey("planMeal:not-a-day"))
+        assertEquals(FoodRoute.Day, FoodRoute.fromKey("swap:not-a-day"))
+    }
+
+    /** Logging a day and planning it are two sheets, and their keys never collide. */
+    @Test
+    fun `planning a day and adding to it keep their keys apart`() {
+        val keys = listOf(
+            FoodRoute.AddFood(date = today),
+            FoodRoute.AddFood(date = today, slot = MealSlot.LUNCH),
+            FoodRoute.PlanMeal(today),
+            FoodRoute.PlanMeal(today, MealSlot.LUNCH),
+        )
+
+        assertEquals(keys.map(FoodRoute::key).distinct().size, keys.size)
+        keys.forEach { route -> assertEquals(route, FoodRoute.fromKey(route.key)) }
+    }
+
+    /** A sheet is a sheet: back from the planning sheet reaches the day it was opened from. */
+    @Test
+    fun `leaving the planning sheet returns to the day underneath`() {
+        val stack = stack()
+        stack.push(FoodRoute.PlanMeal(today.plusDays(1)))
+        stack.push(FoodRoute.RecipePicker)
+
+        stack.back()
+        assertEquals(FoodRoute.PlanMeal(today.plusDays(1)), stack.current)
+
+        stack.back()
+        assertEquals(FoodRoute.Day, stack.current)
+    }
+
+    // endregion
+
     private fun stack(): FoodStack = FoodStack(listOf(FoodRoute.Day))
 }

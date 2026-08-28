@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -116,10 +118,22 @@ internal fun FoodAddRoute(
      */
     onCreateFood: (barcode: String) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * PRD_FOOD 12: this sheet is posing a proposal (`FoodRoute.PlanMeal`) rather than writing a
+     * journal line (`FoodRoute.AddFood`).
+     *
+     * One flag rather than a second composable, because a proposal is a recipe, a serving count
+     * and a moment — three things this screen already asks for. What changes is named on
+     * `FoodAddUiState`: one way in instead of four, no hour, the moment as a field, no
+     * contribution, and `Plan this meal` at the foot.
+     */
+    planning: Boolean = false,
     viewModel: FoodAddViewModel = foodAddViewModel(),
 ) {
     // Idempotent: coming back from the picker recomposes this sheet, and the draft must survive.
-    LaunchedEffect(date, slot, entryId) { viewModel.start(date, slot, entryId) }
+    LaunchedEffect(date, slot, entryId, planning) {
+        viewModel.start(date, slot, entryId, planning)
+    }
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -205,6 +219,8 @@ internal fun FoodAddRoute(
             onOpenTimePicker = viewModel::onShowTimePicker,
             onDismissTimePicker = viewModel::onDismissTimePicker,
             onTimePicked = viewModel::onTimePicked,
+            onConfirmReplacePlan = viewModel::onConfirmReplacePlan,
+            onDismissReplacePlan = viewModel::onDismissReplacePlan,
             onSave = viewModel::save,
             onSaved = {
                 viewModel.onSaveConfirmationFinished()
@@ -274,6 +290,9 @@ internal class FoodAddActions(
     val onOpenTimePicker: () -> Unit = {},
     val onDismissTimePicker: () -> Unit = {},
     val onTimePicked: (LocalTime) -> Unit = {},
+    /** FR-PLAN-001: the moment was already spoken for, and this proposal takes its place. */
+    val onConfirmReplacePlan: () -> Unit = {},
+    val onDismissReplacePlan: () -> Unit = {},
     val onSave: () -> Unit = {},
     /** Fired once the button's confirmation has played out, as on the shipped forms. */
     val onSaved: () -> Unit = {},
@@ -398,6 +417,65 @@ internal fun FoodAddScreen(
         onDismiss = actions.onDismissTimePicker,
         onConfirm = actions.onTimePicked,
     )
+
+    ReplacePlanDialog(state, actions)
+}
+
+/**
+ * PRD_FOOD 8.5 and FR-PLAN-001: "un moment déjà pourvu demande confirmation avant de remplacer".
+ *
+ * A Material `AlertDialog`, the base PRD's documented exception for a blocking, focus-trapped
+ * question — the same shape `RecipeDeletionDialogs` and `DeleteActivityDialog` use, borrowed
+ * rather than reinvented so the app asks its irreversible questions one way.
+ *
+ * It names the **moment** and not the recipe. What is about to be lost is whatever is proposed
+ * there, and somebody who meant Thursday's lunch and is being asked about Thursday's dinner has
+ * learned something worth stopping for.
+ */
+@Composable
+private fun ReplacePlanDialog(state: FoodAddUiState, actions: FoodAddActions) {
+    if (!state.isReplaceConfirmVisible) return
+    val colors = MueTheme.colors
+    AlertDialog(
+        onDismissRequest = actions.onDismissReplacePlan,
+        title = {
+            MueText(
+                text = FoodAddMessages.replacePlanTitle(state.slot),
+                style = MueTheme.typography.sectionTitle,
+            )
+        },
+        text = {
+            MueText(
+                text = FoodAddMessages.REPLACE_PLAN_BODY,
+                style = MueTheme.typography.body,
+                color = colors.textSecondary,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = actions.onConfirmReplacePlan,
+                modifier = Modifier.testTag(FoodTestTags.REPLACE_PLAN_CONFIRM),
+            ) {
+                MueText(
+                    text = FoodAddMessages.REPLACE_PLAN_CONFIRM,
+                    style = MueTheme.typography.button,
+                    color = colors.accent,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = actions.onDismissReplacePlan) {
+                MueText(
+                    text = FoodAddMessages.CANCEL,
+                    style = MueTheme.typography.button,
+                    color = colors.textSecondary,
+                )
+            }
+        },
+        containerColor = colors.canvasElevated,
+        shape = MueTheme.shapes.card,
+        modifier = Modifier.testTag(FoodTestTags.REPLACE_PLAN_DIALOG),
+    )
 }
 
 /** Whichever of PRD_FOOD 7's stages the sheet is on. */
@@ -410,7 +488,8 @@ private fun ColumnScope.Stage(state: FoodAddUiState, actions: FoodAddActions) {
      * saying something else, is what the owner was looking at.
      */
     when (state.stage) {
-        FoodAddStage.PATHS -> WaysIn(actions)
+        // PRD_FOOD 8.5: only a recipe can be proposed, so a planning sheet has one way in.
+        FoodAddStage.PATHS -> if (state.isPlanning) PlanWayIn(actions) else WaysIn(actions)
 
         // FR-FOOD-003. The panel owns its own action, so no `Save entry` is raised under it.
         FoodAddStage.SCAN -> state.scan?.let { ScanSection(it, actions) }
@@ -499,6 +578,44 @@ private fun ColumnScope.WaysIn(actions: FoodAddActions) {
         description = FoodAddMessages.QUICK_PATH_DESCRIPTION,
         testTag = FoodTestTags.ADD_QUICK,
         onClick = actions.onQuickAdd,
+    )
+}
+
+/**
+ * The one way into a proposal (PRD_FOOD 8.5).
+ *
+ * `Add food` offers four; this offers one, and says why rather than leaving three cards quietly
+ * missing. "Une proposition référence toujours une recette ; un aliment simple se journalise
+ * directement et n'est pas planifié" — so the search, the scan and the quick add have nothing to
+ * write here, and a screen that showed them would offer three journeys ending in a refusal.
+ *
+ * The alternative was opening the recipe picker straight away and skipping this stage. It was
+ * rejected on two counts: a navigation the reader did not ask for is a screen appearing under
+ * their thumb, and the sentence below is the only place the rule is ever stated — a reader who
+ * wonders why they cannot plan a banana would have nowhere to find out.
+ */
+@Composable
+private fun ColumnScope.PlanWayIn(actions: FoodAddActions) {
+    MueScreenTitle(
+        title = FoodAddMessages.PLAN_PATHS_TITLE,
+        eyebrow = FoodAddMessages.PLAN_EYEBROW,
+        modifier = Modifier.padding(top = MueTheme.spacing.md, bottom = MueTheme.spacing.sm),
+    )
+
+    WayIn(
+        iconName = FoodIcons.CHEF_HAT,
+        title = FoodAddMessages.RECIPE_PATH,
+        description = FoodAddMessages.PLAN_RECIPE_PATH_DESCRIPTION,
+        testTag = FoodTestTags.ADD_BY_RECIPE,
+        onClick = actions.onUseRecipe,
+    )
+
+    // Never capped: this is the whole of PRD_FOOD 8.5 as a reader meets it.
+    MueText(
+        text = FoodAddMessages.PLAN_ONLY_RECIPES,
+        style = MueTheme.typography.caption,
+        color = MueTheme.colors.textTertiary,
+        modifier = Modifier.testTag(FoodTestTags.PLAN_ONLY_RECIPES),
     )
 }
 
@@ -1183,60 +1300,87 @@ private fun Figures(state: FoodAddUiState) {
 private fun MomentSection(state: FoodAddUiState, actions: FoodAddActions) {
     FoodSectionCard(title = FoodAddMessages.SLOT_SECTION) {
         Column(verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.md)) {
-            MuePickerField(
-                label = FoodAddMessages.TIME_LABEL,
-                value = state.timeLabel,
-                onClick = actions.onOpenTimePicker,
-                modifier = Modifier.testTag(FoodTestTags.TIME_FIELD),
-                onClickLabel = FoodAddMessages.TIME_SHEET_TITLE,
-                trailingText = FoodAddMessages.CHANGE_TIME,
-            )
-
             /*
-             * The derived moment, and the way out of it.
-             *
-             * Deliberately **not** a `MuePickerField`: a field reads as something to fill in, and
-             * this is a consequence rather than an input. It is a quiet row, at the touch target
-             * PRD_FOOD 18 requires, whose whole surface opens the panel — discreet enough not to
-             * compete with the hour above it, and present enough to be found without being hunted
-             * for.
+             * PRD_FOOD 8.5: a proposal carries no hour at all, so the clock is not shown while
+             * planning rather than shown and discarded. It is the whole reason the moment below
+             * changes shape: with no hour there is nothing to derive a moment from.
              */
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = MueMinTouchTarget)
-                    .clip(MueTheme.shapes.field)
-                    .clickable(
-                        role = Role.Button,
-                        onClickLabel = FoodAddMessages.SLOT_SHEET_TITLE,
-                        onClick = actions.onOpenSlotPicker,
-                    )
-                    .padding(horizontal = MueTheme.spacing.sm, vertical = MueTheme.spacing.sm)
-                    .testTag(FoodTestTags.SLOT_FIELD)
-                    // The words alone are `Lunch · 12:00 – 14:30`, which does not say it is a
-                    // control, nor what it is the moment *of*.
-                    .announcedAs(state.slotFieldDescription),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MueIcon(
-                    iconName = FoodIcons.forSlot(state.slot),
-                    tint = MueTheme.colors.textTertiary,
-                    size = SlotFieldIconSize,
+            if (state.showsTime) {
+                MuePickerField(
+                    label = FoodAddMessages.TIME_LABEL,
+                    value = state.timeLabel,
+                    onClick = actions.onOpenTimePicker,
+                    modifier = Modifier.testTag(FoodTestTags.TIME_FIELD),
+                    onClickLabel = FoodAddMessages.TIME_SHEET_TITLE,
+                    trailingText = FoodAddMessages.CHANGE_TIME,
                 )
-                MueText(
-                    text = state.slotFieldValue,
-                    style = MueTheme.typography.micro,
-                    color = MueTheme.colors.textTertiary,
+            }
+
+            if (state.asksForSlot) {
+                /*
+                 * FR-PLAN-001: "L'ajout manuel présente ces trois choix" — the date, the moment
+                 * and the servings. So here the moment is a **field**, the same control the hour
+                 * is on the journal side, opening the same panel.
+                 *
+                 * It is not the quiet row below, and the difference is not decoration: that row
+                 * reports a consequence of the hour, and there is no hour here. A derived value
+                 * with nothing visible deriving it would be a number appearing from nowhere.
+                 */
+                MuePickerField(
+                    label = FoodAddMessages.SLOT_LABEL,
+                    value = state.slotFieldValue,
+                    onClick = actions.onOpenSlotPicker,
+                    modifier = Modifier.testTag(FoodTestTags.SLOT_FIELD),
+                    onClickLabel = FoodAddMessages.SLOT_SHEET_TITLE,
+                    trailingText = FoodAddMessages.CHANGE_SLOT,
+                )
+            } else {
+                /*
+                 * The derived moment, and the way out of it.
+                 *
+                 * Deliberately **not** a `MuePickerField`: a field reads as something to fill in,
+                 * and this is a consequence rather than an input. It is a quiet row, at the touch
+                 * target PRD_FOOD 18 requires, whose whole surface opens the panel — discreet
+                 * enough not to compete with the hour above it, and present enough to be found
+                 * without being hunted for.
+                 */
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = MueTheme.spacing.sm),
-                )
-                MueText(
-                    text = FoodAddMessages.CHANGE_SLOT,
-                    style = MueTheme.typography.micro,
-                    color = MueTheme.colors.accent,
-                    maxLines = 1,
-                )
+                        .fillMaxWidth()
+                        .heightIn(min = MueMinTouchTarget)
+                        .clip(MueTheme.shapes.field)
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = FoodAddMessages.SLOT_SHEET_TITLE,
+                            onClick = actions.onOpenSlotPicker,
+                        )
+                        .padding(horizontal = MueTheme.spacing.sm, vertical = MueTheme.spacing.sm)
+                        .testTag(FoodTestTags.SLOT_FIELD)
+                        // The words alone are `Lunch · 12:00 – 14:30`, which does not say it is a
+                        // control, nor what it is the moment *of*.
+                        .announcedAs(state.slotFieldDescription),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MueIcon(
+                        iconName = FoodIcons.forSlot(state.slot),
+                        tint = MueTheme.colors.textTertiary,
+                        size = SlotFieldIconSize,
+                    )
+                    MueText(
+                        text = state.slotFieldValue,
+                        style = MueTheme.typography.micro,
+                        color = MueTheme.colors.textTertiary,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = MueTheme.spacing.sm),
+                    )
+                    MueText(
+                        text = FoodAddMessages.CHANGE_SLOT,
+                        style = MueTheme.typography.micro,
+                        color = MueTheme.colors.accent,
+                        maxLines = 1,
+                    )
+                }
             }
 
             /*
@@ -1510,6 +1654,94 @@ private fun FoodAddRecipePreview() {
     MuePreviewHost(padding = 0) {
         FoodAddScreen(
             state = previewRecipeServingsState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * PRD_FOOD 8.5, as the first thing a planning sheet shows.
+ *
+ * What to look for: **one** card and not four, the sentence under it naming the rule rather than
+ * leaving three cards quietly missing, and a header reading `Plan a meal` — nothing on this
+ * screen promises a journal line on a day that has not happened.
+ */
+@Preview(name = "Plan a meal — the one way in", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodPlanPathsPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewPlanPathsState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The proposal itself: a recipe, a serving count and a moment (PRD_FOOD 12 and FR-PLAN-001).
+ *
+ * What to look for, in order: **no clock** — a proposal carries no hour, so the field is gone
+ * rather than shown and ignored; the moment as a *field* under it, because with no hour there is
+ * nothing to derive one from; `Per serving` and **no** `In this entry`, because a proposal enters
+ * no total before it is confirmed; and `Plan this meal` at the foot.
+ *
+ * The moment reads `Lunch` although the clock behind these fixtures is 19:40, which is dinner.
+ * That is the answer to "which moment, with no now": the dish is a `MAIN`, and lunch is the first
+ * moment of that family the day has free.
+ */
+@Preview(name = "Plan a meal", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodPlanPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewPlanState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The same sheet on the narrowest phone at the largest font size.
+ *
+ * What to look for: `Plan this meal` whole rather than broken across the button, the recipe name
+ * wrapping at a space, the moment field keeping its label and its value on separate lines rather
+ * than crushing them, and the stepper’s two buttons still 48 dp apart.
+ */
+@Preview(
+    name = "Plan a meal — 360 dp � largest font",
+    showBackground = true,
+    backgroundColor = 0xFF101012,
+    widthDp = 360,
+    heightDp = 900,
+    fontScale = 2.0f,
+)
+@Composable
+private fun FoodPlanNarrowPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewPlanState(),
+            actions = FoodAddActions(),
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The moment panel while planning, with one moment already spoken for (PRD_FOOD 8.5).
+ *
+ * What to look for: `Lunch` reading `12:00 – 14:30 � Already suggested` under its name, and the
+ * field behind the panel already on `Dinner` — the day chose the next free moment of the dish’s
+ * own family without being asked.
+ */
+@Preview(name = "Plan a meal — a moment already taken", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
+@Composable
+private fun FoodPlanReplacingPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodAddScreen(
+            state = previewPlanReplacingState(),
             actions = FoodAddActions(),
             modifier = Modifier.fillMaxSize(),
         )

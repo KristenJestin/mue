@@ -20,17 +20,20 @@ import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.FoodSource
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.RecipeDetail
 import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.FoodLogRepository
+import fr.kristenjestin.mue.domain.repository.MealPlanRepository
 import fr.kristenjestin.mue.domain.repository.ProductLookup
 import fr.kristenjestin.mue.domain.repository.ProductLookupResult
 import fr.kristenjestin.mue.domain.repository.RecipeRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +86,16 @@ internal class FoodAddViewModel(
      * whole hand-off — chosen, resolved, rescaled, saved — is proved on the JVM against a fake.
      */
     private val recipes: RecipeRepository,
+    /**
+     * PRD_FOOD 12's store, which this sheet had no reference to at all.
+     *
+     * `MealPlanRepository.save` existed, was correct, was synchronised and had **no caller
+     * anywhere in `ui/`**: an MCP client could pose a proposal and the person whose phone it is
+     * could not. This is the missing edge. It is read as well as written — the day's proposals
+     * decide which moment a fresh one opens on and which moments the override panel marks as
+     * spoken for (PRD_FOOD 8.5).
+     */
+    private val plans: MealPlanRepository,
     /**
      * FR-FOOD-003's one network call, behind the domain interface PRD_FOOD 20.2 requires.
      *
@@ -152,17 +165,45 @@ internal class FoodAddViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 
-    val uiState: StateFlow<FoodAddUiState> = combine(
+    /**
+     * PRD_FOOD 12: the proposals already on the day the sheet is aimed at.
+     *
+     * Re-subscribed whenever the day moves, exactly as the day screen's own reading is, and empty
+     * while the sheet is writing a journal line — a moment takes as many entries as it is given,
+     * so there is nothing for a logging sheet to learn here and no reason to open the table.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val dayPlans: StateFlow<List<MealPlanEntry>> = _draft
+        .map { if (it.planning) it.date(today()) else null }
+        .distinctUntilChanged()
+        .flatMapLatest { date -> if (date == null) flowOf(emptyList()) else plans.observeDay(date) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
+
+    /**
+     * The five readings the sheet is built from, before the day's proposals join them.
+     *
+     * Two `combine`s rather than one only because the typed overload stops at five sources; the
+     * shape is unchanged and the split is not a boundary of any kind.
+     */
+    private val readings: Flow<AddReading> = combine(
         _draft,
         food,
         original,
         transient,
         recipe,
-    ) { draft, chosen, entry, flags, chosenRecipe -> build(draft, chosen, entry, flags, chosenRecipe) }
+    ) { draft, chosen, entry, flags, chosenRecipe ->
+        AddReading(draft, chosen, entry, flags, chosenRecipe)
+    }
+
+    val uiState: StateFlow<FoodAddUiState> = readings
+        .combine(dayPlans) { reading, plansOnDay -> build(reading, plansOnDay) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = build(_draft.value, null, null, transient.value, null),
+            initialValue = build(
+                AddReading(_draft.value, null, null, transient.value, null),
+                emptyList(),
+            ),
         )
 
     /**
@@ -173,8 +214,19 @@ internal class FoodAddViewModel(
      * A restored process finds the same target and keeps its draft; only the stored line, which
      * is not in the draft, is read again.
      */
-    fun start(date: LocalDate?, slot: MealSlot?, entryId: FoodLogEntryId?) {
-        val target = targetOf(date, slot, entryId)
+    fun start(
+        date: LocalDate?,
+        slot: MealSlot?,
+        entryId: FoodLogEntryId?,
+        /**
+         * PRD_FOOD 12: the sheet was opened to pose a proposal rather than to write a line.
+         *
+         * Part of the target, so walking from `Plan a meal` to `Add food` on the same day starts
+         * afresh instead of resuming a draft meant for the other of the two.
+         */
+        planning: Boolean = false,
+    ) {
+        val target = targetOf(date, slot, entryId, planning)
         val resumed = savedState.get<String>(KEY_TARGET) == target
         savedState[KEY_TARGET] = target
 
@@ -182,7 +234,7 @@ internal class FoodAddViewModel(
             transient.value = Transient(isLoading = entryId != null)
             original.value = null
             if (entryId == null) {
-                replaceDraft(FoodAddDraft.forTarget(date, slot, today(), now()))
+                replaceDraft(FoodAddDraft.forTarget(date, slot, today(), now(), planning))
             }
         }
         if (entryId != null && original.value?.id != entryId) load(entryId, seed = !resumed)
@@ -601,6 +653,10 @@ internal class FoodAddViewModel(
      * character typed exactly where it was (PRD_FOOD 15 and 17).
      */
     fun save() {
+        if (_draft.value.planning) {
+            savePlan(replacing = false)
+            return
+        }
         val draft = _draft.value
         val resolved = draft.resolve(
             food = food.value,
@@ -623,6 +679,95 @@ internal class FoodAddViewModel(
                     }
             }
         }
+    }
+
+    /**
+     * Poses the proposal (PRD_FOOD 12 and FR-PLAN-001), asking first when the moment is taken.
+     *
+     * The write is `MealPlanRepository.save`, a single upsert onto the row `(date, moment)`
+     * already names — so "remplace la proposition précédente" is the primary key doing its work
+     * rather than a delete followed by an insert that could half-fail. What the interface owes on
+     * top of that is the **question**, and this is the only place it is asked: [replacing] is
+     * false on the first attempt and true once the dialog has been answered.
+     *
+     * Nothing is computed here. The moment is `FoodAddDraft.plannedSlot`'s — the same function
+     * the screen displays — and the bounds are `resolvePlan`'s, which are `FoodValidation`'s.
+     */
+    private fun savePlan(replacing: Boolean) {
+        val draft = _draft.value
+        val chosen = recipe.value
+        val taken = MealSlotRules.plannedSlots(dayPlans.value)
+        val slot = draft.plannedSlot(chosen, taken)
+
+        when (val resolution = draft.resolvePlan(chosen, slot, today())) {
+            /*
+             * A refusal with no field to sit beside gets one sentence by the action instead of
+             * nothing at all. `resolvePlan` produces that shape in exactly one case — the recipe
+             * has gone since it was chosen, which `RecipeRepository.delete` can do under an open
+             * sheet — and a primary button that does nothing and says nothing is the worst of the
+             * three possible answers (PRD_FOOD 15 and 17).
+             */
+            is MealPlanResolution.Refused -> transient.update {
+                it.copy(
+                    errors = resolution.errors,
+                    saveError = FoodAddMessages.PLAN_RECIPE_GONE
+                        .takeIf { _ -> resolution.errors.summary == null },
+                    isReplaceConfirmVisible = false,
+                )
+            }
+
+            is MealPlanResolution.Ready -> {
+                /*
+                 * PRD_FOOD 8.5: "Proposer sur un moment déjà pourvu demande une confirmation dans
+                 * l'interface, puis remplace." Asked of the moment and not of the recipe, so
+                 * re-posing the very same dish still says what it is about to overwrite — and
+                 * asked even from `Swap`, where the answer is obvious, because a uniform rule is
+                 * one branch and a smart one is two.
+                 */
+                if (!replacing && slot in taken) {
+                    transient.update {
+                        it.copy(
+                            errors = FoodAddErrors.EMPTY,
+                            saveError = null,
+                            isReplaceConfirmVisible = true,
+                        )
+                    }
+                    return
+                }
+                viewModelScope.launch {
+                    transient.update {
+                        it.copy(
+                            errors = FoodAddErrors.EMPTY,
+                            saveError = null,
+                            isReplaceConfirmVisible = false,
+                        )
+                    }
+                    runCatching { plans.save(resolution.entry) }
+                        .onSuccess { transient.update { flags -> flags.copy(justSaved = true) } }
+                        .onFailure {
+                            transient.update { flags ->
+                                flags.copy(saveError = FoodAddMessages.PLAN_FAILED)
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    /** FR-PLAN-001: the moment was already spoken for, and the answer is to take its place. */
+    fun onConfirmReplacePlan() {
+        savePlan(replacing = true)
+    }
+
+    /**
+     * The confirmation refused: nothing is written and **nothing is lost**.
+     *
+     * The sheet stays exactly as it was — the recipe chosen, the servings set, the moment on the
+     * field — so the obvious next move, changing the moment, costs one tap rather than the whole
+     * form again (PRD_FOOD 15: a refusal never empties a form).
+     */
+    fun onDismissReplacePlan() {
+        transient.update { it.copy(isReplaceConfirmVisible = false) }
     }
 
     /** FR-FOOD-008: the same sheet removes the line, which frees the proposal it confirmed. */
@@ -692,29 +837,31 @@ internal class FoodAddViewModel(
     }
 
     private fun build(
-        draft: FoodAddDraft,
-        chosen: Food?,
-        entry: FoodLogEntry?,
-        flags: Transient,
-        chosenRecipe: FoodAddRecipe?,
-    ): FoodAddUiState = FoodAddUiState.of(
-        draft = draft,
-        food = chosen,
-        original = entry,
-        recipe = chosenRecipe,
-        today = today(),
-        errors = flags.errors,
-        saveError = flags.saveError,
-        justSaved = flags.justSaved,
-        justDeleted = flags.justDeleted,
-        isTimePickerVisible = flags.isTimePickerVisible,
-        isSlotPickerVisible = flags.isSlotPickerVisible,
-        isLoading = flags.isLoading,
-        scan = flags.scan,
-        scanAttempted = flags.scanAttempted,
-        scanSaveError = flags.scanSaveError,
-        locale = locale(),
-    )
+        reading: AddReading,
+        plansOnDay: List<MealPlanEntry>,
+    ): FoodAddUiState {
+        val flags = reading.flags
+        return FoodAddUiState.of(
+            draft = reading.draft,
+            food = reading.food,
+            original = reading.original,
+            recipe = reading.recipe,
+            today = today(),
+            errors = flags.errors,
+            saveError = flags.saveError,
+            justSaved = flags.justSaved,
+            justDeleted = flags.justDeleted,
+            isTimePickerVisible = flags.isTimePickerVisible,
+            isSlotPickerVisible = flags.isSlotPickerVisible,
+            isReplaceConfirmVisible = flags.isReplaceConfirmVisible,
+            isLoading = flags.isLoading,
+            scan = flags.scan,
+            scanAttempted = flags.scanAttempted,
+            scanSaveError = flags.scanSaveError,
+            plans = plansOnDay,
+            locale = locale(),
+        )
+    }
 
     /**
      * Reads the line being corrected back from the journal.
@@ -765,6 +912,18 @@ internal class FoodAddViewModel(
 
 
     /**
+     * The five sources the sheet's own state is built from, kept together so the day's proposals
+     * can join them in a second `combine` without a six-argument overload existing.
+     */
+    private data class AddReading(
+        val draft: FoodAddDraft,
+        val food: Food?,
+        val original: FoodLogEntry?,
+        val flags: Transient,
+        val recipe: FoodAddRecipe?,
+    )
+
+    /**
      * Everything a save attempt or a panel decides, and nothing anyone typed.
      */
     private data class Transient(
@@ -774,6 +933,8 @@ internal class FoodAddViewModel(
         val justDeleted: Boolean = false,
         val isTimePickerVisible: Boolean = false,
         val isSlotPickerVisible: Boolean = false,
+        /** FR-PLAN-001's question, which is asked once and answered before anything is written. */
+        val isReplaceConfirmVisible: Boolean = false,
         val isLoading: Boolean = false,
         /** FR-FOOD-003: where the scan path is. Never saved; see [FoodScanState]. */
         val scan: FoodScanState = FoodScanState.Idle,
@@ -797,7 +958,8 @@ internal class FoodAddViewModel(
             date: LocalDate?,
             slot: MealSlot?,
             entryId: FoodLogEntryId?,
-        ): String = entryId?.value ?: "${date ?: ""}/${slot?.id ?: ""}"
+            planning: Boolean = false,
+        ): String = entryId?.value ?: "${date ?: ""}/${slot?.id ?: ""}/$planning"
 
         private const val STOP_TIMEOUT_MILLIS = 5_000L
 
@@ -826,6 +988,7 @@ internal class FoodAddViewModel(
                     logs = app.container.food.foodLogRepository,
                     foods = app.container.food.foodCatalogueRepository,
                     recipes = app.container.food.recipeRepository,
+                    plans = app.container.food.mealPlanRepository,
                     lookup = app.container.food.productLookup,
                     savedState = createSavedStateHandle(),
                 )

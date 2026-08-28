@@ -77,8 +77,18 @@ internal object FoodTestTags {
 
     fun dismissPlan(slot: MealSlot): String = "food:dismissPlan:${slot.id}"
 
-    const val SWAP_SHEET: String = "food:swapSheet"
-    const val SWAP_SEARCH: String = "food:swapSearch"
+    /**
+     * FR-PLAN-001's confirmation, and the control that answers it.
+     *
+     * They replace `SWAP_SHEET` and `SWAP_SEARCH`, which named a screen that never existed:
+     * `FoodRoute.Swap` drew a wordless empty `Box`. Replacing a proposal is now the same sheet as
+     * posing one, so what needed a handle was the question asked before a row is overwritten.
+     */
+    const val REPLACE_PLAN_DIALOG: String = "food:replacePlanDialog"
+    const val REPLACE_PLAN_CONFIRM: String = "food:replacePlanConfirm"
+
+    /** PRD_FOOD 8.5, stated once on the planning sheet: only a recipe can be proposed. */
+    const val PLAN_ONLY_RECIPES: String = "food:planOnlyRecipes"
 
     // endregion
 

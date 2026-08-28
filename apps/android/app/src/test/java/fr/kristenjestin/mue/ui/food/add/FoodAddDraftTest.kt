@@ -7,6 +7,7 @@ import fr.kristenjestin.mue.domain.logic.Validated
 import fr.kristenjestin.mue.domain.model.Estimation
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.LoggedAmount
@@ -14,6 +15,7 @@ import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Quantity
 import fr.kristenjestin.mue.domain.model.ReferenceUnit
 import fr.kristenjestin.mue.domain.model.Servings
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalTime
@@ -398,6 +400,140 @@ class FoodAddDraftTest {
 
     // endregion
 
+    // region posing a proposal (PRD_FOOD 12 and FR-PLAN-001)
+
+    /**
+     * The three facts FR-PLAN-001 requires, and nothing else on the row.
+     *
+     * A proposal carries no hour, no quantity in grams and no nutritional value: PRD_FOOD 12 keeps
+     * it out of every total until it is confirmed, so there is nothing to freeze and nothing to
+     * compute. What `resolvePlan` produces is a date, a moment, a recipe and a serving count.
+     */
+    @Test
+    fun `a proposal is a recipe, a moment and a serving count, on a day ahead`() {
+        val tomorrow = TODAY.plusDays(1)
+        val entry = plan(
+            planningDraft(tomorrow).copy(servings = "1.5"),
+            slot = MealSlot.DINNER,
+        )
+
+        assertEquals(tomorrow, entry.plannedOn)
+        assertEquals(MealSlot.DINNER, entry.slot)
+        assertEquals(RecipePreviewData.SALMON_ID, entry.recipeId)
+        assertEquals(servings(1.5), entry.plannedServings)
+        // PRD_FOOD 12: nothing has been confirmed, so no journal line is linked.
+        assertNull(entry.consumedLogEntryId)
+        assertFalse(entry.isConsumed)
+    }
+
+    /**
+     * PRD_FOOD 8.5: the identity is the pair, and the separator is the colon `aggregateIdSchema`
+     * accepts. A proposal that could not be addressed at the envelope would sync nowhere.
+     */
+    @Test
+    fun `a proposal is addressed by its day and its moment, with no slash in the identifier`() {
+        val tomorrow = TODAY.plusDays(1)
+        val entry = plan(planningDraft(tomorrow), slot = MealSlot.LUNCH)
+
+        assertEquals(MealPlanKey(tomorrow, MealSlot.LUNCH), entry.key)
+        assertEquals("$tomorrow:lunch", entry.aggregateId)
+        assertFalse(entry.aggregateId.contains('/'))
+    }
+
+    /** PRD_FOOD 15: "date proposée : aujourd'hui ou dans le futur, dans les 60 jours". */
+    @Test
+    fun `a proposal is refused before today and past the sixtieth day`() {
+        assertEquals(
+            FoodValidation.PLANNED_DATE_ERROR,
+            refusedPlan(planningDraft(TODAY.minusDays(1))).date,
+        )
+        assertEquals(
+            FoodValidation.PLANNED_DATE_ERROR,
+            refusedPlan(planningDraft(TODAY.plusDays(61))).date,
+        )
+        // Today and the sixtieth day are both inside it.
+        assertEquals(TODAY, plan(planningDraft(TODAY)).plannedOn)
+        assertEquals(TODAY.plusDays(60), plan(planningDraft(TODAY.plusDays(60))).plannedOn)
+    }
+
+    /**
+     * PRD_FOOD 15: `plannedServings` has no range of its own, so it borrows the consumed one.
+     *
+     * Inventing a second range here would let a proposal be posed that `I ate this` could never
+     * turn into a line — the counter on both sides is `validateConsumedServings`, in quarters,
+     * from 0.25 to 10.
+     */
+    @Test
+    fun `the planned servings are the consumed counter, quarter steps and all`() {
+        assertEquals(
+            FoodValidation.CONSUMED_SERVINGS_ERROR,
+            refusedPlan(planningDraft(TODAY).copy(servings = "0")).servings,
+        )
+        assertEquals(
+            FoodValidation.CONSUMED_SERVINGS_ERROR,
+            refusedPlan(planningDraft(TODAY).copy(servings = "10.5")).servings,
+        )
+        assertEquals(
+            servings(0.25),
+            plan(planningDraft(TODAY).copy(servings = "0.25")).plannedServings,
+        )
+    }
+
+    /** PRD_FOOD 8.5: nothing is written without a recipe, and no field is blamed for it. */
+    @Test
+    fun `a proposal with no recipe behind it writes nothing`() {
+        val resolution = planningDraft(TODAY).resolvePlan(null, MealSlot.LUNCH, TODAY)
+
+        assertTrue(resolution is MealPlanResolution.Refused)
+        assertNull((resolution as MealPlanResolution.Refused).errors.servings)
+    }
+
+    // endregion
+
+    // region which moment, with no clock to ask (PRD_FOOD 12)
+
+    /**
+     * A moment nobody has chosen comes from the dish and from the day, never from the hour.
+     *
+     * `forTarget` leaves the draft holding whatever the clock said — 19:40, so dinner — and that
+     * value is exactly what must **not** decide a proposal for next Thursday.
+     */
+    @Test
+    fun `an unpinned proposal takes its moment from the recipe, not from the clock`() {
+        val draft = planningDraft(TODAY.plusDays(3))
+
+        assertEquals(MealSlot.DINNER, draft.slot, "the clock said dinner")
+        assertEquals(MealSlot.LUNCH, draft.plannedSlot(salmon()))
+    }
+
+    /** PRD_FOOD 8.5: a moment already spoken for is not the one offered first. */
+    @Test
+    fun `a moment already proposed steps aside for the next of the same family`() {
+        val draft = planningDraft(TODAY.plusDays(3))
+
+        assertEquals(
+            MealSlot.DINNER,
+            draft.plannedSlot(salmon(), taken = setOf(MealSlot.LUNCH)),
+        )
+    }
+
+    /** `Swap` names the moment being replaced, and nothing may move it. */
+    @Test
+    fun `a moment carried in by a swap survives whatever the recipe would have chosen`() {
+        val pinned = FoodAddDraft.forTarget(
+            date = TODAY.plusDays(3),
+            slot = MealSlot.EVENING_SNACK,
+            today = TODAY,
+            now = NOW,
+            planning = true,
+        )
+
+        assertTrue(pinned.slotPinned)
+        assertEquals(MealSlot.EVENING_SNACK, pinned.plannedSlot(salmon()))
+    }
+
+    // endregion
+
     // region harness
 
     private fun draft(food: Food): FoodAddDraft =
@@ -427,6 +563,39 @@ class FoodAddDraftTest {
         val resolution = draft.resolve(food, original, TODAY)
         assertTrue(resolution is FoodAddResolution.Refused, "expected a refusal, got $resolution")
         return (resolution as FoodAddResolution.Refused).errors
+    }
+
+    /** A planning draft aimed at [date], with the salmon recipe already chosen. */
+    private fun planningDraft(date: LocalDate): FoodAddDraft = FoodAddDraft.forTarget(
+        date = date,
+        slot = null,
+        today = TODAY,
+        now = NOW,
+        planning = true,
+    ).copy(recipeId = RecipePreviewData.SALMON_ID.value)
+
+    /** The recipe behind those drafts, with the catalogue its ingredients name. */
+    private fun salmon(): FoodAddRecipe = FoodAddRecipe(
+        detail = RecipePreviewData.salmon(),
+        foods = RecipePreviewData.catalogueById(),
+    )
+
+    private fun plan(
+        draft: FoodAddDraft,
+        slot: MealSlot = draft.plannedSlot(salmon()),
+    ): MealPlanEntry {
+        val resolution = draft.resolvePlan(salmon(), slot, TODAY)
+        assertTrue(resolution is MealPlanResolution.Ready, "expected a proposal, got $resolution")
+        return (resolution as MealPlanResolution.Ready).entry
+    }
+
+    private fun refusedPlan(
+        draft: FoodAddDraft,
+        slot: MealSlot = draft.plannedSlot(salmon()),
+    ): FoodAddErrors {
+        val resolution = draft.resolvePlan(salmon(), slot, TODAY)
+        assertTrue(resolution is MealPlanResolution.Refused, "expected a refusal, got $resolution")
+        return (resolution as MealPlanResolution.Refused).errors
     }
 
     private fun quantity(amount: Double): Quantity =

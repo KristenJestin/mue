@@ -364,17 +364,63 @@ class FoodDayUiStateTest {
     }
 
     /**
-     * PRD_FOOD 22 will not let a line be written to a day that has not happened.
+     * PRD_FOOD 22 will not let a line be written to a day that has not happened — and PRD_FOOD 12
+     * makes that day the whole point of planning.
      *
-     * The action keeps its place and stops being a control, which is the same answer the six add
-     * rows gave and for the same reason — a control that vanishes reflows the screen as the week
-     * is walked. It is asked of the **day** now: one action, one refusal, said once.
+     * The action used to be **inert** there, on the grounds that a control which vanishes reflows
+     * the screen. The place was right and the refusal was not: `MealPlanEntry.isPlannableOn`
+     * allows sixty days ahead, the note above the moments already promised that they "can carry a
+     * suggestion", and the only control on the screen was greyed out — so `MealPlanRepository
+     * .save` had no caller anywhere in the interface. The action is live on every day either rule
+     * admits; what changes is which of the two it does.
      */
     @Test
-    fun `a day ahead of today keeps the action and refuses it`() {
-        assertFalse(FoodDayUiState.of(TODAY.plusDays(2), TODAY).canAdd)
-        assertTrue(FoodDayUiState.of(TODAY, TODAY).canAdd)
-        assertTrue(FoodDayUiState.of(TODAY.minusDays(3), TODAY).canAdd)
+    fun `a day ahead of today keeps the action, and it plans`() {
+        val ahead = FoodDayUiState.of(TODAY.plusDays(2), TODAY)
+
+        assertTrue(ahead.canAdd)
+        assertTrue(ahead.isPlanning)
+        assertFalse(ahead.canLog)
+
+        val today = FoodDayUiState.of(TODAY, TODAY)
+        assertTrue(today.canAdd)
+        // Today takes a line, so the action logs; a proposal for today is posed by `Swap`.
+        assertFalse(today.isPlanning)
+
+        val past = FoodDayUiState.of(TODAY.minusDays(3), TODAY)
+        assertTrue(past.canAdd)
+        assertFalse(past.isPlanning)
+    }
+
+    /**
+     * PRD_FOOD 12: the words change with the meaning, because one control cannot promise two
+     * things.
+     *
+     * `Add something` on a Thursday that has not happened is a promise the day cannot keep — the
+     * same class of mistake as `Add what you ate`, which is what `FoodCopyTest` exists for.
+     */
+    @Test
+    fun `the action on a day ahead says it plans, and counts what is already proposed`() {
+        val ahead = TODAY.plusDays(2)
+
+        assertEquals(FoodDayMessages.PLAN_FIRST, FoodDayUiState.of(ahead, TODAY).addLabel)
+
+        val withPlan = FoodDayUiState.of(
+            date = ahead,
+            today = TODAY,
+            plans = FoodDayPreviewData.plans(ahead),
+            recipeNames = FoodDayPreviewData.recipeNames,
+        )
+        assertEquals(FoodDayMessages.PLAN_MORE, withPlan.addLabel)
+    }
+
+    /** Beyond the sixtieth day neither rule holds, so the action has nothing honest left to do. */
+    @Test
+    fun `a day past the planning window keeps the action inert`() {
+        val beyond = FoodDayUiState.of(TODAY.plusDays(MealPlanEntry.MAX_DAYS_AHEAD + 1), TODAY)
+
+        assertFalse(beyond.canAdd)
+        assertFalse(beyond.isPlanning)
     }
 
     @Test
@@ -562,8 +608,8 @@ class FoodDayUiStateTest {
      * A day still to come draws its proposals and nothing else.
      *
      * PRD_FOOD 22 refuses a journal line there, so there is nothing to list but what has been
-     * suggested — and the day's own action is what says the refusal, once, rather than four rows
-     * repeating it.
+     * suggested — and the day's own action is what poses the next one, once, rather than six
+     * moments each offering to.
      */
     @Test
     fun `a day ahead draws its proposals and no empty moment`() {
@@ -577,7 +623,9 @@ class FoodDayUiStateTest {
 
         assertTrue(state.visibleSlots.isNotEmpty())
         assertTrue(state.visibleSlots.all { it.plan != null })
-        assertFalse(state.canAdd)
+        // The action is live, and it poses another proposal rather than writing a line.
+        assertTrue(state.canAdd)
+        assertTrue(state.isPlanning)
     }
 
     // endregion

@@ -11,6 +11,7 @@ import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.LoggedAmount
 import fr.kristenjestin.mue.domain.model.Macro
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Quantity
@@ -204,6 +205,81 @@ internal object FoodAddPreviewData {
 /** PRD_FOOD 7's ways in, which is what the sheet opens on when nothing has been chosen. */
 internal fun previewPathsState(): FoodAddUiState = FoodAddUiState.of(
     draft = FoodAddPreviewData.draft(),
+    today = FoodAddPreviewData.TODAY,
+)
+
+/** The day three days ahead that the planning previews below are aimed at. */
+private val PLANNED_DAY: LocalDate = FoodAddPreviewData.TODAY.plusDays(3)
+
+/** A planning draft for that day, with no moment carried in — the day screen's own action. */
+private fun planDraft(): FoodAddDraft = FoodAddDraft.forTarget(
+    date = PLANNED_DAY,
+    slot = null,
+    today = FoodAddPreviewData.TODAY,
+    now = FoodAddPreviewData.NOW,
+    planning = true,
+)
+
+/**
+ * PRD_FOOD 8.5's rule as its one screen: only a recipe can be proposed.
+ *
+ * What to look for: **one** card and not four, the sentence under it saying why a plain food is
+ * not on the list, and a header that says `Plan a meal` rather than `Add food` — nothing here
+ * promises a journal line on a day that has not happened.
+ */
+internal fun previewPlanPathsState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft(),
+    today = FoodAddPreviewData.TODAY,
+)
+
+/**
+ * The proposal itself: a recipe, a serving count and a moment (PRD_FOOD 12, FR-PLAN-001).
+ *
+ * What to look for, in order: **no clock** — a proposal carries no hour, so the field is gone
+ * rather than shown and ignored; the moment as a *field* under it, because with no hour there is
+ * nothing to derive it from and FR-PLAN-001 wants it chosen; `Per serving` and **no** `In this
+ * entry`, because a proposal enters no total until it is confirmed; and `Plan this meal` at the
+ * foot.
+ *
+ * The moment reads `Lunch` although the clock in these previews is 19:40, which is dinner. That
+ * is the whole of the answer to "how is the moment chosen with no now": the salmon tray is a
+ * `MAIN`, and lunch is the first moment of that family this day has free.
+ */
+internal fun previewPlanState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft().copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+        servings = "1.5",
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    today = FoodAddPreviewData.TODAY,
+)
+
+/**
+ * The same sheet with the day's dinner already spoken for (PRD_FOOD 8.5).
+ *
+ * Lunch already carries the curry, so the field has moved to `Dinner` on its own — a moment holds
+ * at most one proposal, and the next of the same family is the honest default.
+ *
+ * The panel is open, which is what to look at: `Lunch` reads `12:00 – 14:30 · Already suggested`.
+ * That marking is where the shape of a planned day is read, and it is why there is no seventh
+ * screen laying six moments out side by side.
+ */
+internal fun previewPlanReplacingState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft().copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    plans = listOf(
+        MealPlanEntry(
+            plannedOn = PLANNED_DAY,
+            slot = MealSlot.LUNCH,
+            recipeId = RecipePreviewData.CURRY_ID,
+            plannedServings = Servings.ONE,
+        ),
+    ),
+    isSlotPickerVisible = true,
     today = FoodAddPreviewData.TODAY,
 )
 

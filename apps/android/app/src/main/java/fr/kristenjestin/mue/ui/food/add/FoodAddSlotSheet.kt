@@ -68,14 +68,20 @@ internal fun FoodAddSlotSheet(
                     selected = option.selected,
                     onClick = { onSelect(option.slot) },
                     /*
-                     * PRD_FOOD 10.3's window, on the thing being chosen.
+                     * PRD_FOOD 10.3's window, on the thing being chosen — and, while planning,
+                     * whether that moment is already spoken for (PRD_FOOD 8.5).
                      *
                      * A moment is not a word anyone can define by looking at it, and its hours
                      * are the definition. `MueChoiceCard` never caps a description, so at the
-                     * largest font size `05:00 – 10:00` wraps and the row grows rather than the
-                     * hours being cut — half a window is a wrong window.
+                     * largest font size `05:00 – 10:00 · Already suggested` wraps and the row
+                     * grows rather than the hours being cut — half a window is a wrong window.
+                     *
+                     * This is also where the shape of a planned day is read. Six moments is more
+                     * than a planning screen can usefully draw at once, so rather than a grid of
+                     * six proposals somewhere else, the panel that already lists the six says
+                     * which of them are taken — one column, one tap, no second screen.
                      */
-                    description = option.hoursLabel,
+                    description = option.description,
                     icon = {
                         MueIcon(
                             iconName = option.iconName,

@@ -48,6 +48,21 @@ object FoodDayMessages {
     const val ADD_MORE: String = "Add something else"
 
     /**
+     * The same action's words on a day the journal will not take (PRD_FOOD 12 and 22).
+     *
+     * `Add something` would be a promise the day cannot keep — nothing can be *added* to a
+     * Thursday that has not happened — while `Plan something` is exactly what the moment below it
+     * can hold. One control with two honest readings, rather than a second button that appears
+     * only on some days.
+     *
+     * It deliberately avoids the vocabulary of advice. PRD_FOOD 12 forbids a "coach" register in
+     * Food, and `Suggest something` would put the app in the position of the one suggesting.
+     */
+    const val PLAN_FIRST: String = "Plan something"
+
+    const val PLAN_MORE: String = "Plan something else"
+
+    /**
      * PRD_FOOD 17: "aucune ligne aujourd'hui" — what a day with nothing on it says about itself.
      *
      * It has to say something now. The empty state used to *be* the six moments and their add
@@ -76,6 +91,14 @@ object FoodDayMessages {
      */
     const val FUTURE_DAY: String = "This day hasn't happened yet"
 
+    /**
+     * What the day is for, now that the action at the foot of the screen does it.
+     *
+     * The sentence is unchanged and it was true when it shipped; what was missing was any gesture
+     * that made it actionable. `MealPlanRepository.save` had no caller in `ui/` at all, so a
+     * reader could walk to Thursday, read that its moments can carry a suggestion, and find
+     * nothing anywhere in the module that posed one.
+     */
     const val FUTURE_DAY_DETAIL: String =
         "Its moments can carry a suggestion. An entry waits for the day itself."
 

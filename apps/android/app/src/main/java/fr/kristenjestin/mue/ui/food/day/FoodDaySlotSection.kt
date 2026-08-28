@@ -408,18 +408,25 @@ private fun PlanCard(
                     onClick = onConfirm,
                 ).takeIf { state.canConfirm },
                 /*
-                 * `Swap` is deliberately absent while `FoodRoute.Swap` is a placeholder.
+                 * FR-PLAN-002's `Swap`, back on the card because it finally leads somewhere.
                  *
-                 * It pushed a wordless empty `Box` — no title, no back control, the one
-                 * destination in the module a person could reach and see no way out of, escapable
-                 * only by the system gesture. `Trends` was taken out of the view switcher for
-                 * exactly this reason; this action was missed. The rule is the same and it is
-                 * written here rather than remembered.
+                 * It was withdrawn when `FoodRoute.Swap` was a wordless empty `Box` — no title,
+                 * no back control, the one destination in the module a person could reach and see
+                 * no way out of. It now opens the planning sheet aimed at this very moment, which
+                 * is the same screen `Plan something` opens: replacing a proposal and posing one
+                 * are one gesture, and PRD_FOOD 8.5 makes the second half of it — the confirmation
+                 * before the row is overwritten — the same in both directions.
                  *
-                 * Little is lost meanwhile: `Dismiss` frees the moment and a proposal can be posed
-                 * again, which is swapping in two steps instead of one. `FoodDayMessages.SWAP`,
-                 * `FoodTestTags.swapPlan` and `onSwapPlan` are kept so restoring it is one line.
+                 * It sits **before** `Dismiss` and after `I ate this`, in PRD_FOOD 12's own order,
+                 * so the destructive action is last on the row.
                  */
+                PlanActionSpec(
+                    label = FoodDayMessages.SWAP,
+                    iconName = MueIcons.ROTATE_CW,
+                    tint = colors.textSecondary,
+                    testTag = FoodTestTags.swapPlan(state.key.slot),
+                    onClick = onSwap,
+                ),
                 PlanActionSpec(
                     label = FoodDayMessages.DISMISS,
                     iconName = MueIcons.CLOSE,

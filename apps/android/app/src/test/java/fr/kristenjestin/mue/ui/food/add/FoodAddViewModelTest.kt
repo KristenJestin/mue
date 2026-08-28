@@ -8,11 +8,13 @@ import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Quantity
 import fr.kristenjestin.mue.domain.model.RecipeDetail
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.ui.food.day.FakeFoodLogRepository
+import fr.kristenjestin.mue.ui.food.day.FakeMealPlanRepository
 import fr.kristenjestin.mue.ui.food.recipes.FakeRecipeRepository
 import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import kotlinx.coroutines.Dispatchers
@@ -790,6 +792,279 @@ class FoodAddViewModelTest {
 
     // endregion
 
+    // region planning a meal (PRD_FOOD 12, FR-PLAN-001 and 002)
+
+    /**
+     * The write that had no caller: `MealPlanRepository.save`, reached from the interface.
+     *
+     * `mue.plan_meal` had shipped and an agent could pose a proposal; the owner could not. This is
+     * the whole finding, closed — and it writes a **proposal**, never a journal line, because
+     * PRD_FOOD 22 refuses a line on a day that has not happened.
+     */
+    @Test
+    fun `planning writes a proposal on the day, and no journal line`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        val tomorrow = TODAY.plusDays(1)
+        add.viewModel.start(tomorrow, null, null, planning = true)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        add.viewModel.save()
+        advanceUntilIdle()
+
+        val posed = add.plans.saved.single()
+        assertEquals(tomorrow, posed.plannedOn)
+        assertEquals(RecipePreviewData.SALMON_ID, posed.recipeId)
+        assertEquals(Servings.ONE, posed.plannedServings)
+        assertTrue(add.logs.saved.isEmpty(), "a proposal is not a journal line")
+        assertTrue(state(add).justSaved)
+    }
+
+    /**
+     * The moment, with no "now" to deduce one from.
+     *
+     * The clock is fixed at 19:40, which PRD_FOOD 10.3 puts in dinner — and that is exactly the
+     * value a proposal must **not** take, because it is a fact about the hour the plan was made
+     * rather than about the meal. `RecipePreviewData.salmon()` is a `MAIN`, so it opens on lunch.
+     */
+    @Test
+    fun `the moment of a proposal comes from the dish, not from the hour it was planned at`() =
+        addTest(recipes = RecipePreviewData.details()) { add ->
+            add.viewModel.start(TODAY.plusDays(1), null, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            assertEquals(MealSlot.LUNCH, state(add).slot)
+
+            add.viewModel.save()
+            advanceUntilIdle()
+            assertEquals(MealSlot.LUNCH, add.plans.saved.single().slot)
+        }
+
+    /** PRD_FOOD 8.5: a moment already spoken for is not the one a fresh proposal opens on. */
+    @Test
+    fun `a day whose lunch is already proposed opens the next main moment`() {
+        val tomorrow = TODAY.plusDays(1)
+        addTest(
+            recipes = RecipePreviewData.details(),
+            plans = listOf(plannedCurry(tomorrow, MealSlot.LUNCH)),
+        ) { add ->
+            add.viewModel.start(tomorrow, null, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            assertEquals(MealSlot.DINNER, state(add).slot)
+            // The taken moment is still reachable, and says what choosing it would cost.
+            val lunch = state(add).slots.first { it.slot == MealSlot.LUNCH }
+            assertTrue(lunch.isTaken)
+            assertTrue(lunch.description.contains("Already suggested"), lunch.description)
+        }
+    }
+
+    /**
+     * FR-PLAN-001: "Un moment d�j� pourvu demande confirmation avant de remplacer sa proposition."
+     *
+     * The question is asked **before** the write, and refusing it leaves the row exactly as it
+     * was — the whole point of asking.
+     */
+    @Test
+    fun `posing on an occupied moment asks first, and writes nothing until it is answered`() {
+        val tomorrow = TODAY.plusDays(1)
+        addTest(
+            recipes = RecipePreviewData.details(),
+            plans = listOf(plannedCurry(tomorrow, MealSlot.LUNCH)),
+        ) { add ->
+            add.viewModel.start(tomorrow, MealSlot.LUNCH, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            add.viewModel.save()
+            advanceUntilIdle()
+            assertTrue(state(add).isReplaceConfirmVisible)
+            assertTrue(add.plans.saved.isEmpty())
+
+            add.viewModel.onDismissReplacePlan()
+            advanceUntilIdle()
+            assertFalse(state(add).isReplaceConfirmVisible)
+            assertTrue(add.plans.saved.isEmpty())
+            // PRD_FOOD 15: a refusal never empties the form.
+            assertEquals(FoodAddStage.SERVINGS, state(add).stage)
+            assertEquals(MealSlot.LUNCH, state(add).slot)
+        }
+    }
+
+    /**
+     * PRD_FOOD 8.5: "puis remplace" — one row per moment, replaced rather than duplicated.
+     *
+     * The write is a single upsert onto `(date, moment)`, which is what makes the rule structural
+     * rather than a convention the interface has to remember.
+     */
+    @Test
+    fun `confirming the replacement leaves one proposal on the moment`() {
+        val tomorrow = TODAY.plusDays(1)
+        addTest(
+            recipes = RecipePreviewData.details(),
+            plans = listOf(plannedCurry(tomorrow, MealSlot.LUNCH)),
+        ) { add ->
+            add.viewModel.start(tomorrow, MealSlot.LUNCH, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+            add.viewModel.save()
+            advanceUntilIdle()
+
+            add.viewModel.onConfirmReplacePlan()
+            advanceUntilIdle()
+
+            val posed = add.plans.saved.single()
+            assertEquals(MealSlot.LUNCH, posed.slot)
+            assertEquals(RecipePreviewData.SALMON_ID, posed.recipeId)
+            assertEquals(1, add.plans.onDay(tomorrow).count { it.slot == MealSlot.LUNCH })
+        }
+    }
+
+    /**
+     * FR-PLAN-002's `Swap`, which is this same sheet aimed at the moment being replaced.
+     *
+     * The moment travels with the route and is pinned, so the dish's own type cannot quietly move
+     * tomorrow's evening snack to lunch.
+     */
+    @Test
+    fun `a swap keeps the moment it was opened on, whatever the recipe would have chosen`() {
+        val tomorrow = TODAY.plusDays(1)
+        addTest(
+            recipes = RecipePreviewData.details(),
+            plans = listOf(plannedCurry(tomorrow, MealSlot.EVENING_SNACK)),
+        ) { add ->
+            add.viewModel.start(tomorrow, MealSlot.EVENING_SNACK, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            assertEquals(MealSlot.EVENING_SNACK, state(add).slot)
+
+            add.viewModel.save()
+            advanceUntilIdle()
+            add.viewModel.onConfirmReplacePlan()
+            advanceUntilIdle()
+
+            assertEquals(MealSlot.EVENING_SNACK, add.plans.saved.single().slot)
+        }
+    }
+
+    /**
+     * PRD_FOOD 12: "une proposition n'entre dans aucun total tant qu'elle n'est pas confirm�e",
+     * and PRD_FOOD 8.5 gives it no hour.
+     *
+     * So the sheet shows what the recipe is worth per serving — a fact about the preparation —
+     * and **not** what "this entry" contributes, because there is no entry; and the clock is not
+     * on screen at all rather than shown and discarded.
+     */
+    @Test
+    fun `the planning sheet has no hour and quotes no contribution`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY.plusDays(1), null, null, planning = true)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertTrue(state.isPlanning)
+        assertFalse(state.showsTime)
+        assertTrue(state.asksForSlot)
+        assertNull(state.contribution)
+        assertNull(state.slotTimeNote)
+        assertEquals(FoodAddMessages.PER_SERVING_SECTION, state.per100?.header)
+        assertEquals(FoodAddMessages.PLAN_MEAL, state.saveLabel)
+    }
+
+    /**
+     * PRD_FOOD 8.5: "un aliment simple se journalise directement et n'est pas planifi�".
+     *
+     * The planning sheet's first stage offers the recipe and nothing else, and the servings
+     * stepper it leads to is the very one a consumption uses — PRD_FOOD 15 gives `plannedServings`
+     * no range of its own.
+     */
+    @Test
+    fun `a proposal counts its servings on the same quarter-serving counter`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY.plusDays(1), null, null, planning = true)
+        assertEquals(FoodAddStage.PATHS, state(add).stage)
+
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+        assertEquals(FoodAddStage.SERVINGS, state(add).stage)
+
+        add.viewModel.onServingsStep(up = true)
+        add.viewModel.onServingsStep(up = true)
+        advanceUntilIdle()
+        add.viewModel.save()
+        advanceUntilIdle()
+
+        assertEquals(
+            requireNotNull(Servings.ofConsumedOrNull(1.5)),
+            add.plans.saved.single().plannedServings,
+        )
+    }
+
+    /**
+     * Walking from `Plan a meal` to `Add food` on the same day starts afresh.
+     *
+     * The two sheets are one composable, and a draft that survived the walk would let a proposal's
+     * recipe be saved as a journal line — or the reverse — with nothing on screen having changed.
+     */
+    @Test
+    fun `a planning sheet and a logging sheet on the same day are different targets`() = addTest(
+        recipes = RecipePreviewData.details(),
+    ) { add ->
+        add.viewModel.start(TODAY, null, null, planning = true)
+        add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+        advanceUntilIdle()
+        assertEquals(FoodAddStage.SERVINGS, state(add).stage)
+
+        add.viewModel.start(TODAY, null, null, planning = false)
+        advanceUntilIdle()
+
+        val state = state(add)
+        assertEquals(FoodAddStage.PATHS, state.stage)
+        assertFalse(state.isPlanning)
+    }
+
+    /**
+     * PRD_FOOD 11 and 17: a recipe can go while the sheet that chose it is open.
+     *
+     * "Supprimer une recette libère les propositions qui la référencent" — so the delete can land
+     * under this very form. The refusal has no field to sit beside, which is exactly why it has to
+     * say something: a primary button that writes nothing and reports nothing is the one outcome
+     * PRD_FOOD 15 rules out.
+     */
+    @Test
+    fun `a recipe deleted under the planning sheet refuses out loud and writes nothing`() =
+        addTest(recipes = RecipePreviewData.details()) { add ->
+            add.viewModel.start(TODAY.plusDays(1), null, null, planning = true)
+            add.viewModel.onRecipeChosen(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            add.recipes.delete(RecipePreviewData.SALMON_ID)
+            advanceUntilIdle()
+
+            add.viewModel.save()
+            advanceUntilIdle()
+
+            assertEquals(FoodAddMessages.PLAN_RECIPE_GONE, state(add).saveError)
+            assertTrue(add.plans.saved.isEmpty())
+        }
+
+    /** A proposal already on the moment, so the confirmation of FR-PLAN-001 has something to ask about. */
+    private fun plannedCurry(date: LocalDate, slot: MealSlot): MealPlanEntry = MealPlanEntry(
+        plannedOn = date,
+        slot = slot,
+        recipeId = RecipePreviewData.CURRY_ID,
+        plannedServings = Servings.ONE,
+    )
+
+    // endregion
+
     // region harness
 
     private class Add(
@@ -797,6 +1072,7 @@ class FoodAddViewModelTest {
         val logs: FakeFoodLogRepository,
         val foods: RecordingFoodCatalogueRepository,
         val recipes: FakeRecipeRepository,
+        val plans: FakeMealPlanRepository,
         val lookup: FakeProductLookup,
     )
 
@@ -808,6 +1084,7 @@ class FoodAddViewModelTest {
         entries: List<FoodLogEntry> = emptyList(),
         catalogue: List<Food> = FoodAddPreviewData.catalogue(),
         recipes: List<RecipeDetail> = emptyList(),
+        plans: List<MealPlanEntry> = emptyList(),
         savedState: SavedStateHandle = SavedStateHandle(),
         lookup: FakeProductLookup = FakeProductLookup(),
         body: suspend TestScope.(Add) -> Unit,
@@ -815,11 +1092,13 @@ class FoodAddViewModelTest {
         val logs = FakeFoodLogRepository(entries)
         val foods = RecordingFoodCatalogueRepository(catalogue)
         val recipeStore = FakeRecipeRepository(recipes)
+        val planStore = FakeMealPlanRepository(plans)
         val add = Add(
             viewModel = FoodAddViewModel(
                 logs = logs,
                 foods = foods,
                 recipes = recipeStore,
+                plans = planStore,
                 lookup = lookup,
                 savedState = savedState,
                 clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC),
@@ -828,6 +1107,7 @@ class FoodAddViewModelTest {
             logs = logs,
             foods = foods,
             recipes = recipeStore,
+            plans = planStore,
             lookup = lookup,
         )
 
