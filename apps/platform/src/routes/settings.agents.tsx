@@ -535,6 +535,19 @@ interface AgentCardProps {
 function AgentCard(props: AgentCardProps): ReactElement {
   const { agent, busy, confirming, onAskConfirm, onCancel, onConfirm } = props;
 
+  /**
+   * Section 12: a dialog returns the focus to what opened it. This confirmation is
+   * inline rather than a real dialog, but the button that opened it is unmounted
+   * while it is up, so answering "Keep it" would otherwise drop the focus onto the
+   * document body and lose a keyboard user's place in a long list.
+   */
+  const revokeButton = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (wasConfirming.current && !confirming) revokeButton.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
+
   return (
     <li className="card">
       <h3>
@@ -601,7 +614,10 @@ function AgentCard(props: AgentCardProps): ReactElement {
       </dl>
 
       {agent.revoked ? (
-        <p className="quiet">
+        // `status` rather than a plain paragraph: revoking replaces the button the
+        // owner just pressed, so without this the only signal that anything happened
+        // is visual.
+        <p className="quiet" role="status">
           Its tokens were revoked and its consent removed. The identity is kept so the audit trail
           still names it.
         </p>
@@ -611,15 +627,21 @@ function AgentCard(props: AgentCardProps): ReactElement {
             Revoke {agent.name ?? agent.clientId}? Its tokens stop working immediately and it will
             have to be authorised again from scratch. This cannot be undone.
           </p>
-          <button type="button" className="danger" onClick={onConfirm} disabled={busy} autoFocus>
+          {/*
+            The safe answer takes the focus, not the destructive one. The owner
+            arrives here having just pressed a button, and a keyboard that is still
+            travelling -- a repeated Enter, a second Space -- must not be able to
+            complete an irreversible action nobody read the question for.
+          */}
+          <button type="button" className="danger" onClick={onConfirm} disabled={busy}>
             Yes, revoke it
           </button>{" "}
-          <button type="button" onClick={onCancel} disabled={busy}>
+          <button type="button" onClick={onCancel} disabled={busy} autoFocus>
             Keep it
           </button>
         </div>
       ) : (
-        <button type="button" onClick={onAskConfirm} disabled={busy}>
+        <button type="button" ref={revokeButton} onClick={onAskConfirm} disabled={busy}>
           Revoke
         </button>
       )}
