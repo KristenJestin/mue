@@ -12,6 +12,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun --env-file=../../.env test src",
+    "verify:f02": "bun scripts/verify-f02.ts",
     "lint": "vp lint src",
     "format": "vp fmt src",
     "format:check": "vp fmt --check src"
