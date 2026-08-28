@@ -31,15 +31,20 @@ import type { FoodPayloadV1, RecipeIngredient, RecipePayloadV1 } from "@mue/cont
  * [scaleOrNull] guards against 2^53 where `Nutrients.scaleOrNull` guards against 2^63.
  *
  * That difference is unreachable, and it is worth writing down why rather than hoping.
- * There are exactly three call sites, and PRD_FOOD 15 bounds all three:
+ * There are exactly five call sites, and PRD_FOOD 15 bounds all five:
  *
- *  - [contribution]: a per-100 value (at most 900 000) times a quantity in thousandths (at
- *    most 5 000 000) — 4.5e12;
+ *  - [referenceWeightThousandthsOrNull]: a weighed quantity (at most 5 000 000) times a
+ *    thousand — 5.0e9. Its *result* is what widens the line below;
+ *  - [usualServingWeightThousandthsOrNull]: a usual serving size (at most 2 000 000) times a
+ *    portion count in thousandths (at most 20 000) — 4.0e10;
+ *  - [contribution]: a per-100 value (at most 900 000) times a reference weight in
+ *    thousandths. The widest such weight is a usual portion — twenty of a 2 000 g serving,
+ *    4.0e7 — ahead of a cooked correction's 1.7e7 and a bare ingredient's 5.0e6, so 3.6e13;
  *  - [perServing]: numerator 1 — at most 2.1e9;
  *  - [recipeLine]: a canonical value (at most 2.1e9) times a serving count in thousandths
  *    (at most 10 000) — 2.1e13.
  *
- * The largest is 2.1e13, and 2^53 is 9.0e15. `nutrition.test.ts` asserts the ceiling
+ * The largest is 3.6e13, and 2^53 is 9.0e15. `nutrition.test.ts` asserts the ceiling
  * rather than leaving it to this comment.
  */
 
@@ -214,6 +219,95 @@ export function contribution(per100: Nutrients, referenceWeightThousandths: numb
 }
 
 /**
+ * PRD_FOOD 13.1, line one: `poids de reference = poids pese / cookedRatio si pese cuit`.
+ *
+ * The TypeScript half of `NutritionMath.referenceWeightOrNull` and
+ * `Quantity.toReferenceWeightOrNull`, down to the half-up division — a weight and the
+ * nutrients derived from it have to fall on the same side of a thousandth, so the module has
+ * one rounding rule and not two.
+ *
+ * The correction is applied **once**, **before** the per-100 contribution, and **only to the
+ * quantity**. A food's per-100 figures already describe its reference state (PRD_FOOD 8.2),
+ * so bringing the weight back to that state is the whole of the correction; applying the
+ * ratio to the nutrients as well would apply it twice.
+ *
+ * Three cases collapse to the identity, and Kotlin names all three: the weight was taken in
+ * the reference state, which is the ordinary case; the food declares no ratio, so there is no
+ * cooked state to convert from and a stored flag is a leftover rather than a reason to invent
+ * a divisor; or the ratio is exactly 1.000.
+ *
+ * The result may legitimately exceed PRD_FOOD 15's ingredient ceiling — 5 000 g of something
+ * that lost water at a ratio of 0.3 came from 16 666 g of it — so it is bounded by
+ * [CANONICAL_MAX] and by nothing narrower, exactly as `Quantity.ofThousandthsOrNull` is.
+ */
+export function referenceWeightThousandthsOrNull(
+  weighedThousandths: number,
+  cookedRatioThousandths: number | undefined,
+  weighedCooked: boolean,
+): number | null {
+  if (!weighedCooked || cookedRatioThousandths === undefined) return weighedThousandths;
+  if (cookedRatioThousandths <= 0) return null;
+  const reference = scaleOrNull(weighedThousandths, 1_000, cookedRatioThousandths);
+  // Zero is not a quantity, and `Quantity.ofThousandthsOrNull` refuses it for the same reason:
+  // a weight that rounded away is not a weight of nothing.
+  return reference === null || reference < 1 ? null : reference;
+}
+
+/**
+ * A `FOOD` line of PRD_FOOD 10.2, for a quantity read on a scale: line one of PRD_FOOD 13.1
+ * and then line two, in that order and each exactly once.
+ *
+ * An unrepresentable reference weight yields unknown values rather than a wrong number, which
+ * is `NutritionMath.foodContribution`'s decision and the same one [ingredientContribution]
+ * makes about a food it cannot find.
+ */
+export function foodContribution(
+  food: FoodPayloadV1,
+  weighedThousandths: number,
+  weighedCooked: boolean,
+): Nutrients {
+  const reference = referenceWeightThousandthsOrNull(
+    weighedThousandths,
+    food.cookedRatioThousandths,
+    weighedCooked,
+  );
+  if (reference === null) return NUTRIENTS_UNKNOWN;
+  return contribution(nutrientsOfFood(food), reference);
+}
+
+/**
+ * PRD_FOOD 8.6: what a count of a food's own usual portions weighs — `1.5 x apple` at 150 g
+ * each.
+ *
+ * Null when the food declares no portion size, because there is then nothing to multiply and
+ * no weight to guess at.
+ */
+export function usualServingWeightThousandthsOrNull(
+  food: FoodPayloadV1,
+  portionsThousandths: number,
+): number | null {
+  if (food.servingThousandths === undefined) return null;
+  const weight = scaleOrNull(food.servingThousandths, portionsThousandths, 1_000);
+  return weight === null || weight < 1 ? null : weight;
+}
+
+/**
+ * The contribution of a `FOOD` line entered as a count of the food's usual portions.
+ *
+ * No cooked ratio applies here, and `NutritionMath.usualServingContribution` says why: *"a
+ * usual portion is an aid to typing, never a cooked reading"*, so PRD_FOOD 8.6 resolves it to
+ * grams of the food as the catalogue already describes it.
+ */
+export function usualServingContribution(
+  food: FoodPayloadV1,
+  portionsThousandths: number,
+): Nutrients {
+  const weight = usualServingWeightThousandthsOrNull(food, portionsThousandths);
+  if (weight === null) return NUTRIENTS_UNKNOWN;
+  return contribution(nutrientsOfFood(food), weight);
+}
+
+/**
  * One ingredient's contribution, against the foods this account holds.
  *
  * A missing food is not an error to reject. PRD_FOOD 21.2 lets a recipe name a food a
@@ -255,6 +349,25 @@ export function perServing(total: Nutrients, baseServings: number): Nutrients {
 /** PRD_FOOD 13.1: `ligne RECIPE = valeur par portion x portions consommees`. */
 export function recipeLine(servingValues: Nutrients, servingsThousandths: number): Nutrients {
   return scaledNutrients(servingValues, servingsThousandths, 1_000);
+}
+
+/**
+ * A `RECIPE` line worked out from the recipe itself: the three formulas above, in order.
+ *
+ * `NutritionMath.recipeLine(detail, foods, servings)` is already this overload on Android,
+ * and this is its half. It exists so that *what one serving of a recipe is worth* has a
+ * single definition: a caller composing the three by hand can divide by `baseServings` twice,
+ * or forget to divide at all, and both mistakes produce a plausible number.
+ */
+export function recipeLineFor(
+  recipe: RecipePayloadV1,
+  foods: ReadonlyMap<string, FoodPayloadV1>,
+  servingsThousandths: number,
+): Nutrients {
+  return recipeLine(
+    perServing(recipeTotal(recipe, foods), recipe.baseServings),
+    servingsThousandths,
+  );
 }
 
 /**

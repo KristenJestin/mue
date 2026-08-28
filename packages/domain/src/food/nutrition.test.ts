@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  COOKED_RATIO_MIN_THOUSANDTHS,
   ENERGY_PER_100_MAX_MILLI_KCAL,
   INGREDIENT_QUANTITY_MAX_THOUSANDTHS,
   SERVINGS_MAX_THOUSANDTHS,
+  USUAL_PORTIONS_MAX_THOUSANDTHS,
+  USUAL_SERVING_MAX_THOUSANDTHS,
   type FoodLogEntryPayloadV1,
   type FoodPayloadV1,
   type RecipePayloadV1,
@@ -14,14 +17,19 @@ import {
   NUTRIENTS_UNKNOWN,
   NUTRIENTS_ZERO,
   contribution,
+  foodContribution,
   ingredientContribution,
   nutrientsOfFood,
   perServing,
   plusNutrients,
   recipeLine,
+  recipeLineFor,
   recipeTotal,
+  referenceWeightThousandthsOrNull,
   strictSum,
   unresolvedIngredientIds,
+  usualServingContribution,
+  usualServingWeightThousandthsOrNull,
   type Nutrients,
 } from "./nutrition";
 
@@ -234,14 +242,163 @@ describe("PRD_FOOD 13.1's formulas, worked through by hand", () => {
   });
 });
 
+describe("PRD_FOOD 13.1 line one, and the FOOD line built on it", () => {
+  test("a weight taken in the reference state is its own reference weight", () => {
+    // The three identities `NutritionMath.referenceWeightOrNull` names: not weighed cooked,
+    // no ratio declared at all, and a ratio of exactly one.
+    expect(referenceWeightThousandthsOrNull(250_000, 2_300, false)).toBe(250_000);
+    expect(referenceWeightThousandthsOrNull(250_000, undefined, true)).toBe(250_000);
+    expect(referenceWeightThousandthsOrNull(250_000, 1_000, true)).toBe(250_000);
+  });
+
+  test("a weight taken cooked comes back to the reference state, rounded half-up", () => {
+    // `Quantity.toReferenceWeightOrNull`'s own worked example: 250 g of pasta at a ratio of
+    // 2.3 was 108.696 g dry. Truncating would give 108.695, and every nutrient derived from
+    // the weight would then sit on the other side of a thousandth from the weight itself.
+    expect(referenceWeightThousandthsOrNull(250_000, 2_300, true)).toBe(108_696);
+    // A food that gained water: the reference weight is larger than the ceiling PRD_FOOD 15
+    // puts on an ingredient, and that is legitimate rather than an error.
+    expect(referenceWeightThousandthsOrNull(5_000_000, 300, true)).toBe(16_666_667);
+  });
+
+  test("a weight that rounds away is unknown rather than a weight of nothing", () => {
+    expect(referenceWeightThousandthsOrNull(1, 5_000, true)).toBeNull();
+  });
+
+  test("the cooking correction applies to the quantity, once, and never to the nutrients", () => {
+    const pasta = food({ energyMilliKcal: 350_000, proteinMilligrams: 12_000 });
+    // 250 g weighed raw: 350 x 2.5 = 875 kcal.
+    expect(foodContribution(pasta, 250_000, false).energyMilliKcal).toBe(875_000);
+
+    const withRatio = food({ energyMilliKcal: 350_000, cookedRatioThousandths: 2_300 });
+    // 250 g weighed cooked is 108.696 g dry: 350 x 1.08696 = 380.436 kcal.
+    expect(foodContribution(withRatio, 250_000, true).energyMilliKcal).toBe(380_436);
+    // The flag alone changes nothing when the food declares no ratio: there is no cooked
+    // state to convert from, so a stored flag is a leftover and not a divisor.
+    expect(foodContribution(pasta, 250_000, true).energyMilliKcal).toBe(875_000);
+  });
+
+  test("a food's unknown nutrient stays unknown through the contribution", () => {
+    const skyr = food({ energyMilliKcal: 63_000, proteinMilligrams: 10_500 });
+    expect(foodContribution(skyr, 150_000, false)).toEqual({
+      energyMilliKcal: 94_500,
+      proteinMilligrams: 15_750,
+      carbsMilligrams: null,
+      fatMilligrams: null,
+      fibreMilligrams: null,
+    });
+  });
+
+  test("a count of usual portions resolves to a weight, and then to a contribution", () => {
+    const apple = food({ energyMilliKcal: 52_000, servingThousandths: 150_000 });
+    // PRD_FOOD 8.6: 1.5 x apple at 150 g each is 225 g, and 52 x 2.25 = 117 kcal.
+    expect(usualServingWeightThousandthsOrNull(apple, 1_500)).toBe(225_000);
+    expect(usualServingContribution(apple, 1_500).energyMilliKcal).toBe(117_000);
+  });
+
+  test("a food that declares no usual serving cannot resolve a portion count", () => {
+    // Nothing to multiply, and no weight worth guessing at.
+    const loose = food({ energyMilliKcal: 52_000 });
+    expect(usualServingWeightThousandthsOrNull(loose, 1_500)).toBeNull();
+    expect(usualServingContribution(loose, 1_500)).toEqual(NUTRIENTS_UNKNOWN);
+  });
+
+  test("a usual portion is never a cooked reading, so no ratio applies to it", () => {
+    // `NutritionMath.usualServingContribution`: PRD_FOOD 8.6 resolves a portion to grams of
+    // the food as the catalogue describes it, which is already the reference state.
+    const rice = food({
+      energyMilliKcal: 350_000,
+      servingThousandths: 60_000,
+      cookedRatioThousandths: 2_300,
+    });
+    expect(usualServingContribution(rice, 1_000).energyMilliKcal).toBe(210_000);
+  });
+});
+
+describe("a RECIPE line, worked out from the recipe it names", () => {
+  const oats = food({ id: "aaaaaaaa-1111-4111-8111-111111111111", energyMilliKcal: 380_000 });
+  const milk = food({ id: "bbbbbbbb-1111-4111-8111-111111111111", energyMilliKcal: 46_000 });
+  const porridge: RecipePayloadV1 = {
+    id: "cccccccc-1111-4111-8111-111111111111",
+    name: "Porridge",
+    type: "breakfast",
+    baseServings: 2,
+    isFavourite: false,
+    ingredients: [
+      {
+        id: "dddddddd-1111-4111-8111-111111111111",
+        foodId: oats.id,
+        quantityThousandths: 100_000,
+        unit: "gram",
+        position: 0,
+      },
+      {
+        id: "eeeeeeee-1111-4111-8111-111111111111",
+        foodId: milk.id,
+        quantityThousandths: 300_000,
+        unit: "millilitre",
+        position: 1,
+      },
+    ],
+  };
+  const foods = new Map([
+    [oats.id, oats],
+    [milk.id, milk],
+  ]);
+
+  test("the composed form is the three formulas in order, and nothing else", () => {
+    // 518 kcal for two servings, so 259 a serving, so 388.5 for one and a half.
+    expect(recipeLineFor(porridge, foods, 1_500).energyMilliKcal).toBe(388_500);
+    expect(recipeLineFor(porridge, foods, 1_500)).toEqual(
+      recipeLine(perServing(recipeTotal(porridge, foods), porridge.baseServings), 1_500),
+    );
+  });
+
+  test("one serving of a two-serving recipe is a half, and the half survives as an integer", () => {
+    // F-01's own arithmetic, in the unit the column holds: 969 kcal over two servings is
+    // 484.5 kcal, which is 484 500 thousandths and neither 484 000 nor 485 000.
+    const whole = food({ id: "ffffffff-1111-4111-8111-111111111111", energyMilliKcal: 969_000 });
+    const dish: RecipePayloadV1 = {
+      ...porridge,
+      baseServings: 2,
+      ingredients: [
+        {
+          id: "dddddddd-1111-4111-8111-111111111111",
+          foodId: whole.id,
+          quantityThousandths: 100_000,
+          unit: "gram",
+          position: 0,
+        },
+      ],
+    };
+    expect(recipeLineFor(dish, new Map([[whole.id, whole]]), 1_000).energyMilliKcal).toBe(484_500);
+  });
+
+  test("an ingredient this server cannot resolve makes the line unknown, not lighter", () => {
+    expect(recipeLineFor(porridge, new Map([[oats.id, oats]]), 1_000).energyMilliKcal).toBeNull();
+  });
+});
+
 describe("the intermediate product stays exact", () => {
   test("the widest product any call site can produce is below Number.MAX_SAFE_INTEGER", () => {
     // The claim `nutrition.ts` makes in prose, asserted. Kotlin guards against 2^63 and
     // this guards against 2^53; the difference only matters if a call site could reach
     // between them, and PRD_FOOD 15's own bounds say none can.
+    // The widest reference weight the three amount paths can hand to the contribution. A
+    // usual portion is the largest of them: twenty of a 2 000 g serving beats both a bare
+    // ingredient's 5 000 g and the 16 666 g a cooked correction reaches at a ratio of 0.3.
+    const widestReferenceWeight = Math.max(
+      INGREDIENT_QUANTITY_MAX_THOUSANDTHS,
+      (USUAL_SERVING_MAX_THOUSANDTHS * USUAL_PORTIONS_MAX_THOUSANDTHS) / 1_000,
+      (INGREDIENT_QUANTITY_MAX_THOUSANDTHS * 1_000) / COOKED_RATIO_MIN_THOUSANDTHS,
+    );
     const widest = Math.max(
-      // contribution: a per-100 energy times an ingredient quantity in thousandths.
-      ENERGY_PER_100_MAX_MILLI_KCAL * INGREDIENT_QUANTITY_MAX_THOUSANDTHS,
+      // referenceWeightThousandthsOrNull: a weighed quantity times a thousand.
+      INGREDIENT_QUANTITY_MAX_THOUSANDTHS * 1_000,
+      // usualServingWeightThousandthsOrNull: a serving size times a portion count.
+      USUAL_SERVING_MAX_THOUSANDTHS * USUAL_PORTIONS_MAX_THOUSANDTHS,
+      // contribution: a per-100 energy times a reference weight in thousandths.
+      ENERGY_PER_100_MAX_MILLI_KCAL * widestReferenceWeight,
       // recipeLine: a canonical value times a consumed serving count in thousandths.
       CANONICAL_MAX * SERVINGS_MAX_THOUSANDTHS,
     );

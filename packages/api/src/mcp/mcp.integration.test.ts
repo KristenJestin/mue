@@ -2911,6 +2911,394 @@ describe("the whole section 14 catalogue", () => {
     expect(error.aggregateId).toBe(`${localDatePlus(11)}:snack`);
   });
 
+  // --- F-01: a serving of a recipe carries its nutrition into the day -------------------------
+
+  /**
+   * The whole of the reported defect, driven exactly as the agent that found it drove it:
+   * three foods, a two-serving recipe worth 969 kcal, one serving logged, then read back.
+   *
+   * PRD_FOOD 10.2 makes a `recipe` line one of the three forms a journal line takes, and
+   * PRD_FOOD 21.2 makes that line self-contained -- *it* carries the numbers, not the recipe.
+   * Which leaves one question the tool has to answer and used not to: where do the numbers
+   * come from when the caller states a recipe and a serving count and nothing else? An agent
+   * cannot compute them, because PRD_FOOD 13.1 is the server's rule and the agent does not
+   * hold the foods. So the server resolves the recipe itself, through `@mue/domain`, or the
+   * line is written empty and the day's totals are unknown for ever.
+   *
+   * The arithmetic is stated here in whole integers on purpose. One serving of two is a
+   * *half*, and 484.5 kcal is the value that a serving count handled as an integer would
+   * round away.
+   */
+  test("create_food_log resolves a recipe serving into the line's own snapshot (F-01)", async () => {
+    const F01_DAY = "2026-05-27";
+
+    // 350 kcal/100 g, and 180 g of it: 630 kcal.
+    const rice = (await callOk(client, "mue.create_food", {
+      name: "Riz basmati cru",
+      energyKcalPer100: 350,
+      proteinGramsPer100: 7.5,
+      carbsGramsPer100: 78,
+      fatGramsPer100: 0.9,
+      fibreGramsPer100: 1.4,
+    })) as { food: { id: string } };
+    // 165 kcal/100 g, and 150 g of it: 247.5 kcal.
+    const chicken = (await callOk(client, "mue.create_food", {
+      name: "Blanc de poulet",
+      energyKcalPer100: 165,
+      proteinGramsPer100: 31,
+      carbsGramsPer100: 0,
+      fatGramsPer100: 3.6,
+      fibreGramsPer100: 0,
+    })) as { food: { id: string } };
+    // 61 kcal/100 g, and 150 g of it: 91.5 kcal.
+    const yoghurt = (await callOk(client, "mue.create_food", {
+      name: "Yaourt nature",
+      energyKcalPer100: 61,
+      proteinGramsPer100: 3.5,
+      carbsGramsPer100: 4.7,
+      fatGramsPer100: 3.3,
+      fibreGramsPer100: 0,
+    })) as { food: { id: string } };
+
+    const created = (await callOk(client, "mue.create_recipe", {
+      name: "Poulet riz yaourt",
+      type: "main",
+      baseServings: 2,
+      ingredients: [
+        { foodId: rice.food.id, quantity: 180 },
+        { foodId: chicken.food.id, quantity: 150 },
+        { foodId: yoghurt.food.id, quantity: 150 },
+      ],
+    })) as { recipe: { id: string } };
+    const dishId = created.recipe.id;
+
+    // Step 3 of the report: the recipe knows what it is worth. 630 + 247.5 + 91.5 = 969.
+    const dish = (await callOk(client, "mue.get_recipe", { id: dishId })) as {
+      nutrition: { perServing: ComputedNutrients; wholeRecipe: ComputedNutrients };
+    };
+    expect(dish.nutrition.wholeRecipe.energy.milliKcal).toBe(969_000);
+    expect(dish.nutrition.perServing.energy.milliKcal).toBe(484_500);
+    expect(dish.nutrition.perServing.protein.milligrams).toBe(32_625);
+    expect(dish.nutrition.perServing.carbs.milligrams).toBe(73_725);
+    expect(dish.nutrition.perServing.fat.milligrams).toBe(5_985);
+    expect(dish.nutrition.perServing.fibre.milligrams).toBe(1_260);
+
+    // Step 4: one serving, stated as the person would state it -- the recipe and how much of
+    // it. No nutrient is given, because the caller has none to give.
+    const logged = (await callOk(client, "mue.create_food_log", {
+      consumedOn: F01_DAY,
+      consumedAt: "19:30",
+      title: "Poulet riz yaourt",
+      recipeId: dishId,
+      servings: 1,
+    })) as {
+      entry: {
+        id: string;
+        kind: string;
+        slot: string;
+        energyKcal: number | null;
+        proteinGrams: number | null;
+        carbsGrams: number | null;
+        fatGrams: number | null;
+        fibreGrams: number | null;
+      };
+    };
+    const lineId = logged.entry.id;
+    expect(logged.entry.kind).toBe("recipe");
+    expect(logged.entry.slot).toBe("dinner");
+    expect(logged.entry.energyKcal).toBe(484.5);
+    expect(logged.entry.proteinGrams).toBe(32.625);
+    expect(logged.entry.carbsGrams).toBe(73.725);
+    expect(logged.entry.fatGrams).toBe(5.985);
+    expect(logged.entry.fibreGrams).toBe(1.26);
+
+    // The stored row, not the answer that was rendered from it: PRD_FOOD 8.6 stores whole
+    // counts of the canonical unit, and a half serving has to survive as an exact integer.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.foodLogEntries)
+      .where(and(eq(schema.foodLogEntries.userId, userId), eq(schema.foodLogEntries.id, lineId)));
+    const row = rows[0]!;
+    expect(row.energyMilliKcal).toBe(484_500);
+    expect(row.proteinMilligrams).toBe(32_625);
+    expect(row.carbsMilligrams).toBe(73_725);
+    expect(row.fatMilligrams).toBe(5_985);
+    expect(row.fibreMilligrams).toBe(1_260);
+    expect(row.kind).toBe("recipe");
+    expect(row.sourceRef).toBe(dishId);
+    expect(row.quantityThousandths).toBe(1_000);
+    expect(row.quantityUnit).toBe("serving");
+
+    // Step 5, first read.
+    const day = (await callOk(client, "mue.list_food_logs", { date: F01_DAY })) as {
+      entries: { id: string; energyKcal: number | null; proteinGrams: number | null }[];
+    };
+    const line = day.entries.find((entry) => entry.id === lineId)!;
+    expect(line.energyKcal).toBe(484.5);
+    expect(line.proteinGrams).toBe(32.625);
+
+    // Step 5, second read: the totals of the moment and of the day, which is what the report
+    // says are wrong. The dinner and the day are each one line, so each is exactly a serving.
+    const totals = (await callOk(client, "mue.get_daily_nutrition", { date: F01_DAY })) as {
+      isRecorded: boolean;
+      entryCount: number;
+      totals: ComputedNutrients;
+      slots: { slot: string; totals: ComputedNutrients }[];
+    };
+    expect(totals.isRecorded).toBe(true);
+    expect(totals.entryCount).toBe(1);
+    expect(totals.totals.energy.known).toBe(true);
+    expect(totals.totals.energy.milliKcal).toBe(484_500);
+    expect(totals.totals.energy.kcal).toBe(484.5);
+    expect(totals.totals.energy.unknownFrom).toEqual([]);
+    expect(totals.totals.protein.milligrams).toBe(32_625);
+    expect(totals.totals.carbs.milligrams).toBe(73_725);
+    expect(totals.totals.fat.milligrams).toBe(5_985);
+    expect(totals.totals.fibre.milligrams).toBe(1_260);
+
+    const dinner = totals.slots.find((slot) => slot.slot === "dinner")!;
+    expect(dinner.totals.energy.milliKcal).toBe(484_500);
+    expect(dinner.totals.protein.milligrams).toBe(32_625);
+  });
+
+  test("create_food_log resolves a food's own per-100 values for the amount eaten", async () => {
+    // The reporter only drove the recipe path. The food path had the identical hole -- the
+    // tool wrote `foodId` into `sourceRef` and nothing else -- so it is asserted here rather
+    // than assumed fixed alongside.
+    const FOOD_DAY = "2026-04-06";
+    const skyr = (await callOk(client, "mue.create_food", {
+      name: "Skyr F-01",
+      energyKcalPer100: 63,
+      proteinGramsPer100: 10.5,
+      // No carbohydrate: an unknown per-100 value stays unknown through the contribution
+      // rather than being read as a zero.
+    })) as { food: { id: string } };
+
+    const data = (await callOk(client, "mue.create_food_log", {
+      consumedOn: FOOD_DAY,
+      consumedAt: "08:15",
+      title: "Skyr",
+      foodId: skyr.food.id,
+      quantityGrams: 150,
+    })) as {
+      entry: {
+        id: string;
+        kind: string;
+        energyKcal: number | null;
+        proteinGrams: number | null;
+        carbsGrams: number | null;
+      };
+      nutritionFrom: string;
+    };
+    expect(data.entry.kind).toBe("food");
+    expect(data.nutritionFrom).toBe("food");
+    // 63 kcal per 100 g, and 150 g of it: 94.5 kcal, and 15.75 g of protein.
+    expect(data.entry.energyKcal).toBe(94.5);
+    expect(data.entry.proteinGrams).toBe(15.75);
+    expect(data.entry.carbsGrams).toBeNull();
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.foodLogEntries)
+      .where(
+        and(eq(schema.foodLogEntries.userId, userId), eq(schema.foodLogEntries.id, data.entry.id)),
+      );
+    expect(rows[0]!.energyMilliKcal).toBe(94_500);
+    expect(rows[0]!.proteinMilligrams).toBe(15_750);
+    // PRD_FOOD 13.1: what the food does not state, the line does not state either. A zero
+    // here would be a figure nobody measured, handed back as a fact.
+    expect(rows[0]!.carbsMilligrams).toBeNull();
+
+    const totals = (await callOk(client, "mue.get_daily_nutrition", { date: FOOD_DAY })) as {
+      totals: ComputedNutrients;
+    };
+    expect(totals.totals.energy.milliKcal).toBe(94_500);
+    expect(totals.totals.carbs.known).toBe(false);
+  });
+
+  test("a value the caller weighed itself beats the computed one, metric by metric", async () => {
+    const OVERRIDE_DAY = "2026-04-07";
+    const skyr = (await callOk(client, "mue.create_food", {
+      name: "Skyr weighed",
+      energyKcalPer100: 63,
+      proteinGramsPer100: 10.5,
+    })) as { food: { id: string } };
+
+    const data = (await callOk(client, "mue.create_food_log", {
+      consumedOn: OVERRIDE_DAY,
+      consumedAt: "08:15",
+      title: "Skyr",
+      foodId: skyr.food.id,
+      quantityGrams: 150,
+      // The person read the pot rather than trusting the card. Their figure stands.
+      energyKcal: 100,
+    })) as { entry: { energyKcal: number | null; proteinGrams: number | null } };
+    expect(data.entry.energyKcal).toBe(100);
+    // And the metric they said nothing about is still worked out for them.
+    expect(data.entry.proteinGrams).toBe(15.75);
+  });
+
+  test("changing the recipe afterwards does not move a line already written", async () => {
+    // PRD_FOOD 8.4: editing or deleting the food or the recipe afterwards never changes a
+    // line already journalled, and PRD_FOOD 13.1 adds that correcting a food later never
+    // retroactively completes a value that was unknown. The snapshot exists for exactly this
+    // property, so computing it at write time has to preserve it: a read that re-derived
+    // would be a second defect wearing the first one costume.
+    const FROZEN_DAY = "2026-04-08";
+    const flour = (await callOk(client, "mue.create_food", {
+      name: "Farine F-01",
+      energyKcalPer100: 350,
+    })) as { food: { id: string } };
+    const cake = (await callOk(client, "mue.create_recipe", {
+      name: "Gateau F-01",
+      type: "snack",
+      baseServings: 2,
+      ingredients: [{ foodId: flour.food.id, quantity: 200 }],
+    })) as { recipe: { id: string } };
+
+    // 350 x 2 = 700 kcal for the whole cake, so 350 a serving.
+    const line = (await callOk(client, "mue.create_food_log", {
+      consumedOn: FROZEN_DAY,
+      consumedAt: "16:00",
+      title: "Gateau",
+      recipeId: cake.recipe.id,
+      servings: 1,
+    })) as { entry: { id: string; energyKcal: number | null } };
+    expect(line.entry.energyKcal).toBe(350);
+
+    // The recipe is corrected afterwards: twice the flour, and written for four servings.
+    await callOk(client, "mue.update_recipe", {
+      id: cake.recipe.id,
+      baseServings: 4,
+      ingredients: [{ foodId: flour.food.id, quantity: 400 }],
+    });
+    // And so is the food it names.
+    await callOk(client, "mue.update_food", { id: flour.food.id, energyKcalPer100: 400 });
+
+    // The recipe now reads differently: 400 x 4 = 1600 kcal whole, and 400 a serving.
+    const recipeNow = (await callOk(client, "mue.get_recipe", { id: cake.recipe.id })) as {
+      nutrition: { perServing: ComputedNutrients; wholeRecipe: ComputedNutrients };
+    };
+    expect(recipeNow.nutrition.wholeRecipe.energy.milliKcal).toBe(1_600_000);
+    expect(recipeNow.nutrition.perServing.energy.milliKcal).toBe(400_000);
+
+    // The line does not. It records what was eaten, not what the recipe says today.
+    const rows = await handle.database.db
+      .select()
+      .from(schema.foodLogEntries)
+      .where(
+        and(eq(schema.foodLogEntries.userId, userId), eq(schema.foodLogEntries.id, line.entry.id)),
+      );
+    expect(rows[0]!.energyMilliKcal).toBe(350_000);
+
+    const totals = (await callOk(client, "mue.get_daily_nutrition", { date: FROZEN_DAY })) as {
+      totals: ComputedNutrients;
+    };
+    expect(totals.totals.energy.milliKcal).toBe(350_000);
+  });
+
+  test("update_food_log rescales the frozen snapshot instead of reopening the recipe", async () => {
+    // `FoodAddDraft.recipeNutrientsOrNull` is this same rescale on the phone, and the comment
+    // beside it says why it is a rescale rather than a recomputation: the recipe may have
+    // changed since the meal was eaten, and the line records the meal.
+    const CORRECT_DAY = "2026-04-09";
+    const oats = (await callOk(client, "mue.create_food", {
+      name: "Flocons F-01",
+      energyKcalPer100: 380,
+      proteinGramsPer100: 13,
+    })) as { food: { id: string } };
+    const porridge = (await callOk(client, "mue.create_recipe", {
+      name: "Porridge F-01",
+      type: "breakfast",
+      baseServings: 2,
+      ingredients: [{ foodId: oats.food.id, quantity: 100 }],
+    })) as { recipe: { id: string } };
+
+    // 380 kcal for the pot, so 190 a serving.
+    const line = (await callOk(client, "mue.create_food_log", {
+      consumedOn: CORRECT_DAY,
+      consumedAt: "08:00",
+      title: "Porridge",
+      recipeId: porridge.recipe.id,
+      servings: 1,
+    })) as { entry: { id: string; energyKcal: number | null; proteinGrams: number | null } };
+    expect(line.entry.energyKcal).toBe(190);
+    expect(line.entry.proteinGrams).toBe(6.5);
+
+    // The recipe is rewritten between the meal and the correction. The correction must not
+    // pick that up: "actually I had two servings" is a statement about the meal.
+    await callOk(client, "mue.update_recipe", {
+      id: porridge.recipe.id,
+      ingredients: [{ foodId: oats.food.id, quantity: 1000 }],
+    });
+
+    const corrected = (await callOk(client, "mue.update_food_log", {
+      id: line.entry.id,
+      servings: 2,
+    })) as {
+      entry: { energyKcal: number | null; proteinGrams: number | null; quantity: number | null };
+      nutritionFrom: string;
+    };
+    expect(corrected.nutritionFrom).toBe("carried");
+    // Twice the line that was written, and not two servings of the recipe as it reads now.
+    expect(corrected.entry.energyKcal).toBe(380);
+    expect(corrected.entry.proteinGrams).toBe(13);
+    expect(corrected.entry.quantity).toBe(2);
+
+    const totals = (await callOk(client, "mue.get_daily_nutrition", { date: CORRECT_DAY })) as {
+      totals: ComputedNutrients;
+    };
+    expect(totals.totals.energy.milliKcal).toBe(380_000);
+  });
+
+  test("create_food_log refuses what it cannot resolve rather than writing a line with no nutrition", async () => {
+    // The failure belongs in the turn that caused it. Accepting the call would produce exactly
+    // the F-01 symptom -- a successful write whose day totals are unknown -- and the agent
+    // would have no way to tell that from a meal nobody could measure.
+    const missing = await callError(client, "mue.create_food_log", {
+      consumedOn: "2026-04-10",
+      consumedAt: "12:00",
+      title: "Un plat",
+      recipeId: crypto.randomUUID(),
+      servings: 1,
+    });
+    expect(missing.code).toBe("http.not_found");
+    expect(missing.aggregateType).toBe("recipe");
+
+    const dish = (await callOk(client, "mue.create_recipe", {
+      name: "Plat sans portions",
+      type: "main",
+      baseServings: 2,
+      ingredients: [{ foodId, quantity: 100 }],
+    })) as { recipe: { id: string } };
+    const noServings = await callError(client, "mue.create_food_log", {
+      consumedOn: "2026-04-10",
+      consumedAt: "12:00",
+      title: "Un plat",
+      recipeId: dish.recipe.id,
+    });
+    expect(noServings.code).toBe("sync.missing_required_field");
+    expect(noServings.field).toBe("servings");
+
+    // A caller carrying all five values itself is untouched by any of this: PRD_FOOD 21.2
+    // makes such a line self-contained, and its `sourceRef` is provenance that resolves
+    // nowhere and harms nothing.
+    const selfContained = (await callOk(client, "mue.create_food_log", {
+      consumedOn: "2026-04-10",
+      consumedAt: "12:00",
+      title: "Un plat rapporte",
+      recipeId: crypto.randomUUID(),
+      servings: 1,
+      energyKcal: 400,
+      proteinGrams: 20,
+      carbsGrams: 40,
+      fatGrams: 15,
+      fibreGrams: 5,
+    })) as { entry: { energyKcal: number | null }; nutritionFrom: string };
+    expect(selfContained.nutritionFrom).toBe("stated");
+    expect(selfContained.entry.energyKcal).toBe(400);
+  });
+
   test("delete_food_log, delete_recipe and delete_food all leave tombstones", async () => {
     const line = (await callOk(client, "mue.create_food_log", {
       consumedOn: "2026-06-14",

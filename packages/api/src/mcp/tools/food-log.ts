@@ -21,6 +21,17 @@ import {
   USUAL_PORTIONS_MIN_THOUSANDTHS,
   USUAL_PORTIONS_STEP_THOUSANDTHS,
 } from "@mue/contracts";
+import {
+  foodContribution,
+  NUTRIENT_METRICS,
+  nutrientsOfLogEntry,
+  recipeLineFor,
+  scaledNutrients,
+  unresolvedIngredientIds,
+  usualServingContribution,
+  usualServingWeightThousandthsOrNull,
+  type Nutrients,
+} from "@mue/domain";
 import { z } from "zod";
 import { envelopeSchema, invalidPayload, missingRequiredField, toolSuccess } from "../errors";
 import type { StoredAggregate } from "../services";
@@ -69,11 +80,41 @@ import type { MueTool, ToolContext } from "./types";
  * `quick` add. So there is no `kind` input to get wrong -- it follows from whether `foodId` or
  * `recipeId` was given, and cannot disagree with `sourceRef`.
  *
- * ## Nothing here depends on the food arriving
+ * ## The snapshot is the server's to compute, and it is computed here or nowhere
  *
- * Section 10.2 and PRD_FOOD 21.2 make a line self-contained: it carries its own nutritional
- * snapshot, so `foodId` is provenance and not a reference that must resolve. A line whose food
- * this server has never seen is still a complete, applicable row.
+ * PRD_FOOD 21.2 makes a line self-contained -- *"la ligne seule, autoportante puisqu'elle
+ * contient son instantane"* -- and that is a statement about what the line must **hold**, not
+ * about who fills it in. Android reads it the same way: `FoodAddDraft.resolve` and
+ * `FoodDayViewModel.onConfirmPlan` both compute the five values through `NutritionMath` at the
+ * moment of saving and write them into the row and into the payload. Nothing on the phone ever
+ * leaves them for the server.
+ *
+ * So an agent naming a recipe has nobody to fill them in but this tool. It cannot do the
+ * arithmetic itself: PRD_FOOD 13.1 is the server's rule, and the per-100 figures of the foods a
+ * recipe is built from are not in the agent's hands. Left to the caller, the line is written
+ * empty -- which is F-01, where a 969 kcal recipe contributed nothing at all to the day, and
+ * `get_daily_nutrition` faithfully propagated the `null` it had been given.
+ *
+ * `resolveSnapshot` is therefore the whole answer: a stated `recipeId` or `foodId` is resolved
+ * against this account's own rows and run through `@mue/domain` -- the same functions
+ * `NutritionMath.kt` mirrors, no arithmetic in this file -- and the result is written into the
+ * line. A value the caller *did* state always wins over the computed one, metric by metric,
+ * because someone who weighed their portion knows better than the recipe does.
+ *
+ * ## The snapshot is frozen once written, and this is the moment it is taken
+ *
+ * PRD_FOOD 8.4: editing or deleting the food or the recipe afterwards never changes a line
+ * already written, and PRD_FOOD 13.1 adds that correcting a food later never retroactively
+ * completes a value that was unknown. That is why the resolution happens *here*, once, and why
+ * no read tool reopens the source: `daily.ts` says the same in its own words. `update_food_log`
+ * keeps the property by rescaling the values the line already carries rather than reopening the
+ * recipe -- which is exactly what `FoodAddDraft.recipeNutrientsOrNull` does on the phone.
+ *
+ * A line whose food this server has never seen is still a complete, applicable row: that is
+ * PRD_FOOD 21.2 and it still holds, for a line arriving from a phone and for a caller that sent
+ * all five values itself. What is refused is the third case -- a caller that named something
+ * this server cannot resolve *and* left the values for it to work out -- because the only other
+ * answer to that is a silently empty line.
  */
 
 const CREATE_TOOL_NAME = "mue.create_food_log";
@@ -346,6 +387,182 @@ function nutrientThousandths(
   return stored;
 }
 
+// --- the nutritional snapshot ------------------------------------------------------------
+
+/**
+ * Where the five values on a line came from.
+ *
+ * F-01 left an agent unable to tell "Mue worked this out" from "Mue was given nothing", and
+ * a null in the entry says only the second. This field says which, in the same breath as the
+ * line it describes.
+ */
+const nutritionFromSchema = z
+  .enum(["recipe", "food", "stated", "carried"])
+  .describe(
+    "Where the line's nutrition came from. `recipe` or `food`: Mue worked it out from what you named, under PRD_FOOD 13.1, exactly as the app does. `stated`: they are the values you sent. `carried`: the values the line already held, rescaled if you changed the amount. A value you sent is always kept as you sent it, even when the rest was computed.",
+  );
+
+/** The values the caller stated, on the canonical scale, as the bundle the domain works in. */
+function statedNutrients(args: LineArgs): Nutrients {
+  const milli = (value: number | undefined): number | null =>
+    value === undefined ? null : toThousandths(value);
+  return {
+    energyMilliKcal: milli(args.energyKcal),
+    proteinMilligrams: milli(args.proteinGrams),
+    carbsMilligrams: milli(args.carbsGrams),
+    fatMilligrams: milli(args.fatGrams),
+    fibreMilligrams: milli(args.fibreGrams),
+  };
+}
+
+/**
+ * The stated value where there is one, the computed value otherwise, metric by metric.
+ *
+ * `??` and not `||`: a stated `0` is a measured zero and has to survive, which is the same
+ * distinction PRD_FOOD 13.1 rests on everywhere else.
+ */
+function preferStated(stated: Nutrients, computed: Nutrients): Nutrients {
+  return {
+    energyMilliKcal: stated.energyMilliKcal ?? computed.energyMilliKcal,
+    proteinMilligrams: stated.proteinMilligrams ?? computed.proteinMilligrams,
+    carbsMilligrams: stated.carbsMilligrams ?? computed.carbsMilligrams,
+    fatMilligrams: stated.fatMilligrams ?? computed.fatMilligrams,
+    fibreMilligrams: stated.fibreMilligrams ?? computed.fibreMilligrams,
+  };
+}
+
+interface Snapshot {
+  readonly nutrients: Nutrients;
+  readonly from: "recipe" | "food" | "stated" | "carried";
+  readonly unresolved: readonly string[];
+}
+
+type ResolvedAmount =
+  | { thousandths: number; unit: "gram" | "millilitre" | "serving" }
+  | { none: true };
+
+/**
+ * The line's five values, worked out from what it references.
+ *
+ * The order of the questions is what keeps this honest. A caller that stated every metric is
+ * answered without a single read -- it is self-sufficient, PRD_FOOD 21.2 applies in full, and
+ * an identifier it happens to have mistyped is provenance that resolves nowhere and harms
+ * nothing. A caller that left even one metric for the server is relying on it, and from there
+ * every way of failing to resolve is a refusal that names its field rather than a line written
+ * empty. That is the same choice `plan_meal` makes about a recipe it cannot find, and for the
+ * same reason: the failure belongs in the turn that caused it, not on the person's day screen a
+ * week later.
+ */
+async function resolveSnapshot(
+  context: ToolContext,
+  args: LineArgs,
+  amount: ResolvedAmount,
+  weighedCooked: boolean,
+): Promise<{ snapshot: Snapshot } | { error: ReturnType<typeof invalidPayload> }> {
+  const stated = statedNutrients(args);
+  const complete = NUTRIENT_METRICS.every((metric) => stated[metric] !== null);
+  if (complete || (args.recipeId === undefined && args.foodId === undefined)) {
+    return { snapshot: { nutrients: stated, from: "stated", unresolved: [] } };
+  }
+
+  if (args.recipeId !== undefined) {
+    const stored = await context.services.getRecipe(context.identity.userId, args.recipeId);
+    if (stored === null || stored.meta.deletedAt !== null) {
+      return { error: notFound("recipe", args.recipeId, "recipe") };
+    }
+    if ("none" in amount || amount.unit !== "serving") {
+      return {
+        error: missingRequiredField(
+          "servings",
+          "Say how many servings of the recipe were eaten and Mue works the nutrition out from the recipe itself. A recipe is eaten in servings; a weight in grams describes an ingredient, not a portion of the dish.",
+        ),
+      };
+    }
+    const foods = await context.services.foodsByIds(
+      context.identity.userId,
+      stored.payload.ingredients.map((ingredient) => ingredient.foodId),
+    );
+    return {
+      snapshot: {
+        nutrients: preferStated(stated, recipeLineFor(stored.payload, foods, amount.thousandths)),
+        from: "recipe",
+        unresolved: unresolvedIngredientIds(stored.payload, foods),
+      },
+    };
+  }
+
+  const stored = await context.services.getFood(context.identity.userId, args.foodId as string);
+  if (stored === null || stored.meta.deletedAt !== null) {
+    return { error: notFound("food", args.foodId as string, "food") };
+  }
+  const food = stored.payload;
+  const weightField = food.referenceUnit === "gram" ? "quantityGrams" : "quantityMillilitres";
+
+  if ("none" in amount) {
+    if (args.portions === undefined) {
+      return {
+        error: missingRequiredField(
+          weightField,
+          `Say how much of ${food.name} was eaten and Mue works the nutrition out from its per-100 values. Give the weight, or \`portions\` when the food declares a usual serving.`,
+        ),
+      };
+    }
+    const portionsThousandths = toThousandths(args.portions);
+    if (usualServingWeightThousandthsOrNull(food, portionsThousandths) === null) {
+      return {
+        error: invalidPayload(
+          `${food.name} declares no usual serving, so a count of portions is not a weight Mue can work with. Give \`${weightField}\` instead, or ask the person what one portion weighs.`,
+          "portions",
+        ),
+      };
+    }
+    return {
+      snapshot: {
+        nutrients: preferStated(stated, usualServingContribution(food, portionsThousandths)),
+        from: "food",
+        unresolved: [],
+      },
+    };
+  }
+
+  if (amount.unit === "serving") {
+    return {
+      error: invalidPayload(
+        "`servings` counts servings of a recipe. For a count of a food's own usual portions use `portions`, and for a weight use `quantityGrams`.",
+        "servings",
+      ),
+    };
+  }
+  if (amount.unit !== food.referenceUnit) {
+    return {
+      error: invalidPayload(
+        `${food.name} is measured in ${food.referenceUnit === "gram" ? "grams" : "millilitres"} and its values are quoted per 100 of them, so an amount on the other scale would be worked out against figures that do not describe it. State the amount as \`${weightField}\`.`,
+        amount.unit === "gram" ? "quantityGrams" : "quantityMillilitres",
+      ),
+    };
+  }
+
+  return {
+    snapshot: {
+      nutrients: preferStated(stated, foodContribution(food, amount.thousandths, weighedCooked)),
+      from: "food",
+      unresolved: [],
+    },
+  };
+}
+
+/** The payload keys the five metrics become, absent when unknown (PRD_FOOD 13.1). */
+function nutrientPayload(nutrients: Nutrients): Record<string, number | undefined> {
+  const key = (value: number | null): number | undefined => value ?? undefined;
+  return {
+    energyMilliKcal: key(nutrients.energyMilliKcal),
+    proteinMilligrams: key(nutrients.proteinMilligrams),
+    carbsMilligrams: key(nutrients.carbsMilligrams),
+    fatMilligrams: key(nutrients.fatMilligrams),
+    fibreMilligrams: key(nutrients.fibreMilligrams),
+  };
+}
+
 // --- mue.create_food_log ----------------------------------------------------------------
 
 const createInputSchema = {
@@ -401,6 +618,12 @@ const writeDataSchema = z.object({
     .boolean()
     .describe(
       "True when the moment was worked out from the time rather than given. Say which moment it landed in when it was, so the person can correct it.",
+    ),
+  nutritionFrom: nutritionFromSchema,
+  unresolvedIngredientIds: z
+    .array(z.string())
+    .describe(
+      "Ingredients of the recipe whose food this server does not hold, so their contribution could not be worked out. Non-empty is why a nutrient below is still null: the meal is not lighter, part of it is unmeasured. Say which, rather than reporting a bare dash.",
     ),
   mutationId: z.string().describe("The mutation this call produced, recorded in the agent audit."),
   ...serverTimeShape,
@@ -507,6 +730,9 @@ async function createHandler(context: ToolContext, args: LineArgs) {
     );
   }
 
+  const resolved = await resolveSnapshot(context, args, amount, args.weighedCooked ?? false);
+  if ("error" in resolved) return refuse(context, CREATE_TOOL_NAME, resolved.error);
+
   const id = crypto.randomUUID();
   const payload = withOptional(
     {
@@ -525,11 +751,9 @@ async function createHandler(context: ToolContext, args: LineArgs) {
       weighedCooked: args.weighedCooked ?? false,
     },
     {
-      energyMilliKcal: nutrientThousandths(args.energyKcal, undefined, false),
-      proteinMilligrams: nutrientThousandths(args.proteinGrams, undefined, false),
-      carbsMilligrams: nutrientThousandths(args.carbsGrams, undefined, false),
-      fatMilligrams: nutrientThousandths(args.fatGrams, undefined, false),
-      fibreMilligrams: nutrientThousandths(args.fibreGrams, undefined, false),
+      // PRD_FOOD 13.1, computed once and frozen here: what the caller stated, and what the
+      // recipe or the food it named is worth for the amount eaten.
+      ...nutrientPayload(resolved.snapshot.nutrients),
       sourceRef: args.recipeId ?? args.foodId,
       amountLabel: args.amountLabel,
       ...("none" in amount
@@ -558,6 +782,7 @@ async function createHandler(context: ToolContext, args: LineArgs) {
     outcome.result.status,
     mutationId,
     when.deduced,
+    resolved.snapshot,
   );
 }
 
@@ -572,8 +797,15 @@ export const createFoodLogTool: MueTool = {
     "app does. Only send `slot` when the person said what kind of meal it was and it disagrees",
     "with the clock. Do not pick a moment because the field exists.",
     "",
-    "Values are for the amount actually eaten, not per 100 g, and every one you leave out stays",
-    "unknown. Never send 0 for a value you were not told: Mue would show it as a fact.",
+    "When the person ate a recipe or a food Mue already holds, send `recipeId` with `servings`,",
+    "or `foodId` with the weight, and leave the nutrition out. Mue works the line's own values",
+    "out from the recipe's ingredients or the food's per-100 figures -- arithmetic you cannot do",
+    "from here, because it needs rows you do not hold. Send a value only when the person weighed",
+    "or read it themselves; it is then kept exactly as you sent it.",
+    "",
+    "Values are for the amount actually eaten, not per 100 g, and every one you leave out with",
+    "nothing to work it out from stays unknown. Never send 0 for a value you were not told: Mue",
+    "would show it as a fact.",
     "",
     "The day must not be in the future. Retrying after a lost response is safe as long as you",
     "send the same `idempotencyKey`.",
@@ -688,6 +920,27 @@ async function updateHandler(context: ToolContext, args: LineArgs) {
 
   const cleared = new Set(args.clear ?? []);
   const keepAmount = "none" in amount && !cleared.has("quantity");
+
+  /**
+   * A correction rescales the snapshot the line already carries; it never reopens the recipe
+   * or the food it came from.
+   *
+   * PRD_FOOD 8.4 freezes a line at the moment it was written and PRD_FOOD 11 makes a recipe
+   * edit non-retroactive, so re-deriving here would quietly recompute a meal against a
+   * preparation that may have changed since it was eaten. `FoodAddDraft.recipeNutrientsOrNull`
+   * is this same rescale on the phone, and the comment beside it makes the same point.
+   *
+   * Only a change of amount *on the same scale* is a proportion. Grams turning into servings
+   * is not one, and clearing the amount removes a label rather than shrinking the portion.
+   */
+  const previousAmount = stored.payload.quantityThousandths;
+  const carried =
+    !("none" in amount) &&
+    stored.payload.quantityUnit === amount.unit &&
+    previousAmount !== undefined &&
+    previousAmount > 0
+      ? scaledNutrients(nutrientsOfLogEntry(stored.payload), amount.thousandths, previousAmount)
+      : nutrientsOfLogEntry(stored.payload);
   const payload = withOptional(
     {
       id: stored.payload.id,
@@ -702,27 +955,27 @@ async function updateHandler(context: ToolContext, args: LineArgs) {
     {
       energyMilliKcal: nutrientThousandths(
         args.energyKcal,
-        stored.payload.energyMilliKcal,
+        carried.energyMilliKcal ?? undefined,
         cleared.has("energyKcal"),
       ),
       proteinMilligrams: nutrientThousandths(
         args.proteinGrams,
-        stored.payload.proteinMilligrams,
+        carried.proteinMilligrams ?? undefined,
         cleared.has("proteinGrams"),
       ),
       carbsMilligrams: nutrientThousandths(
         args.carbsGrams,
-        stored.payload.carbsMilligrams,
+        carried.carbsMilligrams ?? undefined,
         cleared.has("carbsGrams"),
       ),
       fatMilligrams: nutrientThousandths(
         args.fatGrams,
-        stored.payload.fatMilligrams,
+        carried.fatMilligrams ?? undefined,
         cleared.has("fatGrams"),
       ),
       fibreMilligrams: nutrientThousandths(
         args.fibreGrams,
-        stored.payload.fibreMilligrams,
+        carried.fibreMilligrams ?? undefined,
         cleared.has("fibreGrams"),
       ),
       sourceRef: stored.payload.sourceRef,
@@ -763,7 +1016,11 @@ async function updateHandler(context: ToolContext, args: LineArgs) {
   });
   if (!outcome.ok) return outcome.failure;
 
-  return readBack(context, outcome.result.aggregateId, outcome.result.status, mutationId, false);
+  return readBack(context, outcome.result.aggregateId, outcome.result.status, mutationId, false, {
+    nutrients: carried,
+    from: "carried",
+    unresolved: [],
+  });
 }
 
 export const updateFoodLogTool: MueTool = {
@@ -881,6 +1138,7 @@ async function readBack(
   status: "applied" | "duplicate",
   mutationId: string,
   slotWasDeduced: boolean,
+  snapshot: Snapshot,
 ) {
   const current = await context.services.getFoodLogEntry(context.identity.userId, id);
   if (current === null) throw new Error("food_log_entries lost a row between apply and read");
@@ -888,6 +1146,8 @@ async function readBack(
     entry: lineView(current),
     created: status === "applied",
     slotWasDeduced,
+    nutritionFrom: snapshot.from,
+    unresolvedIngredientIds: [...snapshot.unresolved],
     mutationId,
     serverTime: new Date().toISOString(),
   });
