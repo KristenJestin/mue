@@ -60,6 +60,10 @@ function HomePage(): ReactElement {
       <p>
         <Link to="/sign-in">Sign in</Link> to link this browser to it.
       </p>
+      <p>
+        <Link to="/settings/agents">Settings → Agents</Link> is where you open the pairing window
+        for a new agent, see the ones already registered, and revoke one.
+      </p>
     </main>
   );
 }

@@ -79,3 +79,60 @@ export function readAuthConfig(env: Env = process.env): AuthConfig {
     secureCookies: !loopback,
   };
 }
+
+/**
+ * The OAuth 2.1 issuer identifier: the origin, never `<origin>/api/auth`.
+ *
+ * This function is the whole fix for a real client that landed on a 404. Better
+ * Auth's issuer defaults to its own base URL, which carries its base path, so it
+ * was `https://host:3000/api/auth`. RFC 8414 then puts the authorization-server
+ * metadata at `/.well-known/oauth-authorization-server/api/auth`, and OpenID
+ * Connect Discovery at `/api/auth/.well-known/openid-configuration` -- both of
+ * which the server answered, and neither of which the client asked for. It
+ * looked at the origin, found `/.well-known/openid-configuration` 404, fell back
+ * to the origin defaults RFC 8414 has no opinion about, and sent the human to
+ * `https://host:3000/authorize`. 404. The metadata was correct and unread.
+ *
+ * Making the issuer the origin puts the two documents at the two paths every
+ * client checks first, and `issuer` in them equals the URL they were fetched
+ * from, which is what RFC 8414 section 3.3 requires a strict client to verify.
+ * The endpoints do not move: an issuer is an identifier, not a directory, so the
+ * metadata still names `<origin>/api/auth/oauth2/authorize` and that is still
+ * where the endpoint is. Nothing is redirected and nothing is duplicated.
+ *
+ * The cost is that `iss` on every access token changes with it. Tokens minted
+ * under the old issuer no longer verify, so an agent authorised before this
+ * change authorises once more. `packages/api/src/mcp/route.ts` has to pass this
+ * same value to `requireMcpAuth`, whose default is Better Auth's base URL and
+ * would otherwise reject every token the server itself just signed.
+ *
+ * What the F-04 report later established, and what makes this load-bearing rather
+ * than tidy: Codex never reads `authorization_servers` at all. rmcp, the Rust MCP
+ * SDK it embeds, refuses an authorization-server candidate whose host is a private
+ * address -- `is_allowed_authorization_server_metadata_url` consults
+ * `Ipv4Addr::is_private()` and exempts only a loopback pair -- so on the owner's LAN
+ * it skips ours and warns `rejecting authorization server metadata URL
+ * https://<origin>/` at every initialisation. The trailing slash in that warning is
+ * how `url::Url` prints an empty path, not anything this server writes; no document
+ * of ours carries one. The warning predates this change, too: the entry named
+ * `<origin>/api/auth` before, and was skipped just the same.
+ *
+ * What changed is what happens after the skip. rmcp falls back to an ungated probe
+ * of the MCP endpoint's own origin, whose last candidate is
+ * `<origin>/.well-known/oauth-authorization-server` -- a 404 until this function
+ * moved the issuer, which is exactly why that client fell through to the legacy
+ * `<origin>/authorize` and 404ed there. So that one document is the only route a
+ * shipping client has to this authorization server, and it is reached only after
+ * the documented route has been refused. `mcp.integration.test.ts` walks the whole
+ * ladder rung by rung so it cannot quietly go away again.
+ */
+export function oauthIssuer(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    // `readAuthConfig` has already parsed the base URL, so this is unreachable
+    // through it. A hand-built config gets its value back rather than a throw
+    // from a function whose job is to name a string.
+    return baseUrl;
+  }
+}

@@ -15,9 +15,12 @@ import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.LoggedAmount
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Quantity
+import fr.kristenjestin.mue.domain.model.RecipeDetail
+import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.Servings
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -50,6 +53,28 @@ internal data class FoodAddDraft(
     val kindId: String = FoodLogKind.FOOD.id,
     /** The catalogue entry chosen, resolved against the repository rather than copied here. */
     val foodId: String? = null,
+    /**
+     * FR-FOOD-004: the recipe chosen, resolved against the repository exactly as [foodId] is.
+     *
+     * An id and not a `RecipeDetail`, for the reason the food is an id: a recipe corrected between
+     * being chosen and being logged has to be quoted as it is now, and an aggregate with its
+     * ingredients cannot cross a `Bundle`.
+     */
+    val recipeId: String? = null,
+    /**
+     * PRD_FOOD 12: this sheet is posing a **proposal** rather than writing a journal line.
+     *
+     * One flag and not a second draft, because the two share everything that matters: a recipe,
+     * a serving count and a moment. What it switches off is the half a proposal has no room for
+     * — PRD_FOOD 8.5 gives `MealPlanEntry` no hour, no quantity in grams and no quick add, and
+     * §8.5 is explicit that "un aliment simple se journalise directement et n'est pas planifié".
+     *
+     * It lives in the draft rather than being re-derived from [consumedOn] against today, and the
+     * difference is `Swap`: replacing **today's** dinner proposal is a planning gesture on a day
+     * the journal would also accept, so a date alone cannot say which of the two the sheet is.
+     * It also has to survive a process death, which is what the draft is for.
+     */
+    val planning: Boolean = false,
     /** ISO-8601. PRD_FOOD 15 refuses a future day, and the sheet is opened on a day already. */
     val consumedOn: String = "",
     /** `HH:mm` (PRD_FOOD 10.3), stored to the minute like the line it becomes. */
@@ -79,8 +104,36 @@ internal data class FoodAddDraft(
     val quickTitle: String = "",
     val quickEnergy: String = "",
     val quickProtein: String = "",
-    /** FR-FOOD-008 on a recipe line: how many servings were eaten. */
-    val servings: String = "",
+    /**
+     * FR-FOOD-008 on a recipe line: how many servings were eaten.
+     *
+     * Defaulted to one rather than left blank. It was a required field that opened empty, so
+     * choosing a recipe led straight to a refusal to save until a number had been typed — "il me
+     * force à saisir un servings en input. Premièrement on peut renseigner 1 par défaut". One
+     * serving is the commonest answer by a distance, it is what the per-serving figures above the
+     * field are already stated for, and it is inside the range `FoodValidation` enforces, so the
+     * form opens on something true and saveable instead of on an error waiting to happen.
+     */
+    val servings: String = DEFAULT_SERVINGS,
+    /**
+     * FR-FOOD-003: the scan path was taken, and no food has come out of it yet.
+     *
+     * A flag and not a [FoodLogKind]: a scan does not produce a *kind* of line — it produces a
+     * catalogue food, and the line that follows is an ordinary `FOOD` one indistinguishable from
+     * a searched entry. What it does produce is a stage with no food in it yet, which is exactly
+     * one bit of information, and this is that bit.
+     */
+    val scanning: Boolean = false,
+    /**
+     * The barcode field, character for character (PRD_FOOD 18).
+     *
+     * **Both paths write here**, and that is the point rather than an implementation detail.
+     * PRD_FOOD 18 makes the typed number "une alternative complète à la caméra", so the camera
+     * fills this field instead of bypassing it: what was decoded is on screen, in the same box, in
+     * a form that can be corrected before it is looked up — and a screen reader announces the same
+     * value whichever of the two produced it.
+     */
+    val scanBarcode: String = "",
 ) {
 
     val kind: FoodLogKind get() = FoodLogKind.fromId(kindId)
@@ -88,6 +141,8 @@ internal data class FoodAddDraft(
     val slot: MealSlot get() = MealSlot.fromId(slotId)
 
     val food: FoodId? get() = foodId?.let(::FoodId)
+
+    val recipe: RecipeId? get() = recipeId?.let(::RecipeId)
 
     val entry: FoodLogEntryId? get() = entryId?.let(::FoodLogEntryId)
 
@@ -138,14 +193,41 @@ internal data class FoodAddDraft(
     fun backToPaths(): FoodAddDraft = copy(
         kindId = FoodLogKind.FOOD.id,
         foodId = null,
+        recipeId = null,
         quantity = "",
         portionThousandths = null,
         weighedCooked = false,
         quickTitle = "",
         quickEnergy = "",
         quickProtein = "",
-        servings = "",
+        servings = DEFAULT_SERVINGS,
+        scanning = false,
+        scanBarcode = "",
     )
+
+    /**
+     * The servings field moved one step, or this draft unchanged at a bound.
+     *
+     * Every part of the arithmetic belongs to `Servings`: the quarter is
+     * [Servings.CONSUMED_STEP_THOUSANDTHS], and whether the result is still a serving count is
+     * [FoodValidation.validateConsumedServings]'s answer, not a comparison written here. A step
+     * that would leave the range returns `this`, which is what greys the button out.
+     *
+     * A value that does not parse at all — which only a stored draft from an older build can be —
+     * steps to one serving rather than nowhere, so the control is never dead.
+     */
+    fun steppedServings(up: Boolean): FoodAddDraft {
+        val current = FoodValidation.validateConsumedServings(servings).valueOrNull
+            ?: return copy(servings = DEFAULT_SERVINGS)
+        val step = Servings.CONSUMED_STEP_THOUSANDTHS * if (up) 1 else -1
+        val moved = Servings.ofThousandthsOrNull((current.thousandths + step).toLong())
+            ?.let { FoodValidation.validateConsumedServings(it.count).valueOrNull }
+            ?: return this
+        return copy(servings = FoodLabels.servings(moved))
+    }
+
+    /** Whether [steppedServings] would move, which is the only thing the buttons need to know. */
+    fun canStepServings(up: Boolean): Boolean = steppedServings(up).servings != servings
 
     /**
      * Whether this draft holds anything the person actually wrote.
@@ -162,9 +244,32 @@ internal data class FoodAddDraft(
             quickTitle.isNotBlank() ||
             quickEnergy.isNotBlank() ||
             quickProtein.isNotBlank() ||
-            servings.isNotBlank()
+            /*
+             * Against the default rather than against blankness. The field now opens holding one
+             * serving, so `isNotBlank` would call every untouched recipe line "work in progress"
+             * and put the sheet back to reopening on a stage nobody chose — the very complaint
+             * ("j'ai plus accès aux 3 menus d'avant") this property was written to end. Moving
+             * the stepper *is* typing by this rule's own logic, and moving it back to one is
+             * indistinguishable from never having touched it, which is the right answer.
+             */
+            servings != DEFAULT_SERVINGS ||
+            // Thirteen digits off a jar is typing by any measure, and losing them to a `Close`
+            // pressed by accident would mean reading the label again. A code the *camera* put
+            // there counts the same: what makes it worth keeping is that it is on screen and
+            // correct, not how it got there.
+            scanBarcode.isNotBlank()
 
     companion object {
+
+        /**
+         * What the servings field opens on: one whole serving.
+         *
+         * Rendered by [FoodLabels] from `Servings.ONE` rather than written as `"1"`, so the
+         * string is the one the rest of the module would print for the same quantity — the
+         * comparison in `hasTypedContent` and the stepper's own output both have to match it
+         * exactly, and a hand-typed literal would be a second spelling waiting to disagree.
+         */
+        val DEFAULT_SERVINGS: String = FoodLabels.servings(Servings.ONE)
 
         /** `HH:mm`, which is what [FoodValidation.validateConsumedAt] reads back. */
         fun format(time: LocalTime): String =
@@ -182,12 +287,22 @@ internal data class FoodAddDraft(
             slot: MealSlot?,
             today: LocalDate,
             now: LocalTime,
+            /** PRD_FOOD 12: a proposal is being posed rather than a line written. */
+            planning: Boolean = false,
         ): FoodAddDraft {
             val day = date ?: today
             val moment = slot ?: MealSlotRules.slotFor(MealSlotRules.normalize(now))
             val time = MealSlotRules.defaultTime(moment, day, today, now)
             return FoodAddDraft(
+                planning = planning,
                 consumedOn = day.toString(),
+                /*
+                 * A proposal carries **no hour at all** (PRD_FOOD 8.5), and the clock's moment is
+                 * not its moment either. The time is still written so the field round-trips if
+                 * this draft is ever read as a journal one, but the moment is left unpinned
+                 * unless a slot was carried in: `plannedSlot` below decides it from the dish and
+                 * from the day, which is the only honest answer where there is no "now".
+                 */
                 consumedAt = format(time),
                 slotId = moment.id,
                 slotPinned = slot != null,
@@ -207,6 +322,14 @@ internal data class FoodAddDraft(
                 entryId = entry.id.value,
                 kindId = entry.kind.id,
                 foodId = entry.foodRef?.value,
+                /*
+                 * FR-FOOD-008: the recipe a stored line came from is **not** put back in the
+                 * draft. PRD_FOOD 8.4 froze this line's values and PRD_FOOD 11 makes a recipe
+                 * edit non-retroactive, so a correction rescales the snapshot it carries; loading
+                 * the recipe here would quietly recompute the line against a preparation that may
+                 * have changed since.
+                 */
+                recipeId = null,
                 consumedOn = entry.consumedOn.toString(),
                 consumedAt = format(entry.consumedAt),
                 slotId = entry.slot.id,
@@ -229,7 +352,12 @@ internal data class FoodAddDraft(
                 quickProtein = entry.nutrients.protein
                     ?.let { FoodLabels.macro(it, approximate = false).substringBefore(' ') }
                     .orEmpty(),
-                servings = entry.consumedServings?.let(FoodLabels::servings).orEmpty(),
+                /*
+                 * A line that counts no servings — anything but a recipe — falls back to the
+                 * default rather than to an empty string, so that a field this stage never shows
+                 * cannot make a freshly loaded correction look edited.
+                 */
+                servings = entry.consumedServings?.let(FoodLabels::servings) ?: DEFAULT_SERVINGS,
             )
         }
 
@@ -373,6 +501,48 @@ internal fun FoodAddDraft.quickNutrientsOrNull(): Nutrients? =
         ?.nutrients
 
 /**
+ * The recipe a **new** line is being built from, with the catalogue its ingredients name.
+ *
+ * The two travel together for `RecipeDetailViewModel`'s reason: a detail and a catalogue read a
+ * frame apart would print `—` over a figure that is known. A food that is simply absent is not an
+ * error — PRD_FOOD 21.2 makes it the ordinary way a recipe arrives before the food it references
+ * — and its contribution is unknown, which the strict sum of PRD_FOOD 13.1 already propagates.
+ *
+ * Nothing here adds anything up: [NutritionMath] owns every figure, and this only says which
+ * aggregate to ask it about.
+ */
+internal data class FoodAddRecipe(
+    val detail: RecipeDetail,
+    val foods: Map<FoodId, Food> = emptyMap(),
+) {
+    val id: RecipeId get() = detail.id
+
+    val name: String get() = detail.recipe.name
+
+    val baseServings: Int get() = detail.recipe.baseServings
+
+    /** PRD_FOOD 13.1: `valeur par portion = total de la recette / baseServings`. */
+    val perServing: Nutrients get() = NutritionMath.perServing(detail, foods)
+
+    /** PRD_FOOD 13.1: `ligne RECIPE = valeur par portion × portions consommées`. */
+    fun line(servings: Servings): Nutrients =
+        NutritionMath.recipeLine(detail, foods, servings)
+}
+
+/**
+ * FR-FOOD-004: what a new recipe line is worth, or null while the servings do not parse.
+ *
+ * The counterpart of [recipeNutrientsOrNull], and deliberately a different function: that one
+ * rescales a snapshot a line already carries (PRD_FOOD 8.4), this one computes a snapshot that
+ * does not exist yet from the recipe as it is right now.
+ */
+internal fun FoodAddDraft.newRecipeNutrientsOrNull(recipe: FoodAddRecipe?): Nutrients? {
+    val chosen = recipe ?: return null
+    val eaten = FoodValidation.validateConsumedServings(servings).valueOrNull ?: return null
+    return chosen.line(eaten)
+}
+
+/**
  * FR-FOOD-008 on a recipe line: the frozen snapshot rescaled to the servings now stated.
  *
  * PRD_FOOD 8.4 keeps a line's values as they were saved and PRD_FOOD 11 makes a recipe edit
@@ -400,6 +570,8 @@ internal fun FoodAddDraft.resolve(
     food: Food?,
     original: FoodLogEntry?,
     today: LocalDate,
+    /** FR-FOOD-004: the recipe a new line is being built from, null on every other path. */
+    recipe: FoodAddRecipe? = null,
     id: FoodLogEntryId = FoodLogEntryId.random(),
 ): FoodAddResolution {
     val day = date(today)
@@ -468,24 +640,61 @@ internal fun FoodAddDraft.resolve(
             )
         }
 
+        /*
+         * FR-FOOD-004 and FR-FOOD-008, in that order, because they are two different lines.
+         *
+         * A **new** line is computed from the recipe as it stands now: `NutritionMath.recipeLine`
+         * over the aggregate and the catalogue behind it. A **correction** rescales the snapshot
+         * the stored line already carries — PRD_FOOD 8.4 froze those values and PRD_FOOD 11 makes
+         * a recipe edit non-retroactive, so reopening the recipe would silently rewrite history.
+         *
+         * The correction is tried first, so a line being edited can never be recomputed even if
+         * a recipe happens to be loaded. Reaching neither means a recipe line with nothing behind
+         * it, which is the state the sheet used to be able to enter and cannot any longer: `Use a
+         * recipe` now chooses one before this stage exists.
+         */
         FoodLogKind.RECIPE -> {
-            val previous = original ?: return refuse(FoodAddErrors.EMPTY)
             val eaten = when (val parsed = FoodValidation.validateConsumedServings(servings)) {
                 is Validated.Invalid -> return refuse(FoodAddErrors(servings = parsed.message))
                 is Validated.Valid -> parsed.value
             }
-            val rescaled = recipeNutrientsOrNull(previous)
-                ?: return refuse(FoodAddErrors(servings = FoodValidation.CONSUMED_SERVINGS_ERROR))
             val amount = LoggedAmount.Portioned(eaten)
-            line(
-                kind = FoodLogKind.RECIPE,
-                title = previous.title,
-                amount = amount,
-                nutrients = rescaled,
-                estimation = previous.estimation,
-                amountLabel = FoodLabels.amountLabel(amount),
-                sourceRef = previous.sourceRef,
-            )
+
+            when {
+                original != null -> {
+                    val rescaled = recipeNutrientsOrNull(original) ?: return refuse(
+                        FoodAddErrors(servings = FoodValidation.CONSUMED_SERVINGS_ERROR),
+                    )
+                    line(
+                        kind = FoodLogKind.RECIPE,
+                        title = original.title,
+                        amount = amount,
+                        nutrients = rescaled,
+                        estimation = original.estimation,
+                        amountLabel = FoodLabels.amountLabel(amount),
+                        sourceRef = original.sourceRef,
+                    )
+                }
+
+                recipe != null -> line(
+                    kind = FoodLogKind.RECIPE,
+                    title = recipe.name,
+                    amount = amount,
+                    nutrients = recipe.line(eaten),
+                    /*
+                     * PRD_FOOD 8.4 names two approximate lines: a quick add, and a recipe holding
+                     * an approximate ingredient. A `Food` carries no estimation of its own, so a
+                     * recipe assembled from catalogue entries is measured — and an ingredient
+                     * whose food is missing contributes an *unknown*, which the strict sum of
+                     * PRD_FOOD 13.1 propagates as `—` rather than as an approximation.
+                     */
+                    estimation = Estimation.MEASURED,
+                    amountLabel = FoodLabels.amountLabel(amount),
+                    sourceRef = recipe.id.value,
+                )
+
+                else -> refuse(FoodAddErrors.EMPTY)
+            }
         }
 
         FoodLogKind.FOOD -> {
@@ -536,4 +745,80 @@ internal fun FoodAddDraft.resolve(
             }
         }
     }
+}
+
+/**
+ * Which moment this proposal lands on (PRD_FOOD 12).
+ *
+ * The one function both the screen and the write ask, so the moment printed on the sheet and the
+ * moment stored in `(plannedOn, slot)` are the same value by construction rather than by two
+ * agreeing derivations.
+ *
+ * A moment chosen by hand wins outright — [FoodAddDraft.slotPinned] is what the override panel
+ * and `Swap` both set. Otherwise [MealSlotRules.plannedSlotFor] answers from the dish's own type
+ * and the moments the day already holds, because a day still to come has no clock to ask. Before
+ * a recipe has been chosen there is no dish to ask about either, so the draft's own value stands;
+ * it is never saved in that state, since PRD_FOOD 8.5 gives a proposal no meaning without one.
+ */
+internal fun FoodAddDraft.plannedSlot(
+    recipe: FoodAddRecipe?,
+    taken: Set<MealSlot> = emptySet(),
+): MealSlot {
+    if (slotPinned || recipe == null) return slot
+    return MealSlotRules.plannedSlotFor(recipe.detail.recipe.type, taken)
+}
+
+/** Either the proposal that would be posed, or the refusals that stopped it (PRD_FOOD 15). */
+internal sealed interface MealPlanResolution {
+
+    data class Ready(val entry: MealPlanEntry) : MealPlanResolution
+
+    data class Refused(val errors: FoodAddErrors) : MealPlanResolution
+}
+
+/**
+ * The proposal this draft would pose, or the fields that refuse it (PRD_FOOD 12 and 15).
+ *
+ * Three facts and no more, which is exactly what FR-PLAN-001 asks the manual path to present:
+ * a date, a moment and a number of servings — over a recipe, because §8.5 admits nothing else.
+ *
+ * Every bound is [FoodValidation]'s. The day goes through `validatePlannedOn`, which is the
+ * planning rule and **not** the journal's: today or later, up to `MealPlanEntry.MAX_DAYS_AHEAD`.
+ * The count goes through `validateConsumedServings`, deliberately the very same counter a
+ * consumption uses — PRD_FOOD 15 gives `plannedServings` no range of its own, and inventing a
+ * second one would let a proposal be posed that could never be confirmed.
+ *
+ * Nothing is computed here. A proposal carries no nutritional value at all (PRD_FOOD 12: it
+ * "n'entre dans aucun total tant qu'elle n'est pas confirmée"), so there is nothing to freeze —
+ * which is the whole difference between this and `FoodAddDraft.resolve`.
+ */
+internal fun FoodAddDraft.resolvePlan(
+    recipe: FoodAddRecipe?,
+    slot: MealSlot,
+    today: LocalDate,
+): MealPlanResolution {
+    val day = date(today)
+    val dateError = FoodValidation.validatePlannedOn(day, today).errorMessage
+    val counted = FoodValidation.validateConsumedServings(servings)
+
+    /*
+     * A missing recipe is refused with no message of its own. PRD_FOOD 15 puts a refusal "à côté
+     * du champ concerné", and there is no field here to put one beside: the stage that asks for
+     * servings is only reached once a recipe has been chosen, so this branch is the unreachable
+     * one that must still not write a row.
+     */
+    if (recipe == null || dateError != null || counted !is Validated.Valid) {
+        return MealPlanResolution.Refused(
+            FoodAddErrors(servings = counted.errorMessage, date = dateError),
+        )
+    }
+
+    return MealPlanResolution.Ready(
+        MealPlanEntry(
+            plannedOn = day,
+            slot = slot,
+            recipeId = recipe.id,
+            plannedServings = counted.value,
+        ),
+    )
 }

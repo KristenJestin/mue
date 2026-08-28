@@ -4,6 +4,9 @@ import android.content.Context
 import fr.kristenjestin.mue.data.local.database.CiqualSeeding
 import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.datastore.foodCatalogueDataStore
+import fr.kristenjestin.mue.data.local.datastore.userPreferencesDataStore
+import fr.kristenjestin.mue.data.remote.openfoodfacts.KtorProductLookup
+import fr.kristenjestin.mue.data.repository.DataStoreScanPreferencesRepository
 import fr.kristenjestin.mue.data.repository.RoomFoodCatalogueRepository
 import fr.kristenjestin.mue.data.repository.RoomFoodLogRepository
 import fr.kristenjestin.mue.data.repository.RoomMealPlanRepository
@@ -12,20 +15,24 @@ import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.repository.FoodCatalogueRepository
 import fr.kristenjestin.mue.domain.repository.FoodLogRepository
 import fr.kristenjestin.mue.domain.repository.MealPlanRepository
+import fr.kristenjestin.mue.domain.repository.ProductLookup
 import fr.kristenjestin.mue.domain.repository.RecipeRepository
+import fr.kristenjestin.mue.domain.repository.ScanPreferencesRepository
+import io.ktor.client.HttpClient
 
 /**
  * Everything the Food module needs, registered in one place.
  *
  * [AppContainer] gains a **single** property for the whole module, exactly as the Activity Timer
- * and server synchronisation did before it, so the six screens still to be built — `Day`,
- * `Trends`, the catalogue, the recipe editor, the scanner and the planner — can be wired against
- * this surface without the shipped container having to move again for each of them.
+ * and server synchronisation did before it, and that is what has kept it still: the day, the
+ * catalogue, the recipe editor and now the scanner have all been wired against this surface
+ * without the shipped container moving once. `Trends` and the planner are the two left.
  *
  * Lazy, like everything in [AppContainer]: the four repositories open the database, and a cold
- * start that never reaches the Food tab must not pay for it. [outbox] is taken from the sync
- * container rather than built again — one mint point for `mutation_id` across every aggregate is
- * what makes the outbox drainable in one pass.
+ * start that never reaches the Food tab must not pay for it. The scanner's HTTP client is laziest
+ * of the lot — a phone that never scans never creates a connection pool. [outbox] is taken from
+ * the sync container rather than built again: one mint point for `mutation_id` across every
+ * aggregate is what makes the outbox drainable in one pass.
  */
 class FoodContainer(
     private val applicationContext: Context,
@@ -62,5 +69,31 @@ class FoodContainer(
      */
     val ciqualSeeding: CiqualSeeding by lazy {
         CiqualSeeding(applicationContext.assets, foodCatalogueRepository)
+    }
+
+    /**
+     * FR-FOOD-003's one network call (PRD_FOOD 9.2), on a client of its own.
+     *
+     * The client is **not** `SyncContainer.httpClient`, and [KtorProductLookup] carries the whole
+     * argument: this request goes to a third party, and the shared client exists to carry a
+     * bearer to the server the user paired with. Building it here rather than taking it from
+     * `AppContainer` is also what keeps this container's constructor unchanged — the Food module
+     * still costs the application exactly one property.
+     *
+     * Both are lazy, so a phone that never opens the scan path never creates an OkHttp dispatcher,
+     * never opens a connection pool and never loads the engine.
+     */
+    val productLookupClient: HttpClient by lazy { KtorProductLookup.defaultClient() }
+
+    val productLookup: ProductLookup by lazy { KtorProductLookup(productLookupClient) }
+
+    /**
+     * PRD_FOOD 17 and 18: whether the camera has already been asked for once.
+     *
+     * In the app's existing preferences file, beside the timer's own flag and for the same reason
+     * — nothing shows it and only the permission request reads it.
+     */
+    val scanPreferencesRepository: ScanPreferencesRepository by lazy {
+        DataStoreScanPreferencesRepository(applicationContext.userPreferencesDataStore)
     }
 }

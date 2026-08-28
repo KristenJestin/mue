@@ -21,23 +21,56 @@ data class MealPlanKey(
      * The identity as the synchronisation layer addresses it, under
      * [FoodAggregates.TYPE_MEAL_PLAN_ENTRY].
      *
-     * ISO date, a slash, and the slot's stable id — sortable, stable across devices, and
-     * readable in an audit trail. [parseOrNull] is its exact inverse.
+     * ISO date, a colon, and the slot's stable id — sortable, stable across devices, and readable
+     * in an audit trail. [parseOrNull] is its inverse.
+     *
+     * ## The separator was a slash, and it could never have been sent
+     *
+     * `aggregateIdSchema` in `packages/contracts` is `^[A-Za-z0-9._:-]+$`, and `/` is not in it.
+     * Nothing noticed, because `mealPlanEntry` was not in `AGGREGATE_TYPES` either: every
+     * proposal saved on this phone was journalled with a `/`, filtered out of every send by
+     * `SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES`, and would have been refused *at the envelope* —
+     * before any handler, before any storage — on the day the aggregate joined the contract.
+     * They had been accumulating for a week.
+     *
+     * So the separator is [SEPARATOR], a colon, which the identifier alphabet does accept.
+     * Changing how a row is *written* does nothing for rows already written, which is why
+     * `MealPlanIdRepair` exists; see that file for why rewriting these particular identifiers is
+     * provably safe.
+     *
+     * The alternative was widening `aggregateIdSchema` to admit `/`. It was rejected: an
+     * identifier appears in log lines, in error contexts and in MCP tool arguments, and an
+     * alphabet with no path separator in it is worth keeping for the seven aggregates that do not
+     * need one.
      */
     val aggregateId: String get() = "$plannedOn$SEPARATOR${slot.id}"
 
     companion object {
-        private const val SEPARATOR: Char = '/'
+        /** In `aggregateIdSchema`'s alphabet, which [LEGACY_SEPARATOR] is not. */
+        const val SEPARATOR: Char = ':'
+
+        /**
+         * What [aggregateId] used to write, and what every row saved before this change carries.
+         *
+         * It is still *read*, and only read: [parseOrNull] accepts either spelling so a stored
+         * identifier stays meaningful while `MealPlanIdRepair` works through the outbox, and so a
+         * navigation key restored from saved instance state across the upgrade still resolves to
+         * the day it named. Nothing writes it.
+         */
+        const val LEGACY_SEPARATOR: Char = '/'
 
         /**
          * Reads back what [aggregateId] wrote, and null for anything else.
          *
-         * Total and non-throwing: an unparseable id arrives from the network, and a malformed
-         * one is a proposal to ignore, never a crash on the day screen. Note that the slot side
+         * Total and non-throwing: an unparseable id arrives from the network, and a malformed one
+         * is a proposal to ignore, never a crash on the day screen. Note that the slot side
          * cannot fail — `MealSlot.fromId` is total — so only the date can reject a string.
+         *
+         * Both separators are accepted, and the *last* of either wins. Neither an ISO date nor a
+         * slot id contains one, so there is nothing ambiguous to resolve.
          */
         fun parseOrNull(aggregateId: String): MealPlanKey? {
-            val separator = aggregateId.lastIndexOf(SEPARATOR)
+            val separator = aggregateId.indexOfLast { it == SEPARATOR || it == LEGACY_SEPARATOR }
             if (separator <= 0 || separator == aggregateId.lastIndex) return null
             val date = try {
                 LocalDate.parse(aggregateId.substring(0, separator))
@@ -47,6 +80,21 @@ data class MealPlanKey(
             val slotId = aggregateId.substring(separator + 1)
             if (MealSlot.entries.none { it.id == slotId }) return null
             return MealPlanKey(date, MealSlot.fromId(slotId))
+        }
+
+        /**
+         * The identifier a current build would write for a stored one, or null when it already
+         * writes it.
+         *
+         * The decision lives here, beside the two spellings, so `MealPlanIdRepair` decides
+         * *whether* to repair a row and this decides *what to*. A caller that has to construct
+         * the new form itself is a second place for the separator to be spelled.
+         */
+        fun canonicalOrNull(storedAggregateId: String): String? {
+            if (!storedAggregateId.contains(LEGACY_SEPARATOR)) return null
+            val key = parseOrNull(storedAggregateId) ?: return null
+            val canonical = key.aggregateId
+            return if (canonical == storedAggregateId) null else canonical
         }
     }
 }

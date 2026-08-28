@@ -62,6 +62,21 @@ async function applyUpsert(
   mutation: Extract<MutationEnvelope, { op: "upsert" }>,
   now: Date,
 ): Promise<ApplyOutcome> {
+  if (mutation.aggregateType !== "measurement") {
+    // Unreachable: the registry dispatches on `aggregateType`, and the envelope's
+    // upsert arm pins each payload to its own type. Kept because it is also what
+    // narrows the union for the compiler -- so a second aggregate whose payload
+    // happened to fit `measurements` could not be written into it by mistake.
+    return {
+      status: "rejected",
+      error: mueError(
+        "sync.unknown_aggregate_type",
+        "This mutation was routed to the measurement handler and does not belong to it.",
+        false,
+        { aggregateId: mutation.aggregateId },
+      ),
+    };
+  }
   const payload: MeasurementPayloadV1 = mutation.payload;
   const state = await readState(tx, context.userId, mutation.aggregateId);
 

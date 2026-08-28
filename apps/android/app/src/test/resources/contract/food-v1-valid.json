@@ -1,0 +1,18 @@
+{
+  "barcode": "5701092103246",
+  "brand": "Isey",
+  "carbsMilligrams": 4000,
+  "cookedLabel": "Cooked",
+  "energyMilliKcal": 63000,
+  "fatMilligrams": 200,
+  "id": "7c3d9e15-6a2b-4f80-9c47-1e5d8a2b3c40",
+  "name": "Skyr nature",
+  "proteinMilligrams": 10400,
+  "rawLabel": "Raw",
+  "referenceUnit": "gram",
+  "servingLabel": "pot",
+  "servingThousandths": 150000,
+  "source": "open_food_facts",
+  "sourceId": "5701092103246",
+  "sourceVersion": "2026-07-14"
+}

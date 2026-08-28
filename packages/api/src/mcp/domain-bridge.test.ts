@@ -7,16 +7,17 @@ describe("the domain bridge", () => {
   });
 
   /**
-   * A deliberate tripwire, and the only honest way to keep PRD section 20.2 -- one rule,
-   * one implementation, called by the routes, the server functions and the MCP tools
-   * alike -- from quietly having two.
+   * The tripwire, now green from the other side.
    *
-   * While `@mue/domain` exports no activity write, `./provisional-activity-write.ts`
-   * stands in and this passes. The day the sync engine lands one, the bridge switches
-   * to it on its own and this test fails, which is the reminder to delete the
-   * scaffolding file and this test with it.
+   * While `@mue/domain` exported no activity write, `./provisional-activity-write.ts` stood in
+   * and this test asserted `true` — the reminder that PRD section 20.2 was being kept only by
+   * convention, with two implementations of one rule. The sync engine landed
+   * `createActivitySession`, the bridge switched to it, and the scaffolding file is deleted.
+   *
+   * The assertion is inverted rather than removed, because it is the only thing that would notice
+   * a fallback being reintroduced.
    */
-  test("still falls back to the scaffolding, because @mue/domain has no activity write yet", () => {
-    expect(isUsingProvisionalActivityWrite()).toBe(true);
+  test("no longer falls back to scaffolding: the rule lives in @mue/domain", () => {
+    expect(isUsingProvisionalActivityWrite()).toBe(false);
   });
 });

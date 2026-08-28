@@ -1,0 +1,19 @@
+{
+  "amountLabel": "1.5 servings",
+  "carbsMilligrams": 18200,
+  "consumedAt": "20:15",
+  "consumedOn": "2026-08-18",
+  "energyMilliKcal": 284000,
+  "estimation": "measured",
+  "fatMilligrams": 3100,
+  "fromPlan": "2026-08-18:dinner",
+  "id": "2c5fa948-7d01-4e30-9589-6a1b4c7d2e05",
+  "kind": "recipe",
+  "proteinMilligrams": 24600,
+  "quantityThousandths": 1500,
+  "quantityUnit": "serving",
+  "slot": "dinner",
+  "sourceRef": "b5e8f271-0c3a-4d69-8e12-9f4a7b0c5d38",
+  "title": "Skyr bowl",
+  "weighedCooked": false
+}

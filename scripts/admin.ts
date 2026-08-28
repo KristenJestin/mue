@@ -3,11 +3,18 @@
  * Local administration for Mue Platform.
  *
  * Section 15.3 assigns the session, device and agent listing to the Web admin
- * of PRD_WEB.md, then closes with the sentence that makes this file a
- * deliverable: *"Avant la livraison du produit Web complet, les memes
- * revocations doivent rester possibles par une commande d'administration
- * locale documentee."* Section 21 turns it into an acceptance criterion --
- * every agent has a revocable identity -- and the Web product does not exist.
+ * of PRD_WEB.md, then closes with the sentence that made this file a
+ * deliverable before that admin existed: *"Avant la livraison du produit Web
+ * complet, les memes revocations doivent rester possibles par une commande
+ * d'administration locale documentee."* Section 21 turns it into an acceptance
+ * criterion -- every agent has a revocable identity.
+ *
+ * `apps/platform/src/routes/settings.agents.tsx` now serves the agent half of
+ * that listing over the Web, and calls these same functions. This command is not
+ * superseded by it and is not going away: it is the path that still works when
+ * the Web shell will not build, when the session cookie is the thing that is
+ * broken, or when the process is not running at all. Sessions and devices are
+ * still only here.
  *
  * Usage, from the repository root:
  *
@@ -32,7 +39,7 @@ const USAGE = `mue admin
 
   sessions list                  every session, newest use first
   sessions revoke <sessionId>    drop one session: that device stops syncing
-  agents list                    every OAuth client, its scopes and last use
+  agents list                    every OAuth client, what it was granted and its last use
   agents revoke <clientId>       disable an agent and revoke its live tokens
 `;
 
@@ -97,8 +104,14 @@ async function main(argv: readonly string[]): Promise<void> {
             agent.name ?? "-",
             agent.disabled ? "REVOKED" : "active",
             agent.discovered ? "cimd" : "registered",
+            `since ${when(agent.registeredAt)}`,
             `last used ${when(agent.lastUsedAt)}`,
-            agent.scopes.length === 0 ? "no scopes" : agent.scopes.join(","),
+            // What it holds, not what it may ask for: a dynamic registration is
+            // stamped with the server's whole allowed set, so `agent.scopes` says
+            // almost nothing about any one agent.
+            agent.grantedScopes.length === 0
+              ? "granted nothing"
+              : `granted ${agent.grantedScopes.join(",")}`,
           ].join("  "),
         );
       }

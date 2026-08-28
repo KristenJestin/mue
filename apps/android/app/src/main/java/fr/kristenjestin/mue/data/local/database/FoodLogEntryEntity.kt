@@ -109,13 +109,23 @@ data class FoodLogEntryEntity(
 
         /**
          * `MealSlot` persists by its stable id, and those ids do not sort into the order of the
-         * day: `breakfast, dinner, lunch, snack` is alphabetical and wrong. The order of
-         * `MealSlot.ORDERED` is spelled out here so that every query that groups a day by moment
-         * agrees with the screen, and so that adding a moment is a change in one place.
+         * day: `breakfast, dinner, evening_snack, lunch, morning_snack, snack` is alphabetical
+         * and wrong. The order of `MealSlot.ORDERED` is spelled out here so that every query that
+         * groups a day by moment agrees with the screen.
+         *
+         * It is a `const`, because Room's `@Query` is an annotation and only a compile-time
+         * constant can be spliced into one — which is precisely why it cannot be built from
+         * `MealSlot.ORDERED` at runtime and has to be a transcription. A transcription is a thing
+         * that can fall out of date silently: a moment the `CASE` does not name lands in `ELSE`
+         * and sorts to the end of the day, with valid SQL and rows that come back. `SlotOrderSqlTest`
+         * reads it back against the enum for that reason, and `MealPlanEntryEntity.SLOT_ORDER`
+         * points at this one string rather than repeating it — the two used to be two copies, and
+         * two copies is one of them being updated.
          */
         const val SLOT_ORDER =
-            "CASE slot WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 " +
-                "WHEN 'snack' THEN 2 WHEN 'dinner' THEN 3 ELSE 4 END"
+            "CASE slot WHEN 'breakfast' THEN 0 WHEN 'morning_snack' THEN 1 " +
+                "WHEN 'lunch' THEN 2 WHEN 'snack' THEN 3 WHEN 'dinner' THEN 4 " +
+                "WHEN 'evening_snack' THEN 5 ELSE 6 END"
     }
 }
 

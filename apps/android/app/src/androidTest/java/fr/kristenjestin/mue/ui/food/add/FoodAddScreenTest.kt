@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertCountEquals
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -26,6 +28,7 @@ import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.logic.FoodValidation
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -61,6 +64,7 @@ class FoodAddScreenTest {
     private var deleted = 0
     private var timeOpened = 0
     private var backedOut = 0
+    private var closed = 0
     private var stepped = mutableListOf<Boolean>()
 
     // region the ways in (PRD_FOOD 7)
@@ -105,41 +109,76 @@ class FoodAddScreenTest {
      * The way out of a chosen path, on the glass (PRD_FOOD 7).
      *
      * "j'ai plus accès aux 3 menus d'avant." The sheet had no step back at all: once a path was
-     * taken the three cards were unreachable until a line was saved or deleted. It is the first
-     * thing in the column because it is what a reader is looking for the moment they realise they
-     * took the wrong way in — anywhere under the quantity it would be below the fold at a large
-     * text size.
+     * taken the three cards were unreachable until a line was saved or deleted.
+     *
+     * It is now the **header's own arrow**, and there is nothing else. It used to be a second
+     * control under a cross that closed the whole sheet — "j'ai le « add food » mais avec une
+     * croix et un autre bouton en dessous pour revenir en arrière" — so the assertion is that the
+     * one exit does the step, not that a second control exists to do it.
      */
     @Test
-    fun theWayBackToThePathsIsOfferedOnceAPathIsTaken() {
+    fun theHeaderArrowStepsBackToThePathsOnceAPathIsTaken() {
         show(previewCookedState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS)
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK)
             .assertIsDisplayed()
             .performClick()
 
         assertEquals(1, backedOut)
+        assertEquals(0, closed)
     }
 
-    /** Nothing has been chosen yet on the first stage, so there is nothing to go back from. */
+    /**
+     * One exit, and it is an arrow.
+     *
+     * The cross is gone from every stage. Two ways out with two meanings, side by side and
+     * distinguished only by a glyph, is the defect; a header that offers `Close` as well as
+     * `Back` would be it returning.
+     */
     @Test
-    fun theWaysInThemselvesCarryNoWayBack() {
+    fun everyStageOffersExactlyOneWayOut() {
         show(previewPathsState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+        listOf(
+            previewPathsState(),
+            previewScanRefusedState(),
+            previewCookedState(),
+            previewQuickState(),
+            previewRecipeServingsState(),
+        ).forEach { state ->
+            showState(state)
+
+            compose.onAllNodesWithContentDescription(FoodAddMessages.BACK).assertCountEquals(1)
+            compose.onNodeWithContentDescription(FormerCloseLabel).assertDoesNotExist()
+            compose.onNodeWithText(FormerChangePathLabel).assertDoesNotExist()
+        }
+    }
+
+    /** Nothing has been chosen yet on the first stage, so back leaves the sheet instead. */
+    @Test
+    fun theWaysInThemselvesStepBackOutOfTheSheet() {
+        show(previewPathsState())
+
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK).performClick()
+
+        assertEquals(0, backedOut)
+        assertEquals(1, closed)
     }
 
     /**
      * FR-FOOD-008: a correction was not opened on the ways in and has no earlier stage.
      *
      * Offering the step there would offer to turn a weighed food into a quick add, which is the
-     * loss of the line rather than a correction of it.
+     * loss of the line rather than a correction of it. So its arrow closes the sheet.
      */
     @Test
     fun aCorrectionIsNeverOfferedTheWayBack() {
         show(previewServingsState())
 
-        compose.onNodeWithTag(FoodTestTags.ADD_BACK_TO_PATHS).assertDoesNotExist()
+        compose.onNodeWithContentDescription(FoodAddMessages.BACK).performClick()
+
+        assertEquals(0, backedOut)
+        assertEquals(1, closed)
         compose.onNodeWithTag(FoodTestTags.DELETE_BUTTON).assertExists()
     }
 
@@ -148,7 +187,40 @@ class FoodAddScreenTest {
     fun theWayBackIsANamedTargetOfTheRightSize() {
         show(previewCookedState())
 
-        assertTallEnough(FoodAddMessages.CHANGE_PATH)
+        assertTallEnough(FoodAddMessages.BACK)
+    }
+
+    /**
+     * The header names the screen it is on, and not the one it was opened from.
+     *
+     * "quand je rentre dans « scan a barcode », j'ai le « add food »" — the sheet used to carry
+     * `Add food` over all five of its stages. A title that is the same on every screen is not a
+     * title.
+     */
+    @Test
+    fun everyStageNamesItselfInTheHeader() {
+        show(previewPathsState())
+        assertHeaderTitle(FoodAddMessages.ADD_TITLE)
+
+        showState(previewScanRefusedState())
+        assertHeaderTitle(FoodAddMessages.SCAN_PATH)
+
+        showState(previewQuickState())
+        assertHeaderTitle(FoodAddMessages.QUICK_PATH)
+
+        showState(previewCookedState())
+        assertHeaderTitle(FoodAddMessages.AMOUNT_SECTION)
+
+        showState(previewRecipeServingsState())
+        assertHeaderTitle(FoodAddMessages.SERVINGS_SECTION)
+    }
+
+    /** FR-FOOD-008: a correction is one screen whatever form the line it corrects has. */
+    @Test
+    fun aCorrectionNamesItselfAnEdit() {
+        show(previewServingsState())
+
+        assertHeaderTitle(FoodAddMessages.EDIT_TITLE)
     }
 
     // endregion
@@ -265,11 +337,18 @@ class FoodAddScreenTest {
 
     // region the moment and the hour (PRD_FOOD 10.3)
 
+    /**
+     * The override: the six moments, in the panel, and one tap choosing one.
+     *
+     * The panel is where the choosing happens now. On the form itself there is nothing to choose —
+     * see `theFormShowsTheMomentTheHourChoseAndAsksForNothing`, which is the other half of this
+     * pair and asserts that the picker is not there at all until it is asked for.
+     */
     @Test
-    fun theFourMomentsAreOfferedAndTappingOneChoosesIt() {
-        show(previewCookedState())
+    fun theSixMomentsAreOfferedInThePanelAndTappingOneChoosesIt() {
+        show(previewCookedState().copy(isSlotPickerVisible = true))
 
-        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertIsDisplayed()
         MealSlot.ORDERED.forEach { slot ->
             assertDrawn(FoodTestTags.SLOT_PICKER, slot.label)
         }
@@ -301,34 +380,69 @@ class FoodAddScreenTest {
 
     /*
      * "« which moment » on comprend pas, je peux sélectionner breakfast, mais avoir un time à 18h,
-     * je comprends pas ?"
+     * je comprends pas ?" — and then, once the hours were printed on the tiles: "je définis mon
+     * heure de bouffer, le système a déjà en mémoire les plages… ça affiche bien lunch dans
+     * l'interface mais pas à la création".
      *
-     * The pairing is not forbidden — PRD_FOOD 10.3 says the windows "ne créent aucune contrainte"
-     * and a late breakfast is real — so what these two check is that the relation is *visible*:
-     * the hours are on the moments themselves, and a disagreement is stated in words.
+     * The moment is no longer asked for. The hour decides it, the form shows what it decided, and
+     * the six moments live in a panel that is closed until somebody wants to overrule the clock —
+     * which stays allowed, because PRD_FOOD 10.3 says the windows "ne créent aucune contrainte"
+     * and a lunch eaten at three is a real meal.
      */
 
+    /** FR-FOOD-007: the moment is a value on the form, not a control to fill in. */
     @Test
-    fun everyMomentDrawsTheHoursItCovers() {
+    fun theFormShowsTheMomentTheHourChoseAndAsksForNothing() {
+        show(momentState(MealSlot.LUNCH, LocalTime.of(13, 0)))
+
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD)
+            .performScrollTo()
+            .assertIsDisplayed()
+        assertDrawn(FoodTestTags.SLOT_FIELD, "Lunch · 12:00 – 14:30")
+
+        // No grid of moments anywhere on the form: the picker only exists inside the panel.
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertDoesNotExist()
+    }
+
+    /** PRD_FOOD 18: the row is a target and says what it is, not just which moment it names. */
+    @Test
+    fun theMomentRowIsAReachableControlThatSaysWhatItDoes() {
+        show(momentState(MealSlot.LUNCH, LocalTime.of(13, 0)))
+
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD).performScrollTo()
+        compose.onNodeWithTag(FoodTestTags.SLOT_FIELD)
+            .assertContentDescriptionContains(MealSlot.LUNCH.label, substring = true)
+        assertTallEnough(FoodAddMessages.changeSlotDescription(MealSlot.LUNCH.label))
+    }
+
+    /** The override is one panel away, and every moment in it carries its own window. */
+    @Test
+    fun theOverrideOffersEveryMomentWithTheHoursItCovers() {
         show(momentState(MealSlot.DINNER, LocalTime.of(20, 0)))
+        compose.onNodeWithTag(FoodTestTags.SLOT_PICKER).assertDoesNotExist()
+
+        showState(momentState(MealSlot.DINNER, LocalTime.of(20, 0)).copy(isSlotPickerVisible = true))
 
         assertDrawn(FoodTestTags.SLOT_PICKER, "05:00 – 10:00")
-        assertDrawn(FoodTestTags.SLOT_PICKER, "11:30 – 14:30")
-        assertDrawn(FoodTestTags.SLOT_PICKER, "18:00 – 22:00")
-        assertDrawn(FoodTestTags.SLOT_PICKER, FoodAddMessages.ANY_OTHER_TIME)
+        assertDrawn(FoodTestTags.SLOT_PICKER, "10:00 – 12:00")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "12:00 – 14:30")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "14:30 – 18:30")
+        assertDrawn(FoodTestTags.SLOT_PICKER, "18:30 – 22:00")
+        // The one that crosses midnight, drawn as the one interval it is.
+        assertDrawn(FoodTestTags.SLOT_PICKER, "22:00 – 05:00")
     }
 
     @Test
     fun aMomentAndAnHourThatDisagreeSaySoOnScreen() {
-        show(momentState(MealSlot.BREAKFAST, LocalTime.of(18, 0)))
+        show(momentState(MealSlot.BREAKFAST, LocalTime.of(20, 0)))
 
-        // The sheet scrolls, and the note lives under the time field near its foot.
+        // The sheet scrolls, and the note lives under the moment row near its foot.
         compose.onNodeWithTag(FoodTestTags.SLOT_TIME_NOTE)
             .performScrollTo()
             .assertIsDisplayed()
             .assert(
                 hasText(
-                    FoodAddMessages.timeOutsideSlot("18:00", MealSlot.DINNER, MealSlot.BREAKFAST),
+                    FoodAddMessages.timeOutsideSlot("20:00", MealSlot.DINNER, MealSlot.BREAKFAST),
                 ),
             )
     }
@@ -413,6 +527,59 @@ class FoodAddScreenTest {
 
     // endregion
 
+    // region logging a recipe (FR-FOOD-004)
+
+    /**
+     * The recipe is on the sheet, and tapping it goes back to the picker.
+     *
+     * The card's own texts are cleared from the merged tree by `clearAndSetSemantics`, so the
+     * name is read from the **announcement** rather than looked up as a text node — the mistake
+     * eight earlier tests in this module made.
+     */
+    @Test
+    fun aChosenRecipeIsShownOnTheSheetAndLeadsBackToThePicker() {
+        show(previewRecipeServingsState())
+
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE)
+            .assertIsDisplayed()
+            .assertContentDescriptionContains(RecipePreviewData.LONGEST_NAME, substring = true)
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE).performClick()
+
+        assertEquals(1, recipes)
+    }
+
+    /**
+     * FR-FOOD-004: a new recipe line is computed from the recipe, not rescaled from a snapshot.
+     *
+     * The footnote is what says which of the two a reader is looking at, and the figures above it
+     * are `In this entry` once a count has been typed.
+     */
+    @Test
+    fun aNewRecipeLineSaysWhereItsFiguresComeFrom() {
+        show(previewRecipeServingsState())
+
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROM_RECIPE).assertExists()
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROZEN).assertDoesNotExist()
+        /*
+         * The figures' heading is **not a text node**: `FoodSectionCard` clears the semantics of
+         * its title and speaks the whole card through one description, so the merged tree holds
+         * `In this entry` as a `contentDescription` and the text tree does not hold it at all.
+         */
+        compose.onNodeWithContentDescription(FoodAddMessages.CONTRIBUTION_SECTION, substring = true)
+            .assertExists()
+    }
+
+    /** FR-FOOD-008: a correction has no recipe card and says it rescales what was saved. */
+    @Test
+    fun aCorrectedRecipeLineStillRescalesItsFrozenSnapshot() {
+        show(previewServingsState())
+
+        compose.onNodeWithTag(FoodTestTags.CHOSEN_RECIPE).assertDoesNotExist()
+        compose.onNodeWithText(FoodAddMessages.SERVINGS_FROZEN).assertExists()
+    }
+
+    // endregion
+
     // region the portion counter (FR-FOOD-006)
 
     @Test
@@ -431,6 +598,28 @@ class FoodAddScreenTest {
         show(previewCookedState())
 
         compose.onNodeWithTag(FoodTestTags.SERVINGS_STEPPER).assertDoesNotExist()
+    }
+
+    /**
+     * PRD_FOOD 18: the count is announced as a **value**, not as two unexplained buttons.
+     *
+     * `MueStepper` puts the label on the readout as its name and the count as its
+     * `stateDescription` — the arrangement `MueEffortSlider` uses to publish its own number — so a
+     * reader lands on one node that says `Usual portions, 1.5 × 1 apple` instead of on a bare
+     * figure sitting between a `−` and a `+` whose relationship to it has to be guessed.
+     */
+    @Test
+    fun theCounterAnnouncesItsCountAsAValue() {
+        show(previewPortionsState())
+
+        compose
+            .onNode(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.StateDescription,
+                    "1.5 ${FoodLabels.TIMES} 1 apple",
+                ),
+            )
+            .assertContentDescriptionContains(FoodAddMessages.PORTIONS_LABEL)
     }
 
     // endregion
@@ -480,6 +669,32 @@ class FoodAddScreenTest {
         ).assertExists()
     }
 
+    /**
+     * The string in the scaffold's header slot, told apart from the same words on a card.
+     *
+     * `How much?` and `How many servings?` are each drawn twice — once as the screen's title and
+     * once as the section's — so a bare `onNodeWithText` would find two nodes and fail on the
+     * ambiguity rather than on the fact. `MueSubScreenScaffold` marks its title a heading and the
+     * section cards below do not, which is the difference this reads.
+     */
+    private fun assertHeaderTitle(title: String) {
+        compose
+            .onNode(
+                hasText(title) and
+                    SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
+            )
+            .assertExists()
+    }
+
+    /**
+     * The two strings the sheet's second exit used to draw.
+     *
+     * Spelled out here rather than referenced, because both constants are gone from the
+     * production source — which is the point. A test that named them would keep them alive.
+     */
+    private val FormerCloseLabel: String = "Close"
+    private val FormerChangePathLabel: String = "Choose another way"
+
     private fun assertTallEnough(contentDescription: String) {
         val height = compose
             .onNodeWithContentDescription(contentDescription)
@@ -519,6 +734,7 @@ class FoodAddScreenTest {
                                 onSearchFood = { searched++ },
                                 onUseRecipe = { recipes++ },
                                 onQuickAdd = { quick++ },
+                                onClose = { closed++ },
                                 onBackToPaths = { backedOut++ },
                                 onPortionStep = { up -> stepped += up },
                                 onSlotSelected = { slotChosen = it },

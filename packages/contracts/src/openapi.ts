@@ -3,13 +3,19 @@ import { z } from "zod";
 // Evaluated for their side effect: every schema registers its component id with
 // zod's global registry at definition time, and the generator reads that registry.
 // Importing the barrel instead would make this module import itself.
+import "./activity";
 import "./cursor";
 import "./errors";
+import "./food";
+import "./food-log";
 import "./health";
+import "./health-profile";
+import "./meal-plan";
 import "./measurement";
 import "./meta";
 import "./mutation";
 import "./primitives";
+import "./recipe";
 import "./sync";
 
 /** Bumped when `/api/v1` gains a compatible addition; a break needs `/api/v2`. */

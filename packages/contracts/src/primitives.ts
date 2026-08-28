@@ -58,6 +58,10 @@ export const mutationIdSchema = z.uuidv7().meta({
  * a UUID per device would let two devices create two aggregates for one date and break
  * the one-measurement-per-date rule that section 13.2 keeps. So the identifier is the
  * business key, which makes convergence structural instead of a merge heuristic.
+ *
+ * The health profile takes the same rule to its limit. Section 13.4 gives an account exactly
+ * one profile, so its business key is a constant — `HEALTH_PROFILE_AGGREGATE_ID` — and a
+ * second device addresses the row the first one wrote instead of opening a rival to it.
  */
 export const aggregateIdSchema = z
   .string()
@@ -72,14 +76,31 @@ export const aggregateIdSchema = z
   });
 
 /**
- * V1 synchronises one aggregate on purpose. Widening this enum is additive for every
- * reader, which is why the list lives in one place.
+ * The aggregate kinds this contract can express, from PRD section 10.2's list.
+ *
+ * Widening it is additive for every reader, which is why it lives in one place — and why
+ * widening it is also the only thing that lets a journalled Android mutation be *sent*:
+ * `SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES` is derived from this list, so a type absent here is
+ * a type whose outbox rows stay pending for ever. `healthProfile` spent exactly that time
+ * outside it while section 13.4 already called it synchronised.
+ *
+ * Sorted, so an addition lands in an obvious place rather than at whichever end the author
+ * happened to type.
  */
-export const AGGREGATE_TYPES = ["measurement"] as const;
+export const AGGREGATE_TYPES = [
+  "activitySession",
+  "customExerciseDefinition",
+  "food",
+  "foodLogEntry",
+  "healthProfile",
+  "mealPlanEntry",
+  "measurement",
+  "recipe",
+] as const;
 
 export const aggregateTypeSchema = z.enum(AGGREGATE_TYPES).meta({
   id: "AggregateType",
-  description: "The synchronised aggregate kinds. V1 carries one.",
+  description: "The synchronised aggregate kinds (PRD section 10.2).",
 });
 
 export type AggregateType = z.infer<typeof aggregateTypeSchema>;

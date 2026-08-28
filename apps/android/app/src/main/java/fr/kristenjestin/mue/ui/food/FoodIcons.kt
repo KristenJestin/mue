@@ -15,7 +15,7 @@ import fr.kristenjestin.mue.ui.components.MueIcons
  * by one, PRD_ACTIVITIES 14.1 rules out pulling in an icon library for the whole app, and naming
  * them as text keeps this file independent of the order in which the drawables land.
  *
- * PRD_FOOD 19 names two tables and nothing else — the four moments, and one stable icon per food
+ * PRD_FOOD 19 names two tables and nothing else — the moments, and one stable icon per food
  * source — so those are the two functions below. Everything the module draws besides them is
  * chrome the app already imported (`search`, `plus`, `x`, `check`, `trash-2`, `chevron-right`,
  * `calendar-days`, `clock-3`, `sparkles`, `copy-plus`), which is why this object is short.
@@ -33,10 +33,25 @@ object FoodIcons {
      */
     const val APPLE: String = "ic_apple"
 
-    /** PRD_FOOD 19's three other moments: sunrise, sun and moon (PRD_FOOD 10.1's order). */
+    /** PRD_FOOD 19's other moments: sunrise, sun and moon (PRD_FOOD 10.1's order). */
     const val SUNRISE: String = "ic_sunrise"
     const val SUN: String = "ic_sun"
     const val MOON: String = "ic_moon"
+
+    /**
+     * The two glyphs the six moments needed and PRD_FOOD 19's table of four did not have.
+     *
+     * That table — sunrise, sun, fruit, moon — was written for a day with one snack in it. With a
+     * snack after each meal the fruit can only stand for one of the three, and two moments drawn
+     * with the same glyph is exactly the defect the tab bar was fixed for: a reader tells them
+     * apart by the word alone, and the glyph stops carrying anything.
+     *
+     * So the fruit stays on the afternoon `Snack`, which is the moment PRD_FOOD 19 named it for,
+     * and the two new ones take the hour they belong to rather than a second food: a cup for the
+     * mid-morning break, and the night sky for what is eaten after dinner.
+     */
+    const val COFFEE: String = "ic_coffee"
+    const val MOON_STAR: String = "ic_moon_star"
 
     /**
      * A packaged product, both as a provenance and as the way one is added.
@@ -77,16 +92,20 @@ object FoodIcons {
     }
 
     /**
-     * PRD_FOOD 19: the four moments are told apart by their icon.
+     * PRD_FOOD 19: the moments are told apart by their icon, and no two of them share one.
      *
-     * `Snack` takes the fruit rather than a clock: PRD_FOOD 10.3 makes it the catch-all of the
-     * day, so it is the one moment no hour of the sky can stand for.
+     * `Snack` keeps the fruit rather than a clock: it is the afternoon moment PRD_FOOD 19 named
+     * it for. The two moments that flank the day — the mid-morning break and what is eaten after
+     * dinner — take an hour of the sky or a cup instead of a second food, so the six glyphs read
+     * as six different times rather than as three fruits.
      */
     fun forSlot(slot: MealSlot): String = when (slot) {
         MealSlot.BREAKFAST -> SUNRISE
+        MealSlot.MORNING_SNACK -> COFFEE
         MealSlot.LUNCH -> SUN
         MealSlot.SNACK -> APPLE
         MealSlot.DINNER -> MOON
+        MealSlot.EVENING_SNACK -> MOON_STAR
     }
 
     /**

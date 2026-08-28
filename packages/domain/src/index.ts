@@ -2,4 +2,5 @@
 // routes, TanStack Start server functions and MCP tools call these services and
 // never reimplement what they do.
 
+export * from "./food";
 export * from "./sync";

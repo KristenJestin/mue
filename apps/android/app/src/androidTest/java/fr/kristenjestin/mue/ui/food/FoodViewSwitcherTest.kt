@@ -12,16 +12,18 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.dp
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.catalogue.FoodsScreen
@@ -30,13 +32,14 @@ import fr.kristenjestin.mue.ui.food.day.FoodDayScreen
 import fr.kristenjestin.mue.ui.food.day.previewDayState
 import fr.kristenjestin.mue.ui.food.recipes.RecipeListScreen
 import fr.kristenjestin.mue.ui.food.recipes.previewRecipeListState
+import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** The narrowest phone the app supports, where four names would get 90 dp each. */
+/** The narrowest phone the app supports, where three segments get about 95 dp each. */
 private val NarrowestPhone: Dp = 360.dp
 
 /** The largest text size the system offers. */
@@ -57,7 +60,7 @@ private const val LargestFontScale = 2f
  * would prove that a switcher composes; only the shipped screens prove that the switcher is on
  * them, which is the whole of the defect.
  *
- * The last two tests read the [TextLayoutResult] each label hands out rather than its semantics
+ * The last three tests read the [TextLayoutResult] each label hands out rather than its semantics
  * string, for `MueBottomBarLabelTest`'s reason: `onNodeWithTag(...).assertIsDisplayed()` is happy
  * with a pill drawing `Rec…`, and a switcher whose entries cannot be told apart is the tab bar's
  * `Pro… / Pro…` defect one level down.
@@ -157,6 +160,75 @@ class FoodViewSwitcherTest {
         compose.onNodeWithTag(FoodTestTags.view(FoodRoute.Trends)).assertDoesNotExist()
     }
 
+    /**
+     * PRD_FOOD 18's touch minimum, on the segment rather than on the frame around it.
+     *
+     * The prototype draws a short track — `p-1` around buttons of `py-2.5` — and a track sized to
+     * that leaves each segment 40 dp once the frame's own margin is taken off both sides. Forty is
+     * under the floor, on the one control in the module whose entire purpose is to be tapped, and
+     * nothing in the semantics tree would ever have said so.
+     */
+    @Test
+    fun everySegmentIsBigEnoughToTap() {
+        setModule()
+
+        offered().forEach { view ->
+            val height = compose
+                .onNodeWithTag(FoodTestTags.view(view))
+                .getUnclippedBoundsInRoot()
+                .height
+            assertTrue(
+                "«${view.label}» is $height tall, under $MueMinTouchTarget",
+                height >= MueMinTouchTarget,
+            )
+        }
+    }
+
+    /**
+     * The track holds a 48 dp target inside 48 dp of height.
+     *
+     * Raising the segments to the touch minimum was right and is not undone here — the test above
+     * still holds. What was wrong is that the frame grew with them: four dp of inner margin above
+     * and below a 48 dp button made a 56 dp track, and everything under it moved down. "ton
+     * bouton avec la clé à molette là, il est plus gros, du coup ça décale légèrement vers le bas
+     * toute la tab, le contenu, etc. Du coup c'est pas beau."
+     *
+     * So both facts are asserted at once, because either alone is satisfiable by breaking the
+     * other: every segment is at least [MueMinTouchTarget], **and** the track is no taller than
+     * one. The margin now insets the fill inside the target instead of padding the frame around
+     * it, which is the only arrangement that satisfies both.
+     */
+    @Test
+    fun theTrackDoesNotGrowToHoldItsTouchTargets() {
+        setModule()
+
+        val track = compose
+            .onNodeWithTag(FoodTestTags.VIEW_SWITCHER)
+            .getUnclippedBoundsInRoot()
+            .height
+
+        /*
+         * A dp of slack, because this is a rounding question and not a layout one: the segment is
+         * measured in whole pixels and converted back, so a 48 dp track reads as 48.000008 dp at
+         * this density. The defect being guarded against was eight dp of inner margin, not eight
+         * millionths.
+         */
+        assertTrue(
+            "the track is $track tall, over the $MueMinTouchTarget its segments need",
+            track <= MueMinTouchTarget + 1.dp,
+        )
+        offered().forEach { view ->
+            val segment = compose
+                .onNodeWithTag(FoodTestTags.view(view))
+                .getUnclippedBoundsInRoot()
+                .height
+            assertTrue(
+                "«${view.label}» is $segment tall, under $MueMinTouchTarget",
+                segment >= MueMinTouchTarget,
+            )
+        }
+    }
+
     // region what reaches the glass (the tab bar's lesson, one level down)
 
     /** The width the switcher is already right at, and the one nothing here may move. */
@@ -170,29 +242,62 @@ class FoodViewSwitcherTest {
     }
 
     /**
-     * The defect the tab bar paid nine fixes for, refused here by construction.
+     * The defect the tab bar paid nine fixes for, refused here by measurement.
      *
-     * A rail gives each name the width it asks for, so `Recipes` is `Recipes` at twice the font
-     * scale on the narrowest phone the app supports — not `Rec…`, and not a bare glyph either.
+     * The track is a set of **equal segments**, which is precisely the layout a long name gets cut
+     * in: a third of 360 dp is about 95 dp, and at twice the font scale `Recipes` wants more. So
+     * the rule this asserts is not "every name survives" — it is **whole or absent**. A label that
+     * fits is drawn entire; below that the track drops every one of them and keeps the glyphs, as
+     * `MueBottomBar` does. What must never reach the glass is a fragment.
      */
     @Test
-    fun everyNameIsStillDrawnWholeAtTwiceTheFontScale() {
+    fun noNameIsDrawnCutAtTwiceTheFontScale() {
         setModule(fontScale = LargestFontScale)
 
         offered().forEach { view ->
-            assertEquals("«${view.label}» reaches the glass cut", view.label, drawnLabel(view))
+            val drawn = drawnLabel(view)
+            assertTrue(
+                "«${view.label}» reaches the glass as «$drawn»",
+                drawn == null || drawn == view.label,
+            )
         }
     }
 
-    /** Two entries drawing one word is a switcher that cannot be read, whatever it announces. */
+    /**
+     * The measurement actually bites at the largest size, rather than merely being written down.
+     *
+     * `Recipes` does not fit a third of the narrowest phone at twice the font scale, so **no**
+     * label is drawn — the widest one decides for all three, because a track with two words and
+     * one glyph in it would read as two kinds of thing.
+     *
+     * If this ever fails because the labels *do* fit, the threshold has moved and the previous
+     * test is the one that still matters. It is not a rule about a `dp` breakpoint: nothing in the
+     * switcher reads one.
+     */
     @Test
-    fun noTwoEntriesDrawTheSameNameAtTwiceTheFontScale() {
+    fun theTrackFallsBackToGlyphsWhenAWordWouldNotFit() {
         setModule(fontScale = LargestFontScale)
 
         val drawn = offered().mapNotNull(::drawnLabel)
 
-        assertEquals("the switcher draws $drawn", drawn.distinct(), drawn)
-        assertTrue("nothing is drawn at all", drawn.isNotEmpty())
+        assertEquals("the track still draws $drawn", emptyList<String>(), drawn)
+    }
+
+    /**
+     * Two entries a reader cannot tell apart is a switcher that cannot be read, whatever it draws.
+     *
+     * Once the words are gone the glyph is what carries the name, so this reads the announcement
+     * rather than the glass: three segments, three different names, at the size where the names
+     * are no longer written out.
+     */
+    @Test
+    fun everyEntryStillAnnouncesItsOwnNameOnceTheWordsAreGone() {
+        setModule(fontScale = LargestFontScale)
+
+        offered().forEach { view ->
+            compose.onNodeWithTag(FoodTestTags.view(view))
+                .assertContentDescriptionEquals(view.label)
+        }
     }
 
     // endregion
@@ -211,7 +316,7 @@ class FoodViewSwitcherTest {
         listOf(FoodRoute.Day, FoodRoute.Recipes, FoodRoute.Foods)
 
     private fun select(view: FoodRoute.View) {
-        compose.onNodeWithTag(FoodTestTags.view(view)).performScrollTo().performClick()
+        compose.onNodeWithTag(FoodTestTags.view(view)).performClick()
         compose.waitForIdle()
     }
 
@@ -293,7 +398,7 @@ class FoodViewSwitcherTest {
                 onOpenDatePicker = {},
                 onDismissDatePicker = {},
                 onDayPicked = {},
-                onAddToSlot = {},
+                onAdd = {},
                 onEditEntry = {},
                 onConfirmPlan = {},
                 onSwapPlan = {},
@@ -320,7 +425,6 @@ class FoodViewSwitcherTest {
                 onSourceChange = {},
                 onOpenFood = {},
                 onCreateFood = {},
-                onOpenPreferences = {},
                 modifier = Modifier.fillMaxSize(),
             )
 

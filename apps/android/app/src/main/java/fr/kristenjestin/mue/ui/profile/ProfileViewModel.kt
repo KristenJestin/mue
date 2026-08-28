@@ -25,7 +25,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -136,17 +135,38 @@ class ProfileViewModel(
         initialValue = ProfileUiState(),
     )
 
+    /**
+     * The form follows the stored profile until the user takes it over, and **only** the user
+     * takes it over.
+     *
+     * It used to read once with `first()` and then set [KEY_FORM_OWNED] itself. That made
+     * "seeded" and "typed in" the same state, and on a fresh install the two are hours apart: the
+     * owner has to open this screen to reach `Server settings` and pair, so the one read happens
+     * *before* the first synchronisation and returns an empty profile. The form was then frozen
+     * against the height and birth date the pull applied moments later, and the next save wrote
+     * that stale empty snapshot back through `UserProfileRepository.save` — which replaces the
+     * row *and* journals a mutation, so the nulls reached `mue_app.health_profile` too and the
+     * server merged them as "the user cleared their profile".
+     *
+     * Collecting instead of reading once is what makes a profile arriving from another device
+     * converge here, which is the client half of PRD 13.4. [KEY_FORM_OWNED] keeps its original
+     * job — a keystroke must never be overwritten by a store that answers afterwards — and it is
+     * now set by [takeOverForm] alone, which is to say by an actual edit.
+     */
     init {
         viewModelScope.launch {
-            if (isFormOwnedByUser()) return@launch
-            val stored = profileRepository.profile.first()
-            // The read is asynchronous; a keystroke may have landed meanwhile and must win.
-            if (isFormOwnedByUser()) return@launch
-            savedStateHandle[KEY_DISPLAY_NAME] = stored.displayName.orEmpty()
-            savedStateHandle[KEY_HEIGHT] = stored.heightCm?.toString().orEmpty()
-            savedStateHandle[KEY_BIRTH_DATE] = stored.birthDate?.toString().orEmpty()
-            savedStateHandle[KEY_SEX] = stored.sex?.wireValue.orEmpty()
-            savedStateHandle[KEY_FORM_OWNED] = true
+            profileRepository.profile.collect { stored ->
+                // From the first edit the form is the user's, and no stored value may replace
+                // what they are looking at.
+                if (isFormOwnedByUser()) return@collect
+                savedStateHandle[KEY_DISPLAY_NAME] = stored.displayName.orEmpty()
+                savedStateHandle[KEY_HEIGHT] = stored.heightCm?.toString().orEmpty()
+                savedStateHandle[KEY_BIRTH_DATE] = stored.birthDate?.toString().orEmpty()
+                // FR-PROFILE-007 : le sexe suit exactement le même chemin que ses deux voisins,
+                // et pour la même raison — il est stocké dans `health_profile` (contrat §4) et
+                // PRD_SCALE 22 le fait descendre du serveur comme eux.
+                savedStateHandle[KEY_SEX] = stored.sex?.wireValue.orEmpty()
+            }
         }
     }
 

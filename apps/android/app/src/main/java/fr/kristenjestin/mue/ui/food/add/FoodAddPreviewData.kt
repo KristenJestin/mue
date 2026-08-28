@@ -11,12 +11,14 @@ import fr.kristenjestin.mue.domain.model.FoodLogKind
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.domain.model.LoggedAmount
 import fr.kristenjestin.mue.domain.model.Macro
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Quantity
 import fr.kristenjestin.mue.domain.model.ReferenceUnit
 import fr.kristenjestin.mue.domain.model.Servings
 import fr.kristenjestin.mue.ui.food.day.FoodDayPreviewData
+import fr.kristenjestin.mue.ui.food.recipes.RecipePreviewData
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -163,6 +165,36 @@ internal object FoodAddPreviewData {
     fun draft(slot: MealSlot = MealSlot.DINNER): FoodAddDraft =
         FoodAddDraft.forTarget(date = TODAY, slot = slot, today = TODAY, now = NOW)
 
+    /** The barcode every scan fixture is built around: the recorded Nutella card's own. */
+    const val SCANNED_BARCODE: String = "3017620422003"
+
+    /**
+     * A product card as Open Food Facts really returns one, with a gap in it (PRD_FOOD 9.2).
+     *
+     * Its shape is the recorded Nutella fixture's: four values from the manufacturer, and **no
+     * fibre**, because the only figure Open Food Facts has for it is one it estimated from the
+     * ingredient list and PRD_FOOD 17 refuses estimates. It is the fixture that makes an
+     * incomplete card visible in a preview and in a test — a `—` on a real product, beside four
+     * real numbers, rather than an invented `0`.
+     */
+    fun scannedProduct(): Food = Food(
+        id = FoodId("preview-scanned"),
+        name = "Nutella",
+        source = FoodSource.OPEN_FOOD_FACTS,
+        referenceUnit = ReferenceUnit.GRAM,
+        per100 = Nutrients(
+            energy = Energy.ofKilocaloriesOrNull(539.0),
+            protein = Macro.ofGramsOrNull(6.3),
+            carbs = Macro.ofGramsOrNull(57.5),
+            fat = Macro.ofGramsOrNull(30.9),
+            fibre = null,
+        ),
+        brand = "Ferrero",
+        barcode = SCANNED_BARCODE,
+        sourceId = SCANNED_BARCODE,
+        sourceVersion = "v3.6/947",
+    )
+
     private fun quantity(amount: Double): Quantity =
         requireNotNull(Quantity.ofIngredientOrNull(amount)) { "$amount is not a quantity" }
 
@@ -175,6 +207,119 @@ internal fun previewPathsState(): FoodAddUiState = FoodAddUiState.of(
     draft = FoodAddPreviewData.draft(),
     today = FoodAddPreviewData.TODAY,
 )
+
+/** The day three days ahead that the planning previews below are aimed at. */
+private val PLANNED_DAY: LocalDate = FoodAddPreviewData.TODAY.plusDays(3)
+
+/** A planning draft for that day, with no moment carried in — the day screen's own action. */
+private fun planDraft(): FoodAddDraft = FoodAddDraft.forTarget(
+    date = PLANNED_DAY,
+    slot = null,
+    today = FoodAddPreviewData.TODAY,
+    now = FoodAddPreviewData.NOW,
+    planning = true,
+)
+
+/**
+ * PRD_FOOD 8.5's rule as its one screen: only a recipe can be proposed.
+ *
+ * What to look for: **one** card and not four, the sentence under it saying why a plain food is
+ * not on the list, and a header that says `Plan a meal` rather than `Add food` — nothing here
+ * promises a journal line on a day that has not happened.
+ */
+internal fun previewPlanPathsState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft(),
+    today = FoodAddPreviewData.TODAY,
+)
+
+/**
+ * The proposal itself: a recipe, a serving count and a moment (PRD_FOOD 12, FR-PLAN-001).
+ *
+ * What to look for, in order: **no clock** — a proposal carries no hour, so the field is gone
+ * rather than shown and ignored; the moment as a *field* under it, because with no hour there is
+ * nothing to derive it from and FR-PLAN-001 wants it chosen; `Per serving` and **no** `In this
+ * entry`, because a proposal enters no total until it is confirmed; and `Plan this meal` at the
+ * foot.
+ *
+ * The moment reads `Lunch` although the clock in these previews is 19:40, which is dinner. That
+ * is the whole of the answer to "how is the moment chosen with no now": the salmon tray is a
+ * `MAIN`, and lunch is the first moment of that family this day has free.
+ */
+internal fun previewPlanState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft().copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+        servings = "1.5",
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    today = FoodAddPreviewData.TODAY,
+)
+
+/**
+ * The same sheet with the day's dinner already spoken for (PRD_FOOD 8.5).
+ *
+ * Lunch already carries the curry, so the field has moved to `Dinner` on its own — a moment holds
+ * at most one proposal, and the next of the same family is the honest default.
+ *
+ * The panel is open, which is what to look at: `Lunch` reads `12:00 – 14:30 · Already suggested`.
+ * That marking is where the shape of a planned day is read, and it is why there is no seventh
+ * screen laying six moments out side by side.
+ */
+internal fun previewPlanReplacingState(): FoodAddUiState = FoodAddUiState.of(
+    draft = planDraft().copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    plans = listOf(
+        MealPlanEntry(
+            plannedOn = PLANNED_DAY,
+            slot = MealSlot.LUNCH,
+            recipeId = RecipePreviewData.CURRY_ID,
+            plannedServings = Servings.ONE,
+        ),
+    ),
+    isSlotPickerVisible = true,
+    today = FoodAddPreviewData.TODAY,
+)
+
+/**
+ * The scan stage as somebody with **no camera permission** meets it (PRD_FOOD 17 and 18).
+ *
+ * The picture that has to be checked by eye rather than only by test: the explanation is quiet
+ * rather than alarming, the field under it is a full-width control with its own label and its own
+ * button, and nothing about the panel reads as a degraded version of another one. That is what
+ * "une alternative complète à la caméra" has to look like.
+ */
+internal fun previewScanRefusedState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft().copy(scanning = true),
+    today = FoodAddPreviewData.TODAY,
+).let { state ->
+    state.copy(
+        scan = state.scan?.withCamera(isGranted = false, isAvailable = true, canRequest = false),
+    )
+}
+
+/**
+ * A product found, before it is copied into the catalogue (PRD_FOOD 9.2).
+ *
+ * What to look at: the fibre row reads `—` while the four around it carry numbers. Open Food
+ * Facts does have a fibre figure for this card and it marked it `estimate`; PRD_FOOD 17 refuses
+ * estimates, so Mue does not know it. The value stays empty and stays editable once the product
+ * is added — which is the sentence printed under the figures.
+ */
+internal fun previewScanFoundState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft().copy(
+        scanning = true,
+        scanBarcode = FoodAddPreviewData.SCANNED_BARCODE,
+    ),
+    today = FoodAddPreviewData.TODAY,
+    scan = FoodScanState.Found(FoodAddPreviewData.scannedProduct(), alreadyInCatalogue = false),
+).let { state ->
+    state.copy(
+        scan = state.scan?.withCamera(isGranted = true, isAvailable = true, canRequest = false),
+    )
+}
 
 /**
  * 600 g of rice **weighed cooked** (PRD_FOOD 8.6 and 13.1).
@@ -278,13 +423,41 @@ internal fun previewLateBreakfastState(): FoodAddUiState = FoodAddUiState.of(
     today = FoodAddPreviewData.TODAY,
 )
 
-/** The picker on an empty search: what was logged most recently (PRD_FOOD 9.4). */
+/**
+ * The picker on an empty search: what was logged most recently, **and the catalogue under it**
+ * (PRD_FOOD 9.4).
+ *
+ * The two lists are disjoint here for the reason the ViewModel de-duplicates them: a food drawn
+ * under both headings would be two cards for one food, and two nodes answering to one test tag.
+ */
 internal fun previewPickerState(): FoodPickerUiState = FoodPickerUiState(
     query = "",
     sources = sourceFilters(null),
+    recent = listOf(FoodAddPreviewData.apple()).map(FoodPickerRowUiState::of),
+    results = FoodAddPreviewData.catalogue()
+        .filterNot { it.id == FoodAddPreviewData.apple().id }
+        .map(FoodPickerRowUiState::of),
+    isRecent = true,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
+    sectionTitle = FoodAddMessages.CATALOGUE_SECTION,
+    emptyMessage = null,
+)
+
+/**
+ * The same screen on a phone that has logged nothing yet.
+ *
+ * The head is empty and the catalogue is not, which is the whole of the first defect: 1 038
+ * seeded entries were hidden behind `Nothing logged yet` because the recents were read as the
+ * list rather than as its head.
+ */
+internal fun previewPickerNothingLoggedState(): FoodPickerUiState = FoodPickerUiState(
+    query = "",
+    sources = sourceFilters(null),
+    recent = emptyList(),
     results = FoodAddPreviewData.catalogue().map(FoodPickerRowUiState::of),
     isRecent = true,
-    sectionTitle = FoodAddMessages.RECENT_SECTION,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
+    sectionTitle = FoodAddMessages.CATALOGUE_SECTION,
     emptyMessage = null,
 )
 
@@ -292,10 +465,52 @@ internal fun previewPickerState(): FoodPickerUiState = FoodPickerUiState(
 internal fun previewEmptyPickerState(): FoodPickerUiState = FoodPickerUiState(
     query = "sauerkraut ice cream",
     sources = sourceFilters(null),
+    recent = emptyList(),
     results = emptyList(),
     isRecent = false,
+    recentTitle = FoodAddMessages.RECENT_SECTION,
     sectionTitle = FoodAddMessages.RESULTS_SECTION,
     emptyMessage = FoodAddMessages.NO_RESULTS,
+)
+
+/**
+ * The recipe picker with something to choose (FR-FOOD-004).
+ *
+ * It borrows `RecipePreviewData`'s own recipes rather than inventing three more: the picker and
+ * the `Recipes` view show the same objects, and two fixtures for one catalogue is how the two
+ * screens end up disagreeing about what a recipe looks like.
+ */
+internal fun previewRecipePickerState(): RecipePickerUiState = RecipePickerUiState(
+    query = "",
+    results = RecipePreviewData.recipes().map(RecipePickerRowUiState::of),
+    sectionTitle = FoodAddMessages.RECIPE_RESULTS_SECTION,
+    emptyMessage = null,
+    hasAnyRecipe = true,
+)
+
+/** PRD_FOOD 17: "aucune recette enregistrée" — the invitation, and no fake recipe. */
+internal fun previewEmptyRecipePickerState(): RecipePickerUiState = RecipePickerUiState(
+    query = "",
+    results = emptyList(),
+    sectionTitle = FoodAddMessages.RECIPE_RESULTS_SECTION,
+    emptyMessage = FoodAddMessages.NO_RECIPES,
+    hasAnyRecipe = false,
+)
+
+/**
+ * FR-FOOD-004 on the sheet: a recipe chosen, and the servings still to state.
+ *
+ * The figures under the field are `Per serving` until a count is typed, which is the recipe's
+ * answer to the per-100 card a food shows at the same moment.
+ */
+internal fun previewRecipeServingsState(): FoodAddUiState = FoodAddUiState.of(
+    draft = FoodAddPreviewData.draft(MealSlot.DINNER).copy(
+        kindId = FoodLogKind.RECIPE.id,
+        recipeId = RecipePreviewData.SALMON_ID.value,
+        servings = "1.5",
+    ),
+    recipe = FoodAddRecipe(RecipePreviewData.salmon(), RecipePreviewData.catalogueById()),
+    today = FoodAddPreviewData.TODAY,
 )
 
 private fun sourceFilters(selected: FoodSource?): List<FoodSourceFilterUiState> =

@@ -45,6 +45,24 @@ export function readSignInContinuation(search: string): SignInContinuation | nul
   return { oauthQuery: query, clientId };
 }
 
+/**
+ * Where to go once the session exists, for a visitor who was sent here by a page that
+ * needed one -- `/settings/agents` is the only sender today.
+ *
+ * Only a path on this origin is ever returned. `next` arrives in a URL anyone can put
+ * in front of the owner, and a login page that forwards to whatever it is handed is
+ * the textbook open redirect: the address bar says Mue while the credentials-shaped
+ * page after it does not. `//evil.example` and `/\evil.example` are both absolute
+ * URLs to a browser, so a leading slash alone proves nothing.
+ */
+export function readSafeNext(search: string): string | null {
+  const value = new URLSearchParams(search.replace(/^\?/, "")).get("next");
+  if (value === null || value === "") return null;
+  if (!value.startsWith("/")) return null;
+  if (value.startsWith("//") || value.startsWith("/\\")) return null;
+  return value;
+}
+
 type Mode = "sign-in" | "sign-up";
 
 interface Credentials {
@@ -89,6 +107,7 @@ export function SignInPage(): ReactElement {
    */
   const searchStr = useRouterState({ select: (state) => state.location.searchStr });
   const continuation = readSignInContinuation(searchStr);
+  const next = readSafeNext(searchStr);
 
   const [mode, setMode] = useState<Mode>("sign-in");
   const [busy, setBusy] = useState(false);
@@ -108,8 +127,14 @@ export function SignInPage(): ReactElement {
       .then(() => {
         // A full navigation, not a router one: the next stop is either the Hono half of
         // the entry point or a page that must be rendered with the new session cookie.
+        //
+        // The OAuth continuation wins over `next` when both are present: the signed
+        // query is a flow already in progress, and abandoning it halfway would leave
+        // the client waiting on a redirect that never comes.
         window.location.assign(
-          continuation === null ? "/" : `/api/auth/oauth2/authorize?${continuation.oauthQuery}`,
+          continuation !== null
+            ? `/api/auth/oauth2/authorize?${continuation.oauthQuery}`
+            : (next ?? "/"),
         );
       })
       .catch((error: unknown) => {

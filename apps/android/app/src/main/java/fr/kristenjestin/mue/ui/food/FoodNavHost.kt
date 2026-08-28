@@ -25,9 +25,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import fr.kristenjestin.mue.ui.food.add.FoodAddRoute
 import fr.kristenjestin.mue.ui.food.add.FoodPickerRoute
+import fr.kristenjestin.mue.ui.food.add.RecipePickerRoute
 import fr.kristenjestin.mue.ui.food.add.foodAddViewModel
 import fr.kristenjestin.mue.ui.food.catalogue.FoodEditorRoute
-import fr.kristenjestin.mue.ui.food.catalogue.FoodPreferencesRoute
 import fr.kristenjestin.mue.ui.food.catalogue.FoodsRoute
 import fr.kristenjestin.mue.ui.food.day.FoodDayRoute
 import fr.kristenjestin.mue.ui.food.recipes.RecipeDetailRoute
@@ -49,10 +49,15 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * showing, as the Activity tab's own stack does. The direction of each is resolved once, above
  * the animation, because `transitionSpec` runs outside composition.
  *
- * Only `Trends` and `Swap` still draw [FoodPlaceholder]; the day, the add sheet, the food picker,
- * the catalogue, the preferences and the three recipe screens all have screens behind them. They
- * landed one directory at a time, and the routes, the tags and the icons they needed were already
- * here, so none of them had to reopen a file another was editing.
+ * Only `Trends` still draws [FoodPlaceholder]; the day, the add sheet — which now also plans —
+ * the catalogue and the three recipe screens all have screens behind them. They landed one
+ * directory at a time, and the routes, the tags and the icons they needed were already here, so
+ * none of them had to reopen a file another was editing.
+ *
+ * `Preferences` used to be an eighth sheet here. It is not a Food route any more: PRD_FOOD 6.7's
+ * options live in `Profile`, in the stack that tab already keeps for `Server settings`, and this
+ * module neither draws the door nor knows the screen exists. Its key is retired rather than
+ * redirected — see [FoodRoute.Companion.fromKey].
  */
 @Composable
 fun FoodNavHost(modifier: Modifier = Modifier) {
@@ -70,12 +75,26 @@ fun FoodNavHost(modifier: Modifier = Modifier) {
      */
     var editorPrefill by rememberSaveable { mutableStateOf<String?>(null) }
 
+    /*
+     * PRD_FOOD 17: "Produit absent d'Open Food Facts → bascule vers la création manuelle
+     * **pré-remplie du code-barres**."
+     *
+     * A second holder beside the first rather than a pair in one, for the same reason and with
+     * the same shortcoming: `FoodRoute.FoodEditor` carries an optional `FoodId` and nothing else.
+     * Two `String?`s keep both saveable with no custom `Saver` and keep them independent — a
+     * fruitless *search* prefills a name and no barcode, a fruitless *lookup* prefills a barcode
+     * and no name, and neither can leak into the other's creation.
+     */
+    var editorBarcode by rememberSaveable { mutableStateOf<String?>(null) }
+
     FoodNavHost(stack = stack, modifier = modifier) { route ->
         FoodDestination(
             route = route,
             stack = stack,
             editorPrefill = editorPrefill,
             onEditorPrefillChange = { editorPrefill = it },
+            editorBarcode = editorBarcode,
+            onEditorBarcodeChange = { editorBarcode = it },
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -173,20 +192,39 @@ private fun FoodDestination(
     stack: FoodStack,
     editorPrefill: String?,
     onEditorPrefillChange: (String?) -> Unit,
+    editorBarcode: String?,
+    onEditorBarcodeChange: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when (route) {
         /*
          * PRD_FOOD 10.1. The day being viewed is deliberately absent from every route below:
-         * see the note on `FoodRoute`. What the screen hands back is the day it was on, so a `+`
-         * pressed on Tuesday's lunch opens `Add food` already aimed at Tuesday's lunch.
+         * see the note on `FoodRoute`. What the screen hands back is the day it was on — and
+         * **only** the day.
+         *
+         * The moment used to travel with it, because the `+` that was pressed named one. It no
+         * longer does: `AddFood` with a date and no moment is what makes the hour decide
+         * (`FoodAddDraft.forTarget` leaves `slotPinned = false`), which is the rule the six `+`
+         * buttons were overriding every time one of them was used. The override the owner asked
+         * for is still on the sheet, in `SLOT_FIELD`.
          */
         FoodRoute.Day -> FoodDayRoute(
-            onAddToSlot = { date, slot ->
-                stack.push(FoodRoute.AddFood(date = date, slot = slot))
-            },
+            onAdd = { date -> stack.push(FoodRoute.AddFood(date = date)) },
+            /*
+             * PRD_FOOD 12: the same action at the foot of the screen, on a day the journal cannot
+             * take. It is one gesture with two destinations rather than two controls, because a
+             * day still to come leaves it only one honest meaning — and the day screen is what
+             * knows which day it is on.
+             */
+            onPlan = { date -> stack.push(FoodRoute.PlanMeal(date = date)) },
             onEditEntry = { entryId -> stack.push(FoodRoute.AddFood(entryId = entryId)) },
-            onSwapPlan = { plan -> stack.push(FoodRoute.Swap(plan)) },
+            /*
+             * FR-PLAN-002, and `Swap` is back on the card because this is somewhere real to go.
+             * Replacing a proposal *is* posing one, so it opens the same sheet, aimed at the
+             * moment being replaced — which pins it, so the derivation from the dish does not
+             * quietly move the meal to another moment.
+             */
+            onSwapPlan = { plan -> stack.push(FoodRoute.PlanMeal(plan.plannedOn, plan.slot)) },
             modifier = modifier,
         )
 
@@ -209,17 +247,19 @@ private fun FoodDestination(
                 onEditorPrefillChange(prefill)
                 stack.push(FoodRoute.FoodEditor())
             },
-            onOpenPreferences = { stack.push(FoodRoute.Preferences) },
             modifier = modifier,
         )
 
         /*
          * PRD_FOOD 7's `Add food`, in both its readings (FR-FOOD-002 to 008).
          *
-         * The three callbacks are the three things the sheet cannot do itself. `Use a recipe`
-         * **selects** the recipes view rather than pushing a sheet: PRD_FOOD 7 makes `Recipes`
-         * one of the four siblings, and FR-FOOD-004 logs a recipe from its own card — so this is
-         * a handover, and `select` takes the sheet with it rather than leaving it underneath.
+         * The four callbacks are the four things the sheet cannot do itself, and every one of
+         * them is a **push**. `Use a recipe` used to be a `select(Recipes)`, which is not a
+         * handover at all: selecting a view replaces the root of the module, so the sheet closed,
+         * the switcher and the bottom bar came back, and the person logging a meal was left on
+         * the recipe catalogue with nothing tying it to what they had been writing. It now opens
+         * `RecipePicker` over the sheet exactly as `Search a food` opens `FoodPicker`, and the
+         * choice comes back through the ViewModel the two share.
          */
         is FoodRoute.AddFood -> FoodAddRoute(
             date = route.date,
@@ -227,7 +267,18 @@ private fun FoodDestination(
             entryId = route.entryId,
             onClose = { stack.pop() },
             onSearchFood = { stack.push(FoodRoute.FoodPicker) },
-            onUseRecipe = { stack.select(FoodRoute.Recipes) },
+            onUseRecipe = { stack.push(FoodRoute.RecipePicker) },
+            /*
+             * PRD_FOOD 17's fourth row: a barcode Open Food Facts has no card for opens the
+             * editor already holding it. `push` and not `replaceTop`, so back returns to the
+             * scan with the number still in the field — a lookup that failed for the network's
+             * reasons is worth another try, and the person has not lost the digits either way.
+             */
+            onCreateFood = { barcode ->
+                onEditorPrefillChange(null)
+                onEditorBarcodeChange(barcode)
+                stack.push(FoodRoute.FoodEditor())
+            },
             modifier = modifier,
         )
 
@@ -283,26 +334,68 @@ private fun FoodDestination(
             )
         }
 
+        /*
+         * FR-FOOD-004's picker, the food picker's twin.
+         *
+         * Same shape and same reason: the route carries no parameter, the stack has no result
+         * channel, so what it chose is written straight into the add flow's ViewModel and the
+         * sheet underneath finds it there. `stack.pop()` and never `select`, which is the whole
+         * difference between coming back to the meal being logged and being sent to browse.
+         *
+         * The creation it offers is pushed on top rather than swapped in: a recipe written from
+         * here belongs to this list, and saving it pops back to a picker that now has something
+         * to choose.
+         */
+        FoodRoute.RecipePicker -> {
+            val add = foodAddViewModel()
+            RecipePickerRoute(
+                onPicked = { recipeId ->
+                    add.onRecipeChosen(recipeId)
+                    stack.pop()
+                },
+                onCreateRecipe = { stack.push(FoodRoute.RecipeEditor()) },
+                onBack = { stack.pop() },
+                modifier = modifier,
+            )
+        }
+
         /* FR-CATALOG-003: creating a personal food, correcting one, duplicating a reference. */
         is FoodRoute.FoodEditor -> FoodEditorRoute(
             foodId = route.foodId,
             prefillName = editorPrefill.takeIf { route.foodId == null },
+            prefillBarcode = editorBarcode.takeIf { route.foodId == null },
             onFinished = {
                 /*
                  * The term dies with the sheet. Kept, it would prefill the *next* blank editor
-                 * with a word from a search nobody remembers making.
+                 * with a word from a search nobody remembers making — and the barcode would be
+                 * worse still, since a stale one would attach another product's number to a food
+                 * typed out by hand a week later.
                  */
                 onEditorPrefillChange(null)
+                onEditorBarcodeChange(null)
                 stack.pop()
             },
             modifier = modifier,
         )
 
-        is FoodRoute.Swap -> FoodPlaceholder(modifier)
-
-        /* PRD_FOOD 6.7 and 13.2: the module's occasional settings, and nowhere else. */
-        FoodRoute.Preferences -> FoodPreferencesRoute(
-            onBack = { stack.pop() },
+        /*
+         * PRD_FOOD 12 and FR-PLAN-001, on the sheet that already asks for all three facts.
+         *
+         * The same composable as `AddFood`, told to plan, so a proposal's servings pass through
+         * the very stepper a consumption's do and PRD_FOOD 15's counter exists once. `onSearchFood`
+         * and `onCreateFood` are unreachable from here — §8.5 admits no plain food into a
+         * proposal, so the planning sheet offers the recipe path alone — and are wired to nothing
+         * rather than to a screen that would write the wrong kind of thing.
+         */
+        is FoodRoute.PlanMeal -> FoodAddRoute(
+            date = route.date,
+            slot = route.slot,
+            entryId = null,
+            planning = true,
+            onClose = { stack.pop() },
+            onSearchFood = {},
+            onUseRecipe = { stack.push(FoodRoute.RecipePicker) },
+            onCreateFood = {},
             modifier = modifier,
         )
     }

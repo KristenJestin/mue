@@ -29,11 +29,7 @@ object FoodDayMessages {
     // region the moments (PRD_FOOD 10.1 and 17)
 
     /**
-     * PRD_FOOD 17: "aucune ligne aujourd'hui → quatre moments vides et leur bouton d'ajout".
-     *
-     * The empty state of a moment *is* its add button, and it is an invitation rather than a
-     * report: nothing here says a moment is missing something, because a breakfast that did not
-     * happen is not an error.
+     * The words on the day's one add action, before anything has been written on it.
      *
      * **Not "Add what you ate".** That was the first thing the owner named: a moment later today
      * has not been eaten yet, and its `+` is pressed all the same — "alors que c'est parfois sur
@@ -41,12 +37,43 @@ object FoodDayMessages {
      * the module tell half its readers they were in the wrong place.
      *
      * `Add something` and [ADD_MORE]'s `Add something else` are one pair rather than two
-     * sentences, and neither claims a tense. What is being added to is the heading directly above
-     * the button — the moment names itself, so the button does not have to.
+     * sentences, and neither claims a tense. They used to sit under a moment's heading, which is
+     * what named the thing being added to; there is one action now and no heading over it, and
+     * that is the whole correction — **the moment is not chosen here any more.** The hour picks it
+     * on the sheet (FR-FOOD-007), which is what the six `+` buttons were overriding every time one
+     * of them was pressed.
      */
     const val ADD_FIRST: String = "Add something"
 
     const val ADD_MORE: String = "Add something else"
+
+    /**
+     * The same action's words on a day the journal will not take (PRD_FOOD 12 and 22).
+     *
+     * `Add something` would be a promise the day cannot keep — nothing can be *added* to a
+     * Thursday that has not happened — while `Plan something` is exactly what the moment below it
+     * can hold. One control with two honest readings, rather than a second button that appears
+     * only on some days.
+     *
+     * It deliberately avoids the vocabulary of advice. PRD_FOOD 12 forbids a "coach" register in
+     * Food, and `Suggest something` would put the app in the position of the one suggesting.
+     */
+    const val PLAN_FIRST: String = "Plan something"
+
+    const val PLAN_MORE: String = "Plan something else"
+
+    /**
+     * PRD_FOOD 17: "aucune ligne aujourd'hui" — what a day with nothing on it says about itself.
+     *
+     * It has to say something now. The empty state used to *be* the six moments and their add
+     * rows: the screen was never blank because it always drew all six, filled or not. With a
+     * heading appearing only once its moment holds something, a day nobody has written on has no
+     * headings at all, and one line is what stands between that and a screen that looks broken.
+     *
+     * A report and not an error, and not an instruction either: the action at the foot of the
+     * screen is already the invitation, and repeating it here would be the same control twice.
+     */
+    const val NOTHING_LOGGED_YET: String = "Nothing logged yet"
 
     /** What tapping a line does (PRD_FOOD FR-FOOD-008 reuses the `Add food` sheet to correct one). */
     const val EDIT_ENTRY: String = "Edit this entry"
@@ -64,18 +91,16 @@ object FoodDayMessages {
      */
     const val FUTURE_DAY: String = "This day hasn't happened yet"
 
+    /**
+     * What the day is for, now that the action at the foot of the screen does it.
+     *
+     * The sentence is unchanged and it was true when it shipped; what was missing was any gesture
+     * that made it actionable. `MealPlanRepository.save` had no caller in `ui/` at all, so a
+     * reader could walk to Thursday, read that its moments can carry a suggestion, and find
+     * nothing anywhere in the module that posed one.
+     */
     const val FUTURE_DAY_DETAIL: String =
         "Its moments can carry a suggestion. An entry waits for the day itself."
-
-    /**
-     * What a moment ahead of today offers, in the row the add button holds on every other day.
-     *
-     * PRD_FOOD 10.1 wants that row "toujours présent", and PRD_FOOD 22 will not let it write a
-     * line, so it keeps its place and stops being a control. It names what the moment can hold
-     * rather than what it refuses — the day's own line above has already said that once, and four
-     * refusals under it would read as four errors.
-     */
-    const val PLANNABLE_SLOT: String = "Can hold a suggestion"
 
     // endregion
 

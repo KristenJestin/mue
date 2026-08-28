@@ -1,8 +1,6 @@
 package fr.kristenjestin.mue.ui.food.day
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,9 +33,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import fr.kristenjestin.mue.domain.model.FoodLogEntryId
 import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
@@ -50,13 +51,19 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
+import fr.kristenjestin.mue.ui.theme.MueTypography
 import java.util.Locale
 
-/** The prototype's glyph tile, grown to the touch minimum of PRD_FOOD 18. */
-private val IconTileSize: Dp = MueMinTouchTarget
-
-/** The small tile of the add row: decoration inside a target, not a target of its own. */
-private val AddTileSize: Dp = 32.dp
+/**
+ * The prototype's glyph tile on a journal line: `h-10 w-10`, so 40 dp.
+ *
+ * It had been grown to [MueMinTouchTarget] on the grounds of PRD_FOOD 18, but that rule sizes
+ * *targets* and this tile is not one: the card around it carries the click, and the glyph inside
+ * is explicitly decorative because the title beside it already names the line. Growing it bought
+ * no reachability and cost the row its proportions — a 48 dp block of amber is the heaviest thing
+ * on a line whose subject is the food's name.
+ */
+private val IconTileSize: Dp = 40.dp
 
 /** The glyph in front of one of a proposal's actions. */
 private val PlanActionIconSize: Dp = 14.dp
@@ -70,6 +77,24 @@ private val PlanActionGutter: Dp = 12.dp
 /** The bullet the prototype sets between two facts of one line. */
 private val FactBulletSize: Dp = 3.dp
 
+/**
+ * The prototype's moment label: `text-[9px] font-bold tracking-[.12em] uppercase`.
+ *
+ * `eyebrow` drew `BREAKFAST` at 14 sp — the very size of the food names in the cards beneath it —
+ * so a moment shouted as loudly as the things inside it. The prototype puts the label *under* its
+ * own lines in the hierarchy: smaller, bolder and widely tracked, which is what makes an
+ * uppercase word read as a heading rather than as content.
+ *
+ * Built from the shipped `micro` rather than from a raw `sp`, so the module still owns no size of
+ * its own and the label keeps growing with the reader's chosen text size. Only the weight and the
+ * tracking are the prototype's.
+ */
+private fun SlotLabelStyle(type: MueTypography): TextStyle =
+    type.micro.copy(fontWeight = FontWeight.Bold, letterSpacing = SlotLabelTracking)
+
+/** The prototype's `tracking-[.12em]`, which is what spaces an uppercase label out. */
+private val SlotLabelTracking = 0.12.em
+
 /** PRD_FOOD 19: a proposal is outlined rather than filled, and the outline is dashed. */
 private val DashOn: Dp = 6.dp
 private val DashOff: Dp = 4.dp
@@ -79,19 +104,33 @@ private val DashWidth: Dp = 1.dp
 private const val PlanOutlineAlpha = 0.4f
 
 /**
- * One of the four moments (PRD_FOOD 10.1), in the order that section fixes: the unconfirmed
- * proposal if there is one, then the lines sorted by time, then an add button that is always
- * there.
+ * One of the six moments (PRD_FOOD 10.1), in the order that section fixes: the unconfirmed
+ * proposal if there is one, then the lines sorted by time.
  *
  * The moment's own total sits in the heading and appears only once the moment holds a line.
- * PRD_FOOD 10.4 forbids inventing one, so an empty breakfast shows **no total at all** — not a
- * zero, and not a dash either. Three facts, three readings: nothing logged, a known zero, and
- * an unknown.
+ * PRD_FOOD 10.4 forbids inventing one, so a moment holding nothing but a proposal shows **no
+ * total at all** — not a zero, and not a dash either. Three facts, three readings: nothing
+ * logged, a known zero, and an unknown.
+ *
+ * ## What six moments cost the day, and what stopped paying for it
+ *
+ * This section used to end in an add row, and every one of the six drew one whether it held
+ * anything or not — PRD_FOOD 10.1's "toujours présent", so that adding to breakfast was always
+ * the same gesture in the same spot. Drawn as six full blocks that is two thirds of an ordinary
+ * day's height spent on headings over empty invitations, and the answer was to **fold** an empty
+ * snack down to a single quiet row.
+ *
+ * Both are gone, and the fold went with the thing it existed to compress. A moment is drawn only
+ * when it holds something ([FoodDaySlotUiState.hasContent]), so there is no empty block left to
+ * shrink; and the day carries **one** add action at its foot rather than six inside it. The
+ * owner's reason is the better one: *"vu que maintenant c'est géré via l'heure, ça a moins de
+ * sens de partir du type de repas"* — a `+` that names a moment passes that moment to the sheet
+ * and overrides the clock, which is how a tap at 00:26 on `Breakfast`'s `+` produced a sheet
+ * offering breakfast against a window reading 05:00–10:00.
  */
 @Composable
 internal fun FoodDaySlotSection(
     state: FoodDaySlotUiState,
-    onAdd: () -> Unit,
     onEditEntry: (FoodLogEntryId) -> Unit,
     onConfirmPlan: (MealPlanKey) -> Unit,
     onSwapPlan: (MealPlanKey) -> Unit,
@@ -116,8 +155,6 @@ internal fun FoodDaySlotSection(
         state.entries.forEach { entry ->
             FoodDayEntryCard(state = entry, onClick = { onEditEntry(entry.id) })
         }
-
-        AddToSlotRow(state = state, onClick = onAdd)
     }
 }
 
@@ -156,7 +193,7 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
                 // Locale-independent, for the reason `Food.fold` gives: a Turkish device would
                 // otherwise turn the `i` of `Dinner` into a dotted capital.
                 text = state.label.uppercase(Locale.ROOT),
-                style = type.eyebrow,
+                style = SlotLabelStyle(type),
                 color = colors.textTertiary,
                 modifier = Modifier
                     .padding(start = MueTheme.spacing.sm)
@@ -197,9 +234,9 @@ private fun SlotHeading(state: FoodDaySlotUiState) {
                      */
                     .semantics { hideFromAccessibility() },
             ) {
-                MueText(total, type.bodyStrong, color = colors.textPrimary)
+                MueText(total, type.micro, color = colors.textTertiary)
                 state.proteinLabel?.let {
-                    MueText(it, type.micro, color = colors.textTertiary)
+                    MueText(it, type.micro, color = colors.textQuiet)
                 }
             }
         },
@@ -370,6 +407,19 @@ private fun PlanCard(
                     testTag = FoodTestTags.confirmPlan(state.key.slot),
                     onClick = onConfirm,
                 ).takeIf { state.canConfirm },
+                /*
+                 * FR-PLAN-002's `Swap`, back on the card because it finally leads somewhere.
+                 *
+                 * It was withdrawn when `FoodRoute.Swap` was a wordless empty `Box` — no title,
+                 * no back control, the one destination in the module a person could reach and see
+                 * no way out of. It now opens the planning sheet aimed at this very moment, which
+                 * is the same screen `Plan something` opens: replacing a proposal and posing one
+                 * are one gesture, and PRD_FOOD 8.5 makes the second half of it — the confirmation
+                 * before the row is overwritten — the same in both directions.
+                 *
+                 * It sits **before** `Dismiss` and after `I ate this`, in PRD_FOOD 12's own order,
+                 * so the destructive action is last on the row.
+                 */
                 PlanActionSpec(
                     label = FoodDayMessages.SWAP,
                     iconName = MueIcons.ROTATE_CW,
@@ -475,63 +525,6 @@ private fun PlanAction(action: PlanActionSpec, modifier: Modifier = Modifier) {
             style = MueTheme.typography.chip,
             color = action.tint,
             modifier = Modifier.padding(start = MueTheme.spacing.xs),
-        )
-    }
-}
-
-/**
- * PRD_FOOD 10.1: "un bouton d'ajout toujours présent", and PRD_FOOD 17's empty state in one.
- *
- * A moment with nothing in it is not an error and says nothing about what is missing; it simply
- * offers the way in. The words change once the moment holds something, which is the prototype's
- * own distinction between `Add what you ate` and `Add something else`.
- */
-@Composable
-private fun AddToSlotRow(
-    state: FoodDaySlotUiState,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = MueTheme.colors
-    val spacing = MueTheme.spacing
-    val shape = MueTheme.shapes.field
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .border(BorderStroke(1.dp, colors.hairline), shape)
-            /*
-             * PRD_FOOD 22: on a day still to come the row keeps its place and stops being a
-             * control. `enabled = false` rather than a missing `clickable`, so the node is still
-             * announced as a disabled button instead of quietly becoming a paragraph — a reader
-             * who reaches it hears that it is there and cannot be used, which is the fact.
-             */
-            .clickable(enabled = state.canAdd, role = Role.Button, onClick = onClick)
-            .padding(horizontal = spacing.md, vertical = spacing.sm)
-            .testTag(FoodTestTags.addToSlot(state.slot))
-            // The words alone do not say which moment they would add to.
-            .announcedAs("${state.addLabel}, ${state.label}"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The `+` is the promise of a line, so it goes where no line may be written.
-        if (state.canAdd) {
-            Box(
-                modifier = Modifier
-                    .size(AddTileSize)
-                    .clip(MueTheme.shapes.small)
-                    .background(colors.surface),
-                contentAlignment = Alignment.Center,
-            ) {
-                MueIcon(iconName = ActivityIcons.PLUS, tint = colors.textTertiary, size = 14.dp)
-            }
-        }
-        MueText(
-            text = state.addLabel,
-            style = MueTheme.typography.caption,
-            color = if (state.canAdd) colors.textTertiary else colors.textQuiet,
-            modifier = Modifier.padding(start = if (state.canAdd) spacing.md else 0.dp),
         )
     }
 }

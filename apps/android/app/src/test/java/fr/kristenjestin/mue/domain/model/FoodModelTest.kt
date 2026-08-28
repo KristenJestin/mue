@@ -329,10 +329,52 @@ class MealPlanKeyTest {
 
     private val key = MealPlanKey(LocalDate.of(2026, 3, 14), MealSlot.DINNER)
 
+    /**
+     * `aggregateIdSchema` in `packages/contracts/src/primitives.ts`, transcribed.
+     *
+     * It is written out rather than referenced, because it is the rule a *stored* identifier is
+     * ultimately judged against on a machine this test cannot reach, and a copy that could drift
+     * towards what this file happens to emit would assert nothing at all.
+     */
+    private val AGGREGATE_ID = Regex("^[A-Za-z0-9._:-]+\$")
+
+    /**
+     * The separator is a colon, and that is a contract requirement rather than a preference.
+     *
+     * `aggregateIdSchema` in `packages/contracts` is `^[A-Za-z0-9._:-]+$`. The `/` this used to
+     * write is not in it, so every proposal already journalled would have been refused *at the
+     * envelope* — before any handler, before any storage — on the day `mealPlanEntry` joined
+     * `AGGREGATE_TYPES`. `MealPlanIdRepair` moves the rows that exist; this is what stops the next
+     * one being written.
+     */
     @Test
     fun `the identity of a proposal is its date and its moment, in a sortable id`() {
-        assertEquals("2026-03-14/dinner", key.aggregateId)
-        assertEquals("2026-01-05/breakfast", MealPlanKey(LocalDate.of(2026, 1, 5), MealSlot.BREAKFAST).aggregateId)
+        assertEquals("2026-03-14:dinner", key.aggregateId)
+        assertEquals("2026-01-05:breakfast", MealPlanKey(LocalDate.of(2026, 1, 5), MealSlot.BREAKFAST).aggregateId)
+        assertTrue(AGGREGATE_ID.matches(key.aggregateId))
+    }
+
+    /**
+     * The old spelling still *reads*, and only reads.
+     *
+     * A phone upgrading mid-queue holds rows written with a `/` in `sync_mutations`, in
+     * `sync_aggregate_state` and inside the `fromPlan` of journalled food-log payloads. Every one
+     * of those has to keep resolving to the day it names while the repair works through them, and
+     * a navigation key restored from saved instance state across the upgrade has to as well.
+     */
+    @Test
+    fun `the slash a previous build wrote still parses, and is never written again`() {
+        val legacy = "2026-03-14/dinner"
+        assertEquals(key, MealPlanKey.parseOrNull(legacy))
+        assertEquals("2026-03-14:dinner", MealPlanKey.canonicalOrNull(legacy))
+        assertFalse(AGGREGATE_ID.matches(legacy))
+    }
+
+    /** A row already canonical is not a repair candidate: the pass must be idempotent. */
+    @Test
+    fun `an identifier a current build wrote needs no repair`() {
+        assertNull(MealPlanKey.canonicalOrNull("2026-03-14:dinner"))
+        assertNull(MealPlanKey.canonicalOrNull("not an identifier at all"))
     }
 
     @Test
@@ -355,19 +397,19 @@ class MealPlanKeyTest {
     @Test
     fun `a malformed id is ignored rather than thrown`() {
         assertNull(MealPlanKey.parseOrNull(""))
-        assertNull(MealPlanKey.parseOrNull("/"))
+        assertNull(MealPlanKey.parseOrNull(":"))
         assertNull(MealPlanKey.parseOrNull("dinner"))
         assertNull(MealPlanKey.parseOrNull("2026-03-14"))
-        assertNull(MealPlanKey.parseOrNull("2026-03-14/"))
-        assertNull(MealPlanKey.parseOrNull("/dinner"))
-        assertNull(MealPlanKey.parseOrNull("2026-13-14/dinner"))
-        assertNull(MealPlanKey.parseOrNull("not-a-date/dinner"))
+        assertNull(MealPlanKey.parseOrNull("2026-03-14:"))
+        assertNull(MealPlanKey.parseOrNull(":dinner"))
+        assertNull(MealPlanKey.parseOrNull("2026-13-14:dinner"))
+        assertNull(MealPlanKey.parseOrNull("not-a-date:dinner"))
     }
 
     @Test
     fun `an unknown moment is refused here, where the total fromId would have hidden it`() {
         assertEquals(MealSlot.SNACK, MealSlot.fromId("brunch"))
-        assertNull(MealPlanKey.parseOrNull("2026-03-14/brunch"))
+        assertNull(MealPlanKey.parseOrNull("2026-03-14:brunch"))
     }
 }
 
@@ -383,7 +425,7 @@ class MealPlanEntryTest {
     @Test
     fun `a proposal is addressed by its business key and carries no identifier of its own`() {
         assertEquals(MealPlanKey(LocalDate.of(2026, 3, 14), MealSlot.DINNER), entry.key)
-        assertEquals("2026-03-14/dinner", entry.aggregateId)
+        assertEquals("2026-03-14:dinner", entry.aggregateId)
         val fields = MealPlanEntry::class.java.declaredFields.map { it.name }
         assertFalse(fields.contains("id"))
     }

@@ -1,6 +1,6 @@
 import { requireMcpAuth } from "@better-auth/mcp";
 import { StreamableHTTPTransport } from "@hono/mcp";
-import type { AuthHandle } from "@mue/auth";
+import { oauthIssuer, type AuthHandle } from "@mue/auth";
 import type { MueError } from "@mue/contracts";
 import { Hono } from "hono";
 import { unauthenticated } from "./errors";
@@ -160,7 +160,18 @@ export function createMcpApp(options: McpRouteOptions): Hono {
           await server.close();
         }
       },
-      { resource: config.mcpResource, challengeScopes: challengeScopes(options) },
+      {
+        resource: config.mcpResource,
+        challengeScopes: challengeScopes(options),
+        // `requireMcpAuth` defaults the expected issuer to Better Auth's base
+        // URL, `<origin>/api/auth`. `@mue/auth` moved the issuer to the origin so
+        // OAuth discovery lands where clients look for it, so the tokens this
+        // very server signs carry `iss: <origin>` and the default would reject
+        // every one of them -- as a bare 401 with no server-side reason, because
+        // an issuer mismatch is indistinguishable from a forged token. The two
+        // values have one source: `oauthIssuer`.
+        issuer: oauthIssuer(config.baseUrl),
+      },
     );
 
     return guarded(c.req.raw);

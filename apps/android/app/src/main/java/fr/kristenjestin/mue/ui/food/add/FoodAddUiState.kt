@@ -2,14 +2,18 @@ package fr.kristenjestin.mue.ui.food.add
 
 import androidx.compose.runtime.Immutable
 import fr.kristenjestin.mue.domain.logic.FoodLabels
+import fr.kristenjestin.mue.domain.logic.FoodValidation
 import fr.kristenjestin.mue.domain.logic.MealSlotRules
 import fr.kristenjestin.mue.domain.logic.Validated
+import fr.kristenjestin.mue.domain.logic.errorMessage
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodLogEntry
 import fr.kristenjestin.mue.domain.model.FoodLogKind
+import fr.kristenjestin.mue.domain.model.MealPlanEntry
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.Nutrients
 import fr.kristenjestin.mue.domain.model.Servings
+import fr.kristenjestin.mue.domain.repository.LookupFailure
 import fr.kristenjestin.mue.ui.food.FoodIcons
 import fr.kristenjestin.mue.ui.food.day.FoodDayFormat
 import java.time.LocalDate
@@ -20,6 +24,9 @@ import java.util.Locale
 internal enum class FoodAddStage {
     /** PRD_FOOD 7's ways in, shown while nothing has been chosen yet. */
     PATHS,
+
+    /** FR-FOOD-003: the camera and the typed barcode, until one of them yields a food. */
+    SCAN,
 
     /** FR-FOOD-006: a catalogue food, weighed or counted in its usual portions. */
     AMOUNT,
@@ -110,13 +117,29 @@ internal data class FoodAddFoodUiState(
     val description: String,
 )
 
-/** One of PRD_FOOD 10.1's four moments as an option (FR-FOOD-007). */
+/**
+ * The recipe a line is being built from (FR-FOOD-004).
+ *
+ * The same two lines a food gets — what it is, and one fact underneath — so the sheet reads the
+ * same whichever way in was taken. [meta] carries what a serving *means* here: the number of
+ * servings the ingredient quantities were written for (PRD_FOOD 8.3), without which "2 servings"
+ * on the field below is a number with no unit behind it.
+ */
+@Immutable
+internal data class FoodAddRecipeUiState(
+    val name: String,
+    val meta: String,
+    val iconName: String,
+    val description: String,
+)
+
+/** One of PRD_FOOD 10.1's six moments, as an option **inside the override panel** (FR-FOOD-007). */
 @Immutable
 internal data class FoodAddSlotUiState(
     val slot: MealSlot,
     val label: String,
     /**
-     * PRD_FOOD 10.3's window under the name — `05:00 – 10:00` — or `Any other time` for the snack.
+     * PRD_FOOD 10.3's window under the name — `05:00 – 10:00`. Every moment has one.
      *
      * The moment and the hour were two controls with nothing between them, and a moment is not a
      * word anyone can define by looking at it. Its hours are the definition, they are already in
@@ -125,6 +148,21 @@ internal data class FoodAddSlotUiState(
     val hoursLabel: String,
     val iconName: String,
     val selected: Boolean,
+    /**
+     * PRD_FOOD 8.5: this moment already holds a proposal, so choosing it will replace one.
+     *
+     * Only ever true while planning. On a journal line it would be meaningless — a moment takes
+     * as many entries as anyone cares to write — and saying "already suggested" beside a moment
+     * somebody is about to log an apple into would be a warning about nothing.
+     */
+    val isTaken: Boolean = false,
+    /**
+     * What sits under the moment's name in the panel: its hours, and whether it is spoken for.
+     *
+     * Composed here rather than in the sheet, so the one control that shows it draws a string it
+     * was handed instead of assembling one — and so both readings are provable on the JVM.
+     */
+    val description: String = hoursLabel,
 )
 
 /**
@@ -154,6 +192,151 @@ internal data class FoodAmountUiState(
     val referenceNote: String?,
 )
 
+/**
+ * Where the scan path has got to (PRD_FOOD 9.2 and 17).
+ *
+ * Five states, and every one of them is a different screen in PRD_FOOD 17's table. Collapsing any
+ * two would be the failure `LookupFailure` and `ProductLookupResult` were both written to prevent
+ * one layer down: "Open Food Facts has never heard of this jar" sends somebody to type a label,
+ * and "your train went into a tunnel" must not.
+ *
+ * It is deliberately **not** in the draft. None of it was typed, none of it survives a process
+ * death worth keeping — a lookup made twenty minutes ago on a network that has since changed is
+ * not news — and a `Food` cannot cross a `Bundle` anyway.
+ */
+internal sealed interface FoodScanState {
+
+    /** Nothing has been looked up yet: the camera is live, the field is empty or being typed. */
+    data object Idle : FoodScanState
+
+    /** A request is out. PRD_FOOD 17 keeps the other three ways in reachable while it is. */
+    data object LookingUp : FoodScanState
+
+    /**
+     * A product card came back, or the local catalogue already held one for this number.
+     *
+     * [food] is a **candidate** until [alreadyInCatalogue] says otherwise: PRD_FOOD 9.2 copies the
+     * product locally "au moment de l'ajout", so nothing is written until the person accepts what
+     * they are looking at. That matters most on an incomplete card — the values are on screen,
+     * with their dashes, *before* a row exists.
+     */
+    data class Found(val food: Food, val alreadyInCatalogue: Boolean) : FoodScanState
+
+    /** The service answered and knows no such barcode. PRD_FOOD 17 prefills a manual creation. */
+    data class NotFound(val barcode: String) : FoodScanState
+
+    /** Nothing was learned about the barcode, and [reason] says which of the four ways. */
+    data class Unavailable(val barcode: String, val reason: LookupFailure) : FoodScanState
+}
+
+/**
+ * The product a lookup found, rendered (PRD_FOOD 9.2, 13.2 and 17).
+ *
+ * [per100] goes through [FoodNutrientsUiState] like every other set of five figures in this
+ * module, which is what guarantees that a card with no fibre shows `—` and never `≈ 0 g`. The
+ * mapper already refuses to invent the value; this is the half that refuses to draw one.
+ */
+@Immutable
+internal data class FoodScanFoundUiState(
+    val name: String,
+    val meta: String,
+    val iconName: String,
+    val description: String,
+    val per100: FoodNutrientsUiState,
+    val actionLabel: String,
+    /** PRD_FOOD 17: said out loud when the card documents fewer than the five metrics. */
+    val incompleteNote: String?,
+)
+
+/**
+ * What the scan panel says when it has no product to show (PRD_FOOD 17).
+ *
+ * One shape for the two cases because what the screen *does* with them is identical — print the
+ * sentence, offer what is possible — while what it *says* is never the same twice: that is
+ * [FoodAddMessages]' job, and the four [LookupFailure] values reach four different sentences
+ * there.
+ */
+@Immutable
+internal data class FoodScanNoticeUiState(
+    val message: String,
+    val detail: String?,
+    /** Only a failure can be retried; a product that does not exist will not exist next time. */
+    val canRetry: Boolean,
+    /** PRD_FOOD 17's "bascule vers la création manuelle pré-remplie". */
+    val canCreate: Boolean,
+)
+
+/**
+ * The scan stage, whole (FR-FOOD-003, PRD_FOOD 17 and 18).
+ *
+ * [cameraExplanation] is the sentence PRD_FOOD 17 asks for when the camera is unavailable, and
+ * its presence is never a reason to hide anything else: the field, the button and every outcome
+ * below work identically with no camera on the device at all.
+ */
+@Immutable
+internal data class FoodScanUiState(
+    val barcode: String,
+    /** PRD_FOOD 15's own refusal, shown after an attempt rather than during typing. */
+    val barcodeError: String?,
+    val canLookUp: Boolean,
+    val isLookingUp: Boolean,
+    /** True while the preview should be on screen: granted, and this device has a camera. */
+    val isCameraLive: Boolean,
+    val cameraExplanation: String?,
+    /** PRD_FOOD 18: the only offer of the system prompt, and it is made at most once. */
+    val cameraActionLabel: String?,
+    val found: FoodScanFoundUiState?,
+    val notice: FoodScanNoticeUiState?,
+    /** A write that failed on the way into the catalogue. Nothing was lost. */
+    val saveError: String?,
+) {
+
+    /**
+     * The camera's three facts, folded in by the screen that can see them.
+     *
+     * They arrive here rather than through the ViewModel because a permission is a property of
+     * the Android process, not of a draft: `rememberFoodCameraPermission` reads it, re-reads it on
+     * every resume, and hands the answer down. Keeping it out of [FoodAddUiState.of] is what lets
+     * that function stay a pure function of a draft, and keeping the *wording* in here — rather
+     * than in the composable — is what lets PRD_FOOD 17's three sentences be proved on the JVM.
+     *
+     * The order of the branches is the order of the truths a person is owed:
+     *
+     * 1. **there is no camera on this device.** Nothing to grant, nothing to explain about
+     *    permissions, and offering a prompt that would change nothing would be a lie;
+     * 2. **granted.** The preview runs and there is nothing to say;
+     * 3. **never asked.** The offer is made, once, and only from here;
+     * 4. **refused.** The explanation PRD_FOOD 17 requires, and **no second prompt** — Android
+     *    would not show one, and pretending otherwise would hand somebody a button that does
+     *    nothing. Settings is the way back, and the field below never needed either.
+     */
+    fun withCamera(
+        isGranted: Boolean,
+        isAvailable: Boolean,
+        canRequest: Boolean,
+    ): FoodScanUiState = when {
+        !isAvailable -> copy(
+            isCameraLive = false,
+            cameraExplanation = FoodAddMessages.CAMERA_ABSENT,
+            cameraActionLabel = null,
+        )
+
+        isGranted -> copy(isCameraLive = true, cameraExplanation = null, cameraActionLabel = null)
+
+        canRequest -> copy(
+            isCameraLive = false,
+            cameraExplanation = FoodAddMessages.CAMERA_NOT_YET_ALLOWED,
+            cameraActionLabel = FoodAddMessages.ALLOW_CAMERA,
+        )
+
+        else -> copy(
+            isCameraLive = false,
+            cameraExplanation = FoodAddMessages.CAMERA_REFUSED,
+            cameraActionLabel = FoodAddMessages.OPEN_CAMERA_SETTINGS,
+        )
+    }
+}
+
 /** FR-FOOD-005: the three fields of a quick add, and nothing else. */
 @Immutable
 internal data class FoodQuickUiState(
@@ -175,6 +358,15 @@ internal data class FoodQuickUiState(
 internal data class FoodAddUiState(
     val stage: FoodAddStage,
     val isEditing: Boolean,
+    /**
+     * PRD_FOOD 12: the sheet is posing a proposal, not writing a line.
+     *
+     * The whole of the difference is named on the fields it touches — [showsTime] is false, the
+     * one way in is the recipe, [contribution] stays null and [saveLabel] says `Plan this meal`.
+     * There is no second screen and no second ViewModel: a proposal is a recipe, a serving count
+     * and a moment, and this sheet already asks for all three.
+     */
+    val isPlanning: Boolean,
     val screenTitle: String,
     val date: LocalDate,
     val today: LocalDate,
@@ -182,6 +374,16 @@ internal data class FoodAddUiState(
     val dateDescription: String,
     val slot: MealSlot,
     val slots: List<FoodAddSlotUiState>,
+    /**
+     * FR-FOOD-007, already rendered: `Lunch · 12:00 – 14:30`.
+     *
+     * The moment is **derived and displayed, never asked for**. It is one quiet line under the
+     * hour rather than a grid of tiles beside it, because the hour has already said which moment
+     * this is and a control that asks again is a second entry of one fact.
+     */
+    val slotFieldValue: String,
+    /** PRD_FOOD 18: the same line for the ear, including what tapping it does. */
+    val slotFieldDescription: String,
     val time: LocalTime,
     val timeLabel: String,
     /**
@@ -193,10 +395,30 @@ internal data class FoodAddUiState(
      */
     val slotTimeNote: String?,
     val food: FoodAddFoodUiState?,
+    /** FR-FOOD-004: the chosen recipe, on [FoodAddStage.SERVINGS] and nowhere else. */
+    val recipe: FoodAddRecipeUiState?,
     val amount: FoodAmountUiState?,
+    /** FR-FOOD-003, and null on every stage but [FoodAddStage.SCAN]. */
+    val scan: FoodScanUiState?,
     val quick: FoodQuickUiState?,
     val servings: String,
-    /** PRD_FOOD 8.2: what the food is worth per 100, shown before any quantity is typed. */
+    /**
+     * Whether the servings stepper may move each way (FR-FOOD-004, PRD_FOOD 15).
+     *
+     * Both answers come from `FoodAddDraft.canStepServings`, which asks `Servings` for the step
+     * and `FoodValidation` whether the result is still a count. Nothing on this side of the
+     * domain compares a number against `0.25` or `10`.
+     */
+    val canAddServing: Boolean,
+    val canRemoveServing: Boolean,
+    /**
+     * What the source is worth before any quantity is typed.
+     *
+     * Per 100 g or ml for a catalogue food (PRD_FOOD 8.2), per serving for a recipe (PRD_FOOD
+     * 13.1). One field for both because the screen does the same thing with them — draws them
+     * where the contribution will go — and because [FoodNutrientsUiState.header] already says
+     * which of the two basis a reader is looking at.
+     */
     val per100: FoodNutrientsUiState?,
     /** PRD_FOOD 13.1: what this line contributes, once there is a quantity to contribute from. */
     val contribution: FoodNutrientsUiState?,
@@ -207,6 +429,18 @@ internal data class FoodAddUiState(
     val justSaved: Boolean,
     val justDeleted: Boolean,
     val isTimePickerVisible: Boolean,
+    /** Whether the override panel is open. Closed is the ordinary state, and the default. */
+    val isSlotPickerVisible: Boolean,
+    /**
+     * PRD_FOOD 8.5 and FR-PLAN-001: the moment is already spoken for, and the write is waiting
+     * for an answer.
+     *
+     * "Proposer sur un moment déjà pourvu demande une confirmation dans l'interface, puis
+     * remplace." The confirmation is the interface's business and not the repository's —
+     * `MealPlanRepository.save` is a single upsert onto the row `(date, moment)` already names,
+     * so by the time it is called the decision has been taken.
+     */
+    val isReplaceConfirmVisible: Boolean,
     val isLoading: Boolean,
 ) {
 
@@ -214,6 +448,26 @@ internal data class FoodAddUiState(
     val isFoodMissing: Boolean get() = stage == FoodAddStage.FROZEN
 
     val canDelete: Boolean get() = isEditing
+
+    /**
+     * Whether the hour is asked for at all (PRD_FOOD 8.5 against PRD_FOOD 10.3).
+     *
+     * A journal line carries a local time and is ordered by it; a proposal carries **no time
+     * field whatsoever**. So the clock disappears from the planning sheet rather than being
+     * shown and ignored, and with it [slotTimeNote], which exists only to explain a disagreement
+     * between an hour and a moment that a proposal cannot have.
+     */
+    val showsTime: Boolean get() = !isPlanning
+
+    /**
+     * The moment as something to **choose** rather than as something derived (FR-PLAN-001).
+     *
+     * On the journal side FR-FOOD-007 derives it from the hour and PRD_FOOD 10.3 refuses to ask
+     * the same fact twice, which is why it is a quiet line there. Planning has no hour to derive
+     * it from and FR-PLAN-001 requires the manual path to "présente ces trois choix" — the date,
+     * the moment and the servings — so here it is a field, opening the very same panel.
+     */
+    val asksForSlot: Boolean get() = isPlanning
 
     /**
      * Whether the sheet can go back to PRD_FOOD 7's ways in.
@@ -226,6 +480,17 @@ internal data class FoodAddUiState(
      * unmake it would offer to turn a weighed food into a quick add.
      */
     val canReturnToPaths: Boolean get() = !isEditing && stage != FoodAddStage.PATHS
+
+    /**
+     * Whether the sticky `Save entry` belongs on screen.
+     *
+     * Not on the ways in, and **not on the scan**: neither stage has a line to write yet, and a
+     * primary button that can only refuse is worse than no button — it makes the screen look
+     * finished when the person has not chosen a food. The scan has its own action, on its own
+     * result, and it says what it does.
+     */
+    val showsSaveAction: Boolean
+        get() = stage != FoodAddStage.PATHS && stage != FoodAddStage.SCAN
 
     /** The figures under the fields: the contribution once there is one, the per-100 until then. */
     val figures: FoodNutrientsUiState? get() = contribution ?: per100
@@ -248,70 +513,148 @@ internal data class FoodAddUiState(
             justSaved: Boolean = false,
             justDeleted: Boolean = false,
             isTimePickerVisible: Boolean = false,
+            isSlotPickerVisible: Boolean = false,
+            isReplaceConfirmVisible: Boolean = false,
             isLoading: Boolean = false,
+            /**
+             * PRD_FOOD 12: the proposals already on the day being planned.
+             *
+             * Two things read them and nothing else does: which moment a fresh proposal opens on
+             * (a taken one is not offered first), and which moments the override panel marks as
+             * spoken for. Empty on every journal path, where a moment takes as many lines as it
+             * is given.
+             */
+            plans: List<MealPlanEntry> = emptyList(),
+            /** FR-FOOD-003. [FoodScanState.Idle] on every stage that is not the scan. */
+            scan: FoodScanState = FoodScanState.Idle,
+            /** PRD_FOOD 15: the barcode's refusal appears after an attempt, not while typing. */
+            scanAttempted: Boolean = false,
+            scanSaveError: String? = null,
+            /** FR-FOOD-004: the recipe the picker handed back, resolved against its catalogue. */
+            recipe: FoodAddRecipe? = null,
             locale: Locale = Locale.getDefault(),
         ): FoodAddUiState {
             val date = draft.date(today)
             val time = draft.time(MealSlot.fromId(draft.slotId).defaultTime)
             val stage = stageOf(draft, food, original)
             val amount = food?.let { amountOf(draft, it) }
+            val chosenRecipe = recipe.takeIf { stage == FoodAddStage.SERVINGS }
+            val planning = draft.planning
+            val taken = MealSlotRules.plannedSlots(plans)
+            /*
+             * The one derivation of the moment, shared with the write (`FoodAddDraft.plannedSlot`).
+             * On a journal line it is the draft's own value untouched; while planning it is the
+             * dish's type against the day's free moments, because there is no clock to ask.
+             */
+            val slot = if (planning) draft.plannedSlot(chosenRecipe, taken) else draft.slot
 
             return FoodAddUiState(
                 stage = stage,
                 isEditing = draft.isEditing,
-                screenTitle = if (draft.isEditing) {
-                    FoodAddMessages.EDIT_TITLE
-                } else {
-                    FoodAddMessages.ADD_TITLE
+                isPlanning = planning,
+                /*
+                 * A correction is one screen and says so; a new line names the stage it is on.
+                 *
+                 * The sheet used to say `Add food` on all five of its stages, which is what the
+                 * owner met on two of them: the scan panel and the quick-add form both claimed
+                 * to be the screen he had just left. `FoodAddStage` is the only thing that knows
+                 * where the sheet is, so the title is asked of it.
+                 */
+                screenTitle = when {
+                    draft.isEditing -> FoodAddMessages.EDIT_TITLE
+                    planning -> FoodAddMessages.planStageTitle(stage)
+                    else -> FoodAddMessages.stageTitle(stage)
                 },
                 date = date,
                 today = today,
                 dateLabel = FoodDayFormat.dayLabel(date, today, locale),
                 dateDescription = FoodDayFormat.dayDescription(date, today, locale),
-                slot = draft.slot,
-                slots = MealSlot.ORDERED.map { slot ->
+                slot = slot,
+                slotFieldValue = FoodAddMessages.slotWithHours(
+                    label = slot.label,
+                    hours = hoursOf(slot, locale),
+                ),
+                slotFieldDescription = FoodAddMessages.changeSlotDescription(slot.label),
+                slots = MealSlot.ORDERED.map { option ->
+                    val hours = hoursOf(option, locale)
+                    val isTaken = planning && option in taken
                     FoodAddSlotUiState(
-                        slot = slot,
-                        label = slot.label,
-                        hoursLabel = hoursOf(slot, locale),
-                        iconName = FoodIcons.forSlot(slot),
-                        selected = slot == draft.slot,
+                        slot = option,
+                        label = option.label,
+                        hoursLabel = hours,
+                        iconName = FoodIcons.forSlot(option),
+                        selected = option == slot,
+                        isTaken = isTaken,
+                        /*
+                         * PRD_FOOD 8.5's "au maximum une proposition" made visible **before** the
+                         * choice rather than only after it. Six moments is more than a planning
+                         * screen can usefully draw at once, so this panel is where the shape of
+                         * the planned day is read: which moments are spoken for, in one column,
+                         * without a second screen listing all six.
+                         */
+                        description = if (isTaken) {
+                            FoodAddMessages.slotAlreadyPlanned(hours)
+                        } else {
+                            hours
+                        },
                     )
                 },
                 time = time,
                 timeLabel = FoodDayFormat.time(time, locale),
-                slotTimeNote = slotTimeNote(draft.slot, time, locale),
+                // A proposal carries no hour, so there is no disagreement between one and a
+                // moment to explain (PRD_FOOD 8.5).
+                slotTimeNote = if (planning) null else slotTimeNote(slot, time, locale),
                 food = food?.let(::foodOf),
+                recipe = chosenRecipe?.let(::recipeOf),
                 amount = amount,
+                scan = scanOf(draft, scan, scanAttempted, scanSaveError)
+                    .takeIf { stage == FoodAddStage.SCAN },
                 quick = FoodQuickUiState(
                     title = draft.quickTitle,
                     energy = draft.quickEnergy,
                     protein = draft.quickProtein,
                 ).takeIf { stage == FoodAddStage.QUICK },
                 servings = draft.servings,
+                canAddServing = draft.canStepServings(up = true),
+                canRemoveServing = draft.canStepServings(up = false),
                 per100 = food?.let {
                     FoodNutrientsUiState.of(FoodAddMessages.per100Label(it), it.per100)
+                } ?: chosenRecipe?.let {
+                    FoodNutrientsUiState.of(FoodAddMessages.PER_SERVING_SECTION, it.perServing)
                 },
-                contribution = contributionOf(draft, food, original, stage),
-                errors = errors,
-                saveLabel = if (draft.isEditing) {
-                    FoodAddMessages.SAVE_CHANGES
+                /*
+                 * PRD_FOOD 12: "une proposition n'entre dans aucun total tant qu'elle n'est pas
+                 * confirmée". The per-serving card above stays — it is what the recipe is worth,
+                 * a fact about the preparation — but `In this entry` is withheld, because there
+                 * is no entry: the figure would be the one the day's totals are forbidden to
+                 * include, printed under a heading that says it already counts.
+                 */
+                contribution = if (planning) {
+                    null
                 } else {
-                    FoodAddMessages.SAVE_ENTRY
+                    contributionOf(draft, food, original, recipe, stage)
+                },
+                errors = errors,
+                saveLabel = when {
+                    planning -> FoodAddMessages.PLAN_MEAL
+                    draft.isEditing -> FoodAddMessages.SAVE_CHANGES
+                    else -> FoodAddMessages.SAVE_ENTRY
                 },
                 saveDescription = FoodAddMessages.saveDescription(
-                    label = if (draft.isEditing) {
-                        FoodAddMessages.SAVE_CHANGES
-                    } else {
-                        FoodAddMessages.SAVE_ENTRY
+                    label = when {
+                        planning -> FoodAddMessages.PLAN_MEAL
+                        draft.isEditing -> FoodAddMessages.SAVE_CHANGES
+                        else -> FoodAddMessages.SAVE_ENTRY
                     },
-                    slot = draft.slot,
+                    slot = slot,
                     dateLabel = FoodDayFormat.dayLabel(date, today, locale),
                 ),
                 saveError = saveError,
                 justSaved = justSaved,
                 justDeleted = justDeleted,
                 isTimePickerVisible = isTimePickerVisible,
+                isSlotPickerVisible = isSlotPickerVisible,
+                isReplaceConfirmVisible = isReplaceConfirmVisible,
                 isLoading = isLoading,
             )
         }
@@ -320,12 +663,15 @@ internal data class FoodAddUiState(
          * PRD_FOOD 10.3's window for a moment, rendered.
          *
          * The bounds are [MealSlotRules.windowOf]'s and the clock face is [FoodDayFormat.time]'s,
-         * so the hours under `Breakfast` and the hours the clock actually preselects it for are
-         * the same two numbers. A null window is [MealSlot.SNACK]'s, which PRD_FOOD 10.3 defines
-         * as the complement of the other three — not an interval, and never drawn as one.
+         * so the hours printed beside `Breakfast` and the hours the clock actually preselects it
+         * for are the same two numbers.
+         *
+         * Every moment has a window now, including the snacks. There is no longer a moment that is
+         * "tout le reste" and therefore nothing left to print `Any other time` over — the six
+         * windows partition the clock, so a reader sees an interval wherever a moment is named.
          */
         private fun hoursOf(slot: MealSlot, locale: Locale): String {
-            val window = MealSlotRules.windowOf(slot) ?: return FoodAddMessages.ANY_OTHER_TIME
+            val window = MealSlotRules.windowOf(slot)
             return FoodAddMessages.slotHours(
                 from = FoodDayFormat.time(window.from, locale),
                 untilExclusive = FoodDayFormat.time(window.untilExclusive, locale),
@@ -360,8 +706,113 @@ internal data class FoodAddUiState(
                 food != null -> FoodAddStage.AMOUNT
                 // PRD_FOOD 17: the line survives its food; the sheet says so rather than emptying.
                 original != null -> FoodAddStage.FROZEN
+                /*
+                 * Below the food and not above it, deliberately. Accepting a scanned product
+                 * writes the catalogue row and then the id, and the food is re-read from the
+                 * repository — so for a frame or two after the tap there is an id and no `Food`
+                 * yet. Ranking the scan last keeps the scanner on screen across that gap instead
+                 * of flashing PRD_FOOD 7's three cards over a choice that has just been made.
+                 */
+                draft.scanning -> FoodAddStage.SCAN
                 else -> FoodAddStage.PATHS
             }
+        }
+
+        /**
+         * The scan panel, from the draft and whatever the lookup last said.
+         *
+         * Pure, like everything else in this file, which is what lets PRD_FOOD 17's five outcomes
+         * be checked without a camera, a socket or an emulator — the three things that make the
+         * rest of this feature hard to test.
+         */
+        private fun scanOf(
+            draft: FoodAddDraft,
+            scan: FoodScanState,
+            attempted: Boolean,
+            saveError: String?,
+        ): FoodScanUiState {
+            val typed = draft.scanBarcode
+            val refusal = FoodValidation.validateBarcode(typed).errorMessage
+            return FoodScanUiState(
+                barcode = typed,
+                // Only after an attempt: PRD_FOOD 15 wants a refusal "à côté du champ concerné",
+                // not a complaint at the fourth digit of thirteen.
+                barcodeError = refusal.takeIf { attempted },
+                // Enabled on anything typed rather than on anything valid, so pressing it is what
+                // produces the explanation. A button that greys itself out has told the person
+                // nothing about which of the thirteen digits is wrong.
+                canLookUp = typed.isNotBlank() && scan != FoodScanState.LookingUp,
+                isLookingUp = scan == FoodScanState.LookingUp,
+                // Filled in by the screen through `withCamera`; the ViewModel cannot see a
+                // permission and does not pretend to.
+                isCameraLive = false,
+                cameraExplanation = null,
+                cameraActionLabel = null,
+                found = (scan as? FoodScanState.Found)?.let(::foundOf),
+                notice = noticeOf(scan),
+                saveError = saveError,
+            )
+        }
+
+        /** The product card a lookup produced, with its five figures drawn as figures. */
+        private fun foundOf(found: FoodScanState.Found): FoodScanFoundUiState {
+            val row = FoodPickerRowUiState.of(found.food)
+            return FoodScanFoundUiState(
+                name = row.name,
+                meta = row.meta,
+                iconName = row.iconName,
+                description = FoodDayFormat.sentence(row.name, row.meta),
+                per100 = FoodNutrientsUiState.of(
+                    FoodAddMessages.per100Label(found.food),
+                    found.food.per100,
+                ),
+                actionLabel = if (found.alreadyInCatalogue) {
+                    FoodAddMessages.USE_THIS_FOOD
+                } else {
+                    FoodAddMessages.ADD_THIS_PRODUCT
+                },
+                /*
+                 * PRD_FOOD 17: "Fiche produit incomplète → valeurs manquantes vides et
+                 * modifiables, jamais estimées." The dashes above already say which values are
+                 * missing; this says what they mean and what can be done about them, because a
+                 * dash on its own reads as a defect in Mue rather than a gap in a card written by
+                 * somebody else.
+                 */
+                incompleteNote = FoodAddMessages.INCOMPLETE_CARD
+                    .takeIf { !found.food.per100.isFullyKnown },
+            )
+        }
+
+        /**
+         * The sentence shown when there is no product to show, or null when there is one.
+         *
+         * Every branch names itself. [LookupFailure] carries four values because PRD_FOOD 17 asks
+         * for "un message explicite", and the four things a person would do next — wait for
+         * signal, try again in a moment, give up on this product, type it in — are different
+         * enough that one sentence for all of them would be a wrong instruction three times out
+         * of four.
+         */
+        private fun noticeOf(scan: FoodScanState): FoodScanNoticeUiState? = when (scan) {
+            FoodScanState.Idle, FoodScanState.LookingUp, is FoodScanState.Found -> null
+
+            is FoodScanState.NotFound -> FoodScanNoticeUiState(
+                message = FoodAddMessages.PRODUCT_NOT_FOUND,
+                detail = FoodAddMessages.productNotFoundDetail(scan.barcode),
+                // It will not be there next time either. Offering `Try again` would be an
+                // invitation to repeat a request whose answer is already known.
+                canRetry = false,
+                canCreate = true,
+            )
+
+            is FoodScanState.Unavailable -> FoodScanNoticeUiState(
+                message = FoodAddMessages.lookupFailure(scan.reason),
+                detail = FoodAddMessages.lookupFailureDetail(scan.reason),
+                canRetry = true,
+                // PRD_FOOD 17 keeps every other path open during a network failure, and creating
+                // the food by hand is one of them: the number is known, the label is in the
+                // person's hand, and nothing about a broken network makes that impossible.
+                canCreate = true,
+            )
         }
 
         /**
@@ -377,6 +828,22 @@ internal data class FoodAddUiState(
                 meta = row.meta,
                 iconName = row.iconName,
                 description = FoodDayFormat.sentence(row.name, row.meta),
+            )
+        }
+
+        /**
+         * The chosen recipe's card, worded as its row in the recipe picker was.
+         *
+         * The same two facts under the same name, for the reason [foodOf] gives: a second wording
+         * here would make the recipe look like a different one across a single tap.
+         */
+        private fun recipeOf(recipe: FoodAddRecipe): FoodAddRecipeUiState {
+            val meta = FoodAddMessages.serves(recipe.baseServings)
+            return FoodAddRecipeUiState(
+                name = recipe.name,
+                meta = meta,
+                iconName = FoodIcons.CHEF_HAT,
+                description = FoodDayFormat.sentence(recipe.name, meta),
             )
         }
 
@@ -434,6 +901,7 @@ internal data class FoodAddUiState(
             draft: FoodAddDraft,
             food: Food?,
             original: FoodLogEntry?,
+            recipe: FoodAddRecipe?,
             stage: FoodAddStage,
         ): FoodNutrientsUiState? {
             val nutrients = when (stage) {
@@ -446,9 +914,17 @@ internal data class FoodAddUiState(
 
                 FoodAddStage.QUICK -> draft.quickNutrientsOrNull() ?: return null
 
-                FoodAddStage.SERVINGS -> draft.recipeNutrientsOrNull(original) ?: return null
+                /*
+                 * The correction first, and the new line second, in the order `resolve` decides
+                 * them: a stored line rescales the snapshot PRD_FOOD 8.4 froze, and only a line
+                 * that has none is computed from the recipe as it stands.
+                 */
+                FoodAddStage.SERVINGS -> draft.recipeNutrientsOrNull(original)
+                    ?: draft.newRecipeNutrientsOrNull(recipe)
+                    ?: return null
 
-                FoodAddStage.PATHS -> return null
+                // Neither stage has a food, a quantity or a line yet; the panel is the figures.
+                FoodAddStage.PATHS, FoodAddStage.SCAN -> return null
             }
             return FoodNutrientsUiState.of(FoodAddMessages.CONTRIBUTION_SECTION, nutrients)
         }

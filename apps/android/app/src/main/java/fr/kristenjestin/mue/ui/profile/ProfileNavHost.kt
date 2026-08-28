@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.IntOffset
 import fr.kristenjestin.mue.ui.scale.ScaleDetailScreen
 import fr.kristenjestin.mue.ui.scale.ScaleScanScreen
 import fr.kristenjestin.mue.ui.scale.ScalesScreen
+import fr.kristenjestin.mue.ui.sync.ServerSettingsRoute
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMotion
 
@@ -30,6 +31,9 @@ import fr.kristenjestin.mue.ui.theme.MueMotion
  * sa première pile. Elle est écrite sur le modèle exact de celle de l'onglet `Activity` : une
  * liste, un `AnimatedContent`, un emplacement d'état par route, et un `BackHandler` qui répond
  * avant celui du châssis.
+ *
+ * `Server settings` (sync PRD 9.1) et `Food preferences` (PRD_FOOD 6.7) sont entrés dans cette
+ * même pile plutôt que dans une seconde : un onglet, une pile, un seul gestionnaire de retour.
  *
  * La barre d'onglets reste au-dessus de cet hôte et n'apprend jamais qu'un sous-écran est ouvert :
  * `Profile > Scales` la garde visible comme tous les autres écrans de l'application.
@@ -94,9 +98,13 @@ internal fun ProfileNavHost(
 /**
  * Où chaque écran retombe sur la pile.
  *
- * Quatre branches, et chacune dit une règle du PRD : `Add a scale` est le **seul** chemin vers le
- * flux d'appairage (FR-SCALE-010), une association réussie ramène à la liste (FR-SCALE-012), et une
+ * Chaque branche dit une règle du PRD : `Add a scale` est le **seul** chemin vers le flux
+ * d'appairage (FR-SCALE-010), une association réussie ramène à la liste (FR-SCALE-012), et une
  * balance oubliée referme sa fiche parce qu'il n'y a plus rien à y montrer (FR-SCALE-014).
+ *
+ * `Server settings` (sync PRD 9.1) et `Food preferences` (PRD_FOOD 6.7) se dépilent de la même
+ * façon : ce sont des sous-écrans de cet onglet-ci, pas d'un autre, et le `BackHandler` de la pile
+ * les referme avant que le retour n'atteigne la sélection d'onglet.
  */
 @Composable
 private fun ProfileDestination(
@@ -107,6 +115,18 @@ private fun ProfileDestination(
     when (route) {
         ProfileRoute.Profile -> ProfileScreen(
             onOpenScales = { stack.push(ProfileRoute.Scales) },
+            onOpenServerSettings = { stack.push(ProfileRoute.ServerSettings) },
+            onOpenFoodPreferences = { stack.push(ProfileRoute.FoodPreferences) },
+            modifier = modifier,
+        )
+
+        ProfileRoute.ServerSettings -> ServerSettingsRoute(
+            onNavigateBack = { stack.pop() },
+            modifier = modifier,
+        )
+
+        ProfileRoute.FoodPreferences -> FoodPreferencesRoute(
+            onBack = { stack.pop() },
             modifier = modifier,
         )
 

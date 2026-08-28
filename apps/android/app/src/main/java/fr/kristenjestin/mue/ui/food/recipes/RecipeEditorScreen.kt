@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.RecipeId
 import fr.kristenjestin.mue.domain.model.RecipeType
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueDashedAction
 import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MueIcon
@@ -41,6 +42,7 @@ import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueSplitRow
+import fr.kristenjestin.mue.ui.components.MueStepper
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -78,7 +80,7 @@ internal fun RecipeEditorRoute(
             onBack = onBack,
             onNameChange = viewModel::onNameChange,
             onTypeSelected = viewModel::onTypeSelected,
-            onBaseServingsChange = viewModel::onBaseServingsChange,
+            onBaseServingsStep = viewModel::onBaseServingsStep,
             onPrepTimeChange = viewModel::onPrepTimeChange,
             onDescriptionChange = viewModel::onDescriptionChange,
             onStepsChange = viewModel::onStepsChange,
@@ -103,7 +105,8 @@ internal data class RecipeEditorActions(
     val onBack: () -> Unit = {},
     val onNameChange: (String) -> Unit = {},
     val onTypeSelected: (RecipeType) -> Unit = {},
-    val onBaseServingsChange: (String) -> Unit = {},
+    /** PRD_FOOD 15: true adds a whole serving, false removes one. */
+    val onBaseServingsStep: (Boolean) -> Unit = {},
     val onPrepTimeChange: (String) -> Unit = {},
     val onDescriptionChange: (String) -> Unit = {},
     val onStepsChange: (String) -> Unit = {},
@@ -161,7 +164,13 @@ internal fun RecipeEditorScreen(
                     // above the solid block, and the ramp draws over live content.
                     .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
                     .verticalScroll(scroll)
-                    .padding(bottom = MueStickyActionRamp, top = spacing.md),
+                    /*
+                     * The header's ramp, reserved in full. It used to be `spacing.md` — twelve
+                     * of the twenty-four the scaffold dissolves — so the top half of the name
+                     * field was ghosted at rest with no scroll able to reach it. The quantity
+                     * is the scaffold's own, not a spacing choice, so it is named as such.
+                     */
+                    .padding(bottom = MueStickyActionRamp, top = MueContentTopFade),
                 verticalArrangement = Arrangement.spacedBy(spacing.lg),
             ) {
                 MueTextField(
@@ -175,14 +184,33 @@ internal fun RecipeEditorScreen(
 
                 TypeChooser(state, actions)
 
-                MueTextField(
+                /*
+                 * PRD_FOOD 15: a whole number from 1 to 12 — a count, so the shared stepper,
+                 * for the reason the add sheet's two counters now use it.
+                 *
+                 * `RecipeEditorUiState` asks `FoodValidation.validateBaseServings` whether each
+                 * neighbour is still a legal number of servings, which is where the 1 and the 12
+                 * live. This form has never restated them and does not start now.
+                 */
+                MueStepper(
                     label = RecipeMessages.SERVINGS_LABEL,
                     value = state.baseServings,
-                    onValueChange = actions.onBaseServingsChange,
-                    errorMessage = state.baseServingsError,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    onDecrement = { actions.onBaseServingsStep(false) },
+                    onIncrement = { actions.onBaseServingsStep(true) },
+                    decrementLabel = RecipeMessages.FEWER_BASE_SERVINGS,
+                    incrementLabel = RecipeMessages.MORE_BASE_SERVINGS,
                     modifier = Modifier.testTag(FoodTestTags.RECIPE_SERVINGS_FIELD),
+                    canDecrement = state.canRemoveBaseServing,
+                    canIncrement = state.canAddBaseServing,
+                    isError = state.baseServingsError != null,
                 )
+                state.baseServingsError?.let { message ->
+                    MueText(
+                        text = message,
+                        style = MueTheme.typography.micro,
+                        color = MueTheme.colors.error,
+                    )
+                }
 
                 MueTextField(
                     label = RecipeMessages.PREP_TIME_LABEL,

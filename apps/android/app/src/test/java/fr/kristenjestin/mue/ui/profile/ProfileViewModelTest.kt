@@ -38,6 +38,63 @@ class ProfileViewModelTest {
 
     // region loading and saved state
 
+    /**
+     * The defect this test exists for: **a pulled profile arrived and the screen saved an empty
+     * one over it.**
+     *
+     * On a fresh install the owner has to open this screen to reach `Server settings` and pair,
+     * so the form is seeded *before* the first synchronisation — from a profile that is empty
+     * because nothing has been pulled yet. Until this test, seeding also marked the form as the
+     * user's, which froze it: the height and the birth date the pull then applied could never
+     * reach it, and the next save wrote the empty snapshot back over the row *and* journalled it
+     * as a mutation. The server took that as "the user cleared their profile" and merged nulls
+     * into `mue_app.health_profile`.
+     *
+     * It asserts the *values* and not the shape on purpose. Every type along that path was
+     * right — the change decoded as `HealthProfileUpsertChangeDto`, its revision was recorded,
+     * and the row was written — so a test that checked types was green while 171 cm and a birth
+     * date were being erased.
+     */
+    @Test
+    fun `a profile pulled after the screen opened reaches the form and is what a save writes`() =
+        runTest {
+            val storage = FakeUserProfileRepository(UserProfile.EMPTY)
+            val harness = harness(profileRepository = storage)
+
+            // The screen opened before pairing: there is nothing stored yet.
+            assertEquals("", harness.state().heightInput)
+            assertNull(harness.state().birthDate)
+
+            // The pull lands, carrying the values the server actually holds.
+            storage.arrive(UserProfile("Kris", 171, LocalDate.of(1998, 11, 18)))
+
+            assertEquals("171", harness.state().heightInput)
+            assertEquals(LocalDate.of(1998, 11, 18), harness.state().birthDate)
+
+            // And a save now writes those values back rather than the empty snapshot the form
+            // was seeded with. This is the assertion the owner's phone would have failed.
+            harness.viewModel.saveProfile()
+            harness.state()
+
+            assertEquals(171, storage.stored.heightCm)
+            assertEquals(LocalDate.of(1998, 11, 18), storage.stored.birthDate)
+        }
+
+    /**
+     * The rule the frozen form was there to protect, kept: once the user has typed, a profile
+     * arriving from the server must not pull the field out from under them.
+     */
+    @Test
+    fun `a height being typed survives a profile arriving from the server`() = runTest {
+        val storage = FakeUserProfileRepository(UserProfile.EMPTY)
+        val harness = harness(profileRepository = storage)
+
+        harness.viewModel.onHeightChange("172")
+        storage.arrive(UserProfile("Kris", 171, LocalDate.of(1998, 11, 18)))
+
+        assertEquals("172", harness.state().heightInput)
+    }
+
     @Test
     fun `seeds the form from the stored profile`() = runTest {
         val harness = harness(

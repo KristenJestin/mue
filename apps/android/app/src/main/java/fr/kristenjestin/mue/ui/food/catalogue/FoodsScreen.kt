@@ -7,14 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,13 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,7 +41,6 @@ import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.food.FoodViewScaffold
-import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
 /** PRD_FOOD 9.4's filter, as the row of pills draws it: every source, then one at a time. */
@@ -64,7 +56,6 @@ private val SOURCE_FILTERS: List<FoodSource?> = listOf(null) + FoodSource.entrie
 internal fun FoodsRoute(
     onOpenFood: (FoodId) -> Unit,
     onCreateFood: (String?) -> Unit,
-    onOpenPreferences: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: FoodCatalogueViewModel = foodCatalogueViewModel(),
 ) {
@@ -76,7 +67,6 @@ internal fun FoodsRoute(
         onSourceChange = viewModel::onSourceChange,
         onOpenFood = onOpenFood,
         onCreateFood = { onCreateFood(state.createPrefill) },
-        onOpenPreferences = onOpenPreferences,
         modifier = modifier,
     )
 }
@@ -90,10 +80,18 @@ internal fun FoodsRoute(
  * the whole band would leave a strip of scrollable content that no thumb can reach, which is the
  * 112 dp dead zone `Log activity` shipped with once.
  *
- * The way into `Preferences` sits in the header's trailing slot rather than on a card in the
- * list. PRD_FOOD 22's criterion about a permanent settings control is written of the **day**
- * screen, and PRD_FOOD 6.7 asks that the options themselves live in the preferences rather than
- * on a screen — a door is not an option.
+ * **There is no way into `Preferences` from here any more, and no trailing slot at all.** The
+ * wrench that used to sit in the header opens `Profile` → `Preferences` → `Food preferences`
+ * instead — *"déplace juste le bouton de settings dans foods et mets-le dans profile"* — and the
+ * screen behind it went with it, into the stack `Profile` already keeps for `Server settings`.
+ * PRD_FOOD 6.7 still holds: the options live in the preferences and not on a screen. It is only
+ * the door that stopped being this view's.
+ *
+ * What that leaves is a header the eye can rely on. This was the one screen in the app whose
+ * trailing control was a *button* rather than a chip, and a 48 dp child is what grew the wordmark
+ * row on this view and on no other — *"le bouton settings dans food pousse toujours tout le truc"*.
+ * The floor `MueScreenScaffold` grew in answer stays, for a reason that outlives this control:
+ * see the note on that row.
  */
 @Composable
 internal fun FoodsScreen(
@@ -103,7 +101,6 @@ internal fun FoodsScreen(
     onSourceChange: (FoodSource?) -> Unit,
     onOpenFood: (FoodId) -> Unit,
     onCreateFood: () -> Unit,
-    onOpenPreferences: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
@@ -116,7 +113,6 @@ internal fun FoodsScreen(
         FoodViewScaffold(
             modifier = Modifier.fillMaxSize(),
             topFade = MueContentTopFade,
-            trailing = { PreferencesButton(onOpenPreferences) },
         ) {
             LazyColumn(
                 state = listState,
@@ -258,29 +254,6 @@ private fun SectionTitle(text: String) {
     )
 }
 
-/**
- * The way into `Preferences` (PRD_FOOD 7).
- *
- * An icon alone inside a control, so PRD_FOOD 18 requires it to carry a label a screen reader
- * can read, and the target is the touch minimum whatever the glyph measures.
- */
-@Composable
-private fun PreferencesButton(onClick: () -> Unit) {
-    val colors = MueTheme.colors
-    Box(
-        modifier = Modifier
-            .size(MueMinTouchTarget)
-            .clip(MueTheme.shapes.pill)
-            .background(colors.surface)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = FoodCatalogueMessages.OPEN_PREFERENCES }
-            .testTag(FoodTestTags.OPEN_PREFERENCES),
-        contentAlignment = Alignment.Center,
-    ) {
-        MueIcon(ActivityIcons.WRENCH, tint = colors.textSecondary, size = 18.dp)
-    }
-}
-
 // region previews
 
 @Preview(name = "Foods — catalogue", showBackground = true, backgroundColor = 0xFF101012, heightDp = 900)
@@ -294,7 +267,6 @@ private fun FoodsScreenPreview() {
             onSourceChange = {},
             onOpenFood = {},
             onCreateFood = {},
-            onOpenPreferences = {},
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -325,7 +297,6 @@ private fun FoodsScreenNarrowPreview() {
             onSourceChange = {},
             onOpenFood = {},
             onCreateFood = {},
-            onOpenPreferences = {},
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -348,7 +319,6 @@ private fun FoodsScreenHiddenEnergyPreview() {
             onSourceChange = {},
             onOpenFood = {},
             onCreateFood = {},
-            onOpenPreferences = {},
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -366,7 +336,6 @@ private fun FoodsScreenNoMatchPreview() {
             onSourceChange = {},
             onOpenFood = {},
             onCreateFood = {},
-            onOpenPreferences = {},
             modifier = Modifier.fillMaxSize(),
         )
     }

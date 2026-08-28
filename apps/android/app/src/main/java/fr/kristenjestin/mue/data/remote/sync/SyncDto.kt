@@ -2,9 +2,20 @@ package fr.kristenjestin.mue.data.remote.sync
 
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The wire, hand written, mirroring `packages/contracts/src` field for field.
@@ -27,13 +38,70 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  *    in this package parses it, orders by it, compares it or reconstructs one.
  * 3. **A union is sealed.** `op` and `status` discriminate real Kotlin hierarchies, so a branch
  *    that carries no `nextCursor` genuinely has no `nextCursor` to read.
+ *
+ * ## Two discriminators, and what that costs Kotlin
+ *
+ * The mutation and change unions are discriminated **twice**: `op` says whether a payload is
+ * present, and on an upsert `aggregateType` says which schema that payload follows. Zod nests
+ * two `discriminatedUnion`s and is done. kotlinx.serialization cannot: a sealed hierarchy has
+ * exactly one `@JsonClassDiscriminator`, and two subclasses both named `@SerialName("upsert")`
+ * are refused outright — the measurement and the health profile would collide on the only key
+ * the framework has.
+ *
+ * So [MutationEnvelopeSerializer] and [SyncChangeSerializer] read the two keys by hand. The
+ * hierarchies stay sealed, which is what rule 3 is actually about, and the `when` inside each
+ * serializer is exhaustive over the sealed interface — so a branch added to the contract and
+ * forgotten here fails to compile, where a missing annotation would simply have been absent.
+ * `op` is therefore a **declared property** on every member rather than a key the framework
+ * injects, and it carries [EncodeDefault] because [SyncJson] does not encode defaults.
  */
 
-/** The aggregate types V1 can express on the wire. `AGGREGATE_TYPES` in `primitives.ts`. */
+/**
+ * The aggregate types the wire can express. `AGGREGATE_TYPES` in `primitives.ts`, all eight of
+ * PRD 10.1's matrix.
+ *
+ * Six of them arrived together, and the list is worth reading as a record of what was wrong: two
+ * were journalled and undeliverable because the contract had no branch for them, four more were
+ * never journalled at all, and PRD 10.1 marked every one of them `Synchronisé: Oui` throughout.
+ */
 const val WIRE_AGGREGATE_MEASUREMENT: String = "measurement"
+const val WIRE_AGGREGATE_HEALTH_PROFILE: String = "healthProfile"
+const val WIRE_AGGREGATE_ACTIVITY_SESSION: String = "activitySession"
+const val WIRE_AGGREGATE_CUSTOM_EXERCISE: String = "customExerciseDefinition"
+const val WIRE_AGGREGATE_FOOD: String = "food"
+const val WIRE_AGGREGATE_RECIPE: String = "recipe"
+const val WIRE_AGGREGATE_FOOD_LOG_ENTRY: String = "foodLogEntry"
+const val WIRE_AGGREGATE_MEAL_PLAN_ENTRY: String = "mealPlanEntry"
+
+/**
+ * `HEALTH_PROFILE_AGGREGATE_ID` in `health-profile.ts`, where the Zod envelope pins it as a
+ * literal rather than an opaque identifier.
+ *
+ * PRD 13.4 gives an account exactly one profile, so its identity is a constant and not
+ * something a device mints. Two phones that each invented a UUID for "their" profile would
+ * create two aggregates, both valid and both synchronised, and no merge rule could say which
+ * one *is* the profile. A constant makes the rival unrepresentable instead of unlikely — and it
+ * is the same `'me'` `HealthProfileEntity.ROW_ID` already keys the local table by.
+ */
+const val WIRE_HEALTH_PROFILE_AGGREGATE_ID: String = "me"
+
+/** The two values of `op`. Declared properties here, for the reason [MutationEnvelopeDto] gives. */
+const val WIRE_OP_UPSERT: String = "upsert"
+const val WIRE_OP_DELETE: String = "delete"
 
 /** `MEASUREMENT_PAYLOAD_VERSION_1` in `measurement.ts`. */
 const val WIRE_MEASUREMENT_PAYLOAD_VERSION: Int = 1
+
+/** `HEALTH_PROFILE_PAYLOAD_VERSION_1` in `health-profile.ts`. */
+const val WIRE_HEALTH_PROFILE_PAYLOAD_VERSION: Int = 1
+
+/** The version each of the six new aggregates declares, from its own module in `packages/contracts`. */
+const val WIRE_ACTIVITY_SESSION_PAYLOAD_VERSION: Int = 1
+const val WIRE_CUSTOM_EXERCISE_PAYLOAD_VERSION: Int = 1
+const val WIRE_FOOD_PAYLOAD_VERSION: Int = 1
+const val WIRE_RECIPE_PAYLOAD_VERSION: Int = 1
+const val WIRE_FOOD_LOG_ENTRY_PAYLOAD_VERSION: Int = 1
+const val WIRE_MEAL_PLAN_ENTRY_PAYLOAD_VERSION: Int = 1
 
 /** `PUSH_MAX_MUTATIONS` in `sync.ts`: one request carries at most this many mutations. */
 const val WIRE_PUSH_MAX_MUTATIONS: Int = 200
@@ -131,6 +199,228 @@ data class MeasurementPayloadV1Dto(
 )
 
 /**
+ * `HealthProfilePayloadV1` — the height and birth date of PRD 13.4, the account's one profile.
+ *
+ * Both properties are **nullable and carry no default**, which is not a detail. Zod says
+ * `.nullable()` and not `.optional()`, so `null` is a stated empty value and an absent key is
+ * not a value at all. That distinction is what PRD 13.4's field-by-field merge runs on: the
+ * server compares each field against the version its author was editing, so "the user cleared
+ * their height" has to be expressible and has to be distinguishable from "this client said
+ * nothing about heights". No default here means [SyncJson] always writes both keys, and it
+ * means a body that dropped one fails to parse rather than quietly reading as null.
+ *
+ * [heightCm] is a whole count of centimetres, the unit `UserProfile.heightCm` already holds and
+ * `UserProfile.HEIGHT_RANGE_CM` already bounds. [birthDate] is an ISO-8601 calendar date, as
+ * every date in Mue is, so lexicographic order is chronological order.
+ */
+@Serializable
+data class HealthProfilePayloadV1Dto(
+    val heightCm: Int?,
+    val birthDate: String?,
+)
+
+/*
+ * The six payloads of PRD 10.1's remaining aggregates.
+ *
+ * One rule runs through all of them and it is the only thing that decides where a `= null`
+ * appears: **the contract's `.nullable()` is a property with no Kotlin default, and its
+ * `.optional()` is a property defaulted to null.** [SyncJson] has `explicitNulls = true` and
+ * `encodeDefaults = false`, so the first is always written — as `null` when empty — and the second
+ * vanishes from the body when unset. Getting it backwards is not a style slip: a `.nullable()`
+ * field given a default disappears from a payload the server requires, and an `.optional()` field
+ * without one appears as a `null` the server refuses.
+ *
+ * Which way round each field goes is not a choice made here either. It follows what the aggregate
+ * means: an unknown nutrient is *absent* because PRD_FOOD 13.1 forbids inventing a zero, while a
+ * session with no start time states `null` because PRD_ACTIVITIES 8.2 keeps "no time" distinct
+ * from midnight and both are answers.
+ */
+
+@Serializable
+data class ActivityMetricDto(
+    val kind: String,
+    /** Whole units of the canonical unit `kind` determines; the unit itself is never carried. */
+    val value: Int,
+    val source: String,
+)
+
+@Serializable
+data class SessionEquipmentDto(
+    val equipmentType: String,
+    val customName: String?,
+    val position: Int,
+)
+
+/**
+ * The definition an exercise points at, carried inside the session.
+ *
+ * It duplicates a `customExerciseDefinition`, deliberately: `strength_exercises
+ * .exercise_definition_id` is a `RESTRICT` foreign key, so a session whose definition has not
+ * arrived would abort the very transaction that advances the cursor. The snapshot is what lets
+ * `SyncStore` materialise the missing definition instead.
+ */
+@Serializable
+data class ExerciseDefinitionSnapshotDto(
+    val id: String,
+    val name: String,
+    val trackingMode: String,
+    val equipment: String?,
+    val isCustom: Boolean,
+)
+
+@Serializable
+data class StrengthSetDto(
+    val id: String,
+    val position: Int,
+    val setType: String,
+    val repetitions: Int?,
+    val loadGrams: Int?,
+    val durationSeconds: Int?,
+    val perceivedEffort: Int?,
+)
+
+@Serializable
+data class StrengthExerciseDto(
+    val id: String,
+    val position: Int,
+    val notes: String?,
+    val definition: ExerciseDefinitionSnapshotDto,
+    val sets: List<StrengthSetDto>,
+)
+
+/** `ActivitySessionPayloadV1` — one finished session with every child it has (PRD 10.2). */
+@Serializable
+data class ActivitySessionPayloadV1Dto(
+    val id: String,
+    val movement: String,
+    val customMovementName: String?,
+    val environment: String,
+    val startedOn: String,
+    val startedAtTime: String?,
+    val durationSeconds: Int,
+    val perceivedEffort: Int?,
+    val notes: String?,
+    val source: String,
+    val metrics: List<ActivityMetricDto>,
+    val equipment: List<SessionEquipmentDto>,
+    val exercises: List<StrengthExerciseDto>,
+)
+
+/**
+ * `CustomExerciseDefinitionPayloadV1` — and note what it has no field for.
+ *
+ * There is no `isCustom`. PRD 10.1 marks the seventeen definitions Mue ships `Synchronisé: Non`,
+ * so a payload able to describe one would be able to rename a shipped exercise on another device.
+ * [ExerciseDefinitionSnapshotDto] does carry the flag, because a session may reference a provided
+ * definition; that is the difference between describing an aggregate and describing a reference.
+ */
+@Serializable
+data class CustomExerciseDefinitionPayloadV1Dto(
+    val id: String,
+    val name: String,
+    val trackingMode: String,
+    val equipment: String?,
+)
+
+/** `FoodPayloadV1` — a custom food or a copied product. Never a Ciqual entry (PRD_FOOD 21.1). */
+@Serializable
+data class FoodPayloadV1Dto(
+    val id: String,
+    val name: String,
+    val source: String,
+    val referenceUnit: String,
+    val rawLabel: String,
+    val cookedLabel: String,
+    val energyMilliKcal: Int? = null,
+    val proteinMilligrams: Int? = null,
+    val carbsMilligrams: Int? = null,
+    val fatMilligrams: Int? = null,
+    val fibreMilligrams: Int? = null,
+    val brand: String? = null,
+    val barcode: String? = null,
+    val sourceId: String? = null,
+    val sourceVersion: String? = null,
+    val servingLabel: String? = null,
+    val servingThousandths: Int? = null,
+    val cookedRatioThousandths: Int? = null,
+    val imageRef: String? = null,
+)
+
+@Serializable
+data class RecipeIngredientDto(
+    val id: String,
+    val foodId: String,
+    val quantityThousandths: Int,
+    val unit: String,
+    val position: Int,
+    /** The food's name when the ingredient was written, so it renders before its food arrives. */
+    val foodName: String? = null,
+)
+
+/**
+ * `RecipePayloadV1` — the recipe **with** its ingredients (PRD_FOOD 21.2).
+ *
+ * `ingredients` carries no default and `steps` does, which is the two-way rule above applied to
+ * two lists that look alike. A recipe has at least one ingredient, so an absent key is a body that
+ * should not parse; a recipe may have no steps, and `RecipePayload.steps` defaults to the empty
+ * list, so rows already journalled omit the key entirely.
+ */
+@Serializable
+data class RecipePayloadV1Dto(
+    val id: String,
+    val name: String,
+    val type: String,
+    val baseServings: Int,
+    val isFavourite: Boolean,
+    val ingredients: List<RecipeIngredientDto>,
+    val description: String? = null,
+    val prepTimeMinutes: Int? = null,
+    val steps: List<String> = emptyList(),
+    val imageRef: String? = null,
+)
+
+/** `FoodLogEntryPayloadV1` — one consumption, self-contained (PRD section 10.2). */
+@Serializable
+data class FoodLogEntryPayloadV1Dto(
+    val id: String,
+    val consumedOn: String,
+    val consumedAt: String,
+    val slot: String,
+    val kind: String,
+    val title: String,
+    val estimation: String,
+    val weighedCooked: Boolean,
+    val energyMilliKcal: Int? = null,
+    val proteinMilligrams: Int? = null,
+    val carbsMilligrams: Int? = null,
+    val fatMilligrams: Int? = null,
+    val fibreMilligrams: Int? = null,
+    val sourceRef: String? = null,
+    val amountLabel: String? = null,
+    val quantityThousandths: Int? = null,
+    val quantityUnit: String? = null,
+    val portionsThousandths: Int? = null,
+    /**
+     * The proposal this line was logged from, spelled `<date>:<slot>`.
+     *
+     * `SyncWire` normalises it on the way out: a payload journalled before the separator changed
+     * carries a `/`, which `aggregateIdSchema` has never accepted, and rewriting it at the wire
+     * rather than in storage is what lets those rows go out without their payloads being edited.
+     */
+    val fromPlan: String? = null,
+)
+
+/** `MealPlanEntryPayloadV1` — one proposal, identified by its date and its moment. */
+@Serializable
+data class MealPlanEntryPayloadV1Dto(
+    val plannedOn: String,
+    val slot: String,
+    val recipeId: String,
+    val plannedServingsThousandths: Int,
+    val consumedLogEntryId: String? = null,
+)
+
+/**
  * `MutationEnvelope` — one unit of work in the outbox (PRD 12.2).
  *
  * Sealed on `op`, mirroring Zod's `discriminatedUnion("op", …)`: "an upsert has a payload and a
@@ -143,13 +433,21 @@ data class MeasurementPayloadV1Dto(
  * where the transaction that wrote the business row put it, so a retry of a lost response sends
  * the identifier the server already has and gets its stored result back.
  */
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@JsonClassDiscriminator("op")
+@Serializable(with = MutationEnvelopeSerializer::class)
 sealed interface MutationEnvelopeDto {
     val mutationId: String
     val aggregateType: String
     val aggregateId: String
+
+    /**
+     * `"upsert"` or `"delete"`, declared rather than injected.
+     *
+     * It was the class discriminator until the contract grew a second upsert branch. Two
+     * subclasses cannot share one `@SerialName`, so the discrimination moved into
+     * [MutationEnvelopeSerializer] and this became an ordinary property the concrete
+     * serializers write themselves.
+     */
+    val op: String
 
     /**
      * The revision the author believed it was editing, or null when it believed the aggregate
@@ -171,8 +469,8 @@ sealed interface MutationEnvelopeDto {
  * whenever it held its usual value, and the contract test would report it as a missing field.
  * The expected values are named as constants at the top of this file instead.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("upsert")
 data class MeasurementUpsertMutationDto(
     override val mutationId: String,
     override val aggregateType: String,
@@ -182,6 +480,153 @@ data class MeasurementUpsertMutationDto(
     val payload: MeasurementPayloadV1Dto,
     override val origin: OriginDto,
     override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+/**
+ * The upsert of the single health profile (PRD 13.4).
+ *
+ * [aggregateId] defaults to [WIRE_HEALTH_PROFILE_AGGREGATE_ID] and is written always, because
+ * the Zod envelope pins it as a literal: a mutation naming anything else does not parse on the
+ * server, so a second device cannot open a rival profile even by accident. The default lives
+ * here rather than at the call site so there is one place the constant is spelled.
+ *
+ * There is **no delete counterpart**, and the server refuses one. PRD 13.4 describes fields
+ * that become empty, never a profile that ceases to exist; a tombstone would claim the latter,
+ * and FR-SYNC-005 would then use it to refuse the user's own next edit as a resurrection.
+ * Clearing a height is this branch with `heightCm = null`.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class HealthProfileUpsertMutationDto(
+    override val mutationId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: HealthProfilePayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_HEALTH_PROFILE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateId: String = WIRE_HEALTH_PROFILE_AGGREGATE_ID,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+/*
+ * The six upsert branches PRD 10.1 was already asking for.
+ *
+ * Every one of them is the same declaration with a different payload, and that sameness is the
+ * point: `aggregateType` is written always, because [SyncJson] does not encode defaults and a
+ * discriminator that vanished when it held its usual value would be reported by [ContractDrift]
+ * as a missing field. There is no branch that carries a rule of its own — the rules are in
+ * `packages/contracts` and in `packages/domain`, and this file is the shape they travel in.
+ */
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class ActivitySessionUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: ActivitySessionPayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_ACTIVITY_SESSION,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class CustomExerciseUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: CustomExerciseDefinitionPayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_CUSTOM_EXERCISE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class FoodUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: FoodPayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_FOOD,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class RecipeUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: RecipePayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_RECIPE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class FoodLogEntryUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: FoodLogEntryPayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_FOOD_LOG_ENTRY,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : MutationEnvelopeDto
+
+/**
+ * The upsert of one proposal.
+ *
+ * `aggregateId` is `<plannedOn>:<slot>`, and the server rebuilds it from the payload to check
+ * that the two agree — so an author cannot address one dinner and describe another. `SyncWire`
+ * derives it from the payload here too, rather than copying the stored column, which is what
+ * makes a row journalled under the old `/` spelling go out correctly whether or not
+ * `MealPlanIdRepair` has reached it yet.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class MealPlanEntryUpsertMutationDto(
+    override val mutationId: String,
+    override val aggregateId: String,
+    override val baseRevision: String?,
+    override val payloadSchemaVersion: Int,
+    val payload: MealPlanEntryPayloadV1Dto,
+    override val origin: OriginDto,
+    override val clientOccurredAt: String,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_MEAL_PLAN_ENTRY,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
 ) : MutationEnvelopeDto
 
 /**
@@ -195,7 +640,6 @@ data class MeasurementUpsertMutationDto(
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("delete")
 data class DeleteMutationDto(
     override val mutationId: String,
     override val aggregateType: String,
@@ -206,6 +650,8 @@ data class DeleteMutationDto(
     override val clientOccurredAt: String,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val payload: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_DELETE,
 ) : MutationEnvelopeDto
 
 /**
@@ -215,19 +661,20 @@ data class DeleteMutationDto(
  * client's only pagination state is the opaque cursor. Reading it would be the first step
  * towards reconstructing one.
  */
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@JsonClassDiscriminator("op")
+@Serializable(with = SyncChangeSerializer::class)
 sealed interface SyncChangeDto {
     val sequence: String
     val aggregateType: String
     val aggregateId: String
     val payloadSchemaVersion: Int
     val meta: AggregateMetaDto
+
+    /** Declared rather than injected, for the reason [MutationEnvelopeDto.op] gives. */
+    val op: String
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("upsert")
 data class MeasurementUpsertChangeDto(
     override val sequence: String,
     override val aggregateType: String,
@@ -235,11 +682,127 @@ data class MeasurementUpsertChangeDto(
     override val payloadSchemaVersion: Int,
     val payload: MeasurementPayloadV1Dto,
     override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+/**
+ * The health profile as the server hands it back: **merged**, not echoed.
+ *
+ * PRD 13.4 lets the server keep a field this device never touched, so the payload here can
+ * differ from the one the device pushed a moment earlier — and applying it is how a phone whose
+ * stale birth date was merged away converges instead of believing its own version stood.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class HealthProfileUpsertChangeDto(
+    override val sequence: String,
+    override val payloadSchemaVersion: Int,
+    val payload: HealthProfilePayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_HEALTH_PROFILE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateId: String = WIRE_HEALTH_PROFILE_AGGREGATE_ID,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+/*
+ * The read side of the same six branches.
+ *
+ * They mirror the mutation branches exactly, and a `SyncChangeSerializer` that learned an
+ * aggregate on the write side and forgot it on the read side is the failure `pull-response-ok.json`
+ * exists to catch offline: it carries an `activitySession` and a `mealPlanEntry` change for that
+ * reason.
+ */
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class ActivitySessionUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: ActivitySessionPayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_ACTIVITY_SESSION,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
 ) : SyncChangeDto
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("delete")
+data class CustomExerciseUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: CustomExerciseDefinitionPayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_CUSTOM_EXERCISE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class FoodUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: FoodPayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_FOOD,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class RecipeUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: RecipePayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_RECIPE,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class FoodLogEntryUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: FoodLogEntryPayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_FOOD_LOG_ENTRY,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class MealPlanEntryUpsertChangeDto(
+    override val sequence: String,
+    override val aggregateId: String,
+    override val payloadSchemaVersion: Int,
+    val payload: MealPlanEntryPayloadV1Dto,
+    override val meta: AggregateMetaDto,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val aggregateType: String = WIRE_AGGREGATE_MEAL_PLAN_ENTRY,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_UPSERT,
+) : SyncChangeDto
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
 data class DeleteChangeDto(
     override val sequence: String,
     override val aggregateType: String,
@@ -248,7 +811,290 @@ data class DeleteChangeDto(
     override val meta: AggregateMetaDto,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val payload: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val op: String = WIRE_OP_DELETE,
 ) : SyncChangeDto
+
+/**
+ * The two-level discrimination `packages/contracts` states and kotlinx.serialization has no
+ * annotation for.
+ *
+ * Zod writes `discriminatedUnion("op", [discriminatedUnion("aggregateType", […]), delete])`.
+ * The framework equivalent would need two `@JsonClassDiscriminator`s on one hierarchy, and it
+ * would need two subclasses to answer to `@SerialName("upsert")` — which it refuses. So the
+ * dispatch is written out, once per hierarchy, and it is written *exhaustively*: the `when` in
+ * [serialize] covers a sealed interface, so a branch added to [MutationEnvelopeDto] and
+ * forgotten here does not compile.
+ *
+ * Nothing here is reflective. `JsonContentPolymorphicSerializer` would have done the reading
+ * half in three lines and left the writing half to `value::class.serializerOrNull()`, a
+ * reflective lookup that R8 has to be told to keep; an explicit branch has no such dependency
+ * and names the concrete serializer where a reader can see it.
+ *
+ * A body that is not a JSON object, or that carries an `op` or an `aggregateType` this build
+ * does not know, raises [SerializationException] — which is what [ContractDrift] turns into a
+ * sentence naming the fixture and the discriminator, and what `SyncEngine` treats as one
+ * unreadable row rather than a failed synchronisation.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+object MutationEnvelopeSerializer : KSerializer<MutationEnvelopeDto> {
+
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("MutationEnvelope")
+
+    override fun serialize(encoder: Encoder, value: MutationEnvelopeDto) {
+        val output = encoder.asJsonEncoder("a mutation")
+        output.encodeJsonElement(
+            when (value) {
+                is MeasurementUpsertMutationDto ->
+                    output.json.encodeToJsonElement(MeasurementUpsertMutationDto.serializer(), value)
+
+                is HealthProfileUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        HealthProfileUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is ActivitySessionUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        ActivitySessionUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is CustomExerciseUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        CustomExerciseUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is FoodUpsertMutationDto ->
+                    output.json.encodeToJsonElement(FoodUpsertMutationDto.serializer(), value)
+
+                is RecipeUpsertMutationDto ->
+                    output.json.encodeToJsonElement(RecipeUpsertMutationDto.serializer(), value)
+
+                is FoodLogEntryUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        FoodLogEntryUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is MealPlanEntryUpsertMutationDto ->
+                    output.json.encodeToJsonElement(
+                        MealPlanEntryUpsertMutationDto.serializer(),
+                        value,
+                    )
+
+                is DeleteMutationDto ->
+                    output.json.encodeToJsonElement(DeleteMutationDto.serializer(), value)
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): MutationEnvelopeDto {
+        val input = decoder.asJsonDecoder("a mutation")
+        val element = input.decodeJsonElement().asJsonObject("a mutation")
+        return when (val op = element.discriminator("op", "a mutation")) {
+            WIRE_OP_UPSERT -> when (
+                val type = element.discriminator("aggregateType", "an upsert")
+            ) {
+                WIRE_AGGREGATE_MEASUREMENT ->
+                    input.json.decodeFromJsonElement(
+                        MeasurementUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_HEALTH_PROFILE ->
+                    input.json.decodeFromJsonElement(
+                        HealthProfileUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_ACTIVITY_SESSION ->
+                    input.json.decodeFromJsonElement(
+                        ActivitySessionUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_CUSTOM_EXERCISE ->
+                    input.json.decodeFromJsonElement(
+                        CustomExerciseUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_FOOD ->
+                    input.json.decodeFromJsonElement(FoodUpsertMutationDto.serializer(), element)
+
+                WIRE_AGGREGATE_RECIPE ->
+                    input.json.decodeFromJsonElement(RecipeUpsertMutationDto.serializer(), element)
+
+                WIRE_AGGREGATE_FOOD_LOG_ENTRY ->
+                    input.json.decodeFromJsonElement(
+                        FoodLogEntryUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_MEAL_PLAN_ENTRY ->
+                    input.json.decodeFromJsonElement(
+                        MealPlanEntryUpsertMutationDto.serializer(),
+                        element,
+                    )
+
+                else -> throw SerializationException(
+                    "this build has no upsert branch for aggregateType \"$type\"",
+                )
+            }
+
+            WIRE_OP_DELETE ->
+                input.json.decodeFromJsonElement(DeleteMutationDto.serializer(), element)
+
+            else -> throw SerializationException("a mutation is an upsert or a delete, not \"$op\"")
+        }
+    }
+}
+
+/** The read side of the same two-level union, and the same argument. */
+@OptIn(ExperimentalSerializationApi::class)
+object SyncChangeSerializer : KSerializer<SyncChangeDto> {
+
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("SyncChange")
+
+    override fun serialize(encoder: Encoder, value: SyncChangeDto) {
+        val output = encoder.asJsonEncoder("a change")
+        output.encodeJsonElement(
+            when (value) {
+                is MeasurementUpsertChangeDto ->
+                    output.json.encodeToJsonElement(MeasurementUpsertChangeDto.serializer(), value)
+
+                is HealthProfileUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        HealthProfileUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is ActivitySessionUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        ActivitySessionUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is CustomExerciseUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        CustomExerciseUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is FoodUpsertChangeDto ->
+                    output.json.encodeToJsonElement(FoodUpsertChangeDto.serializer(), value)
+
+                is RecipeUpsertChangeDto ->
+                    output.json.encodeToJsonElement(RecipeUpsertChangeDto.serializer(), value)
+
+                is FoodLogEntryUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        FoodLogEntryUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is MealPlanEntryUpsertChangeDto ->
+                    output.json.encodeToJsonElement(
+                        MealPlanEntryUpsertChangeDto.serializer(),
+                        value,
+                    )
+
+                is DeleteChangeDto ->
+                    output.json.encodeToJsonElement(DeleteChangeDto.serializer(), value)
+            },
+        )
+    }
+
+    override fun deserialize(decoder: Decoder): SyncChangeDto {
+        val input = decoder.asJsonDecoder("a change")
+        val element = input.decodeJsonElement().asJsonObject("a change")
+        return when (val op = element.discriminator("op", "a change")) {
+            WIRE_OP_UPSERT -> when (
+                val type = element.discriminator("aggregateType", "an upsert change")
+            ) {
+                WIRE_AGGREGATE_MEASUREMENT ->
+                    input.json.decodeFromJsonElement(
+                        MeasurementUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_HEALTH_PROFILE ->
+                    input.json.decodeFromJsonElement(
+                        HealthProfileUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_ACTIVITY_SESSION ->
+                    input.json.decodeFromJsonElement(
+                        ActivitySessionUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_CUSTOM_EXERCISE ->
+                    input.json.decodeFromJsonElement(
+                        CustomExerciseUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_FOOD ->
+                    input.json.decodeFromJsonElement(FoodUpsertChangeDto.serializer(), element)
+
+                WIRE_AGGREGATE_RECIPE ->
+                    input.json.decodeFromJsonElement(RecipeUpsertChangeDto.serializer(), element)
+
+                WIRE_AGGREGATE_FOOD_LOG_ENTRY ->
+                    input.json.decodeFromJsonElement(
+                        FoodLogEntryUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                WIRE_AGGREGATE_MEAL_PLAN_ENTRY ->
+                    input.json.decodeFromJsonElement(
+                        MealPlanEntryUpsertChangeDto.serializer(),
+                        element,
+                    )
+
+                else -> throw SerializationException(
+                    "this build has no upsert branch for aggregateType \"$type\"",
+                )
+            }
+
+            WIRE_OP_DELETE ->
+                input.json.decodeFromJsonElement(DeleteChangeDto.serializer(), element)
+
+            else -> throw SerializationException("a change is an upsert or a delete, not \"$op\"")
+        }
+    }
+}
+
+private fun Encoder.asJsonEncoder(what: String): JsonEncoder =
+    this as? JsonEncoder
+        ?: throw SerializationException("$what can only be written as JSON")
+
+private fun Decoder.asJsonDecoder(what: String): JsonDecoder =
+    this as? JsonDecoder
+        ?: throw SerializationException("$what can only be read as JSON")
+
+private fun JsonElement.asJsonObject(what: String): JsonObject =
+    this as? JsonObject ?: throw SerializationException("$what is a JSON object")
+
+/**
+ * One discriminator value, or a failure naming the key that was missing.
+ *
+ * `jsonPrimitive` alone would throw `IllegalArgumentException`, which is not a
+ * [SerializationException] and would therefore escape every `catch` in this package — a body
+ * with `"op": 3` in it would crash a synchronisation instead of marking one row unreadable.
+ */
+private fun JsonObject.discriminator(key: String, what: String): String {
+    val value = this[key] ?: throw SerializationException("$what carries no \"$key\"")
+    val primitive = runCatching { value.jsonPrimitive }.getOrNull()
+    if (primitive == null || !primitive.isString) {
+        throw SerializationException("$what has a \"$key\" that is not a string")
+    }
+    return primitive.content
+}
 
 /** `PushRequest` — a batch of local mutations, in outbox order. */
 @Serializable

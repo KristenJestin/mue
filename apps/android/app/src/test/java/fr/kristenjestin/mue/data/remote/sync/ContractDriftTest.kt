@@ -1,9 +1,15 @@
 package fr.kristenjestin.mue.data.remote.sync
 
+import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.domain.logic.errorMessage
+import fr.kristenjestin.mue.domain.model.UserProfile
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.serializer
 import org.junit.Test
+import java.time.LocalDate
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -29,13 +35,17 @@ class ContractDriftTest {
         val listed = ContractFixtures.manifest().map { it.file }.sorted()
         val onDisk = ContractFixtures.files().filterNot { it == ContractFixtures.MANIFEST }
 
-        // Sixteen files: fifteen instances, each parsed through its Kotlin DTO below, and the
-        // manifest, parsed by `ContractFixtures.manifest`. Every file the contracts package
+        // Thirty-three files: thirty-two instances, each parsed through its Kotlin DTO below, and
+        // the manifest, parsed by `ContractFixtures.manifest`. Every file the contracts package
         // emits has a reader here — which is exactly what they did not have when they landed.
+        //
+        // It was nineteen until six aggregates joined the contract at once. The number is written
+        // out rather than derived from the directory listing on purpose: deriving it would make
+        // this assertion true of any directory, including one a failed emit left half written.
         assertEquals(
-            16,
+            33,
             ContractFixtures.files().size,
-            "the contracts package emits sixteen files and every one of them is read here",
+            "the contracts package emits thirty-three files and every one of them is read here",
         )
 
         assertEquals(
@@ -65,7 +75,7 @@ class ContractDriftTest {
     @Test
     fun everyFixtureRoundTripsThroughItsKotlinDto() {
         val entries = ContractFixtures.manifest()
-        assertEquals(15, entries.size, "the manifest lost or gained a fixture")
+        assertEquals(32, entries.size, "the manifest lost or gained a fixture")
 
         val drift = entries.flatMap { entry ->
             ContractDrift.check(
@@ -100,7 +110,7 @@ class ContractDriftTest {
         assertIs<PullUpgradeRequiredDto>(upgrade)
 
         // The only member of the hierarchy that has a cursor at all.
-        assertEquals("eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk0In0", page.nextCursor)
+        assertEquals("eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTk3In0", page.nextCursor)
         assertEquals(false, page.hasMore)
         assertEquals(SyncErrorCodes.SYNC_UPGRADE_REQUIRED, upgrade.error.code)
         assertEquals(null, upgrade.lastAndroidSyncAt)
@@ -119,7 +129,7 @@ class ContractDriftTest {
         assertEquals(9_007_199_254_740_993L, SyncWire.counterOrNull(page.changes[0].sequence))
     }
 
-    /** The two change branches, so the sealed hierarchy is exercised on both sides of `op`. */
+    /** Every change branch, so the sealed hierarchy is exercised on both keys it turns on. */
     @Test
     fun aPageCarriesItsUpsertAndItsTombstone() {
         val page = assertIs<PullPageDto>(decodePullResponse("pull-response-ok.json"))
@@ -132,6 +142,133 @@ class ContractDriftTest {
         val delete = assertIs<DeleteChangeDto>(page.changes[1])
         assertEquals("2026-08-24", delete.aggregateId)
         assertEquals("2026-08-25T06:12:05.310Z", delete.meta.deletedAt)
+
+        // The second upsert branch: same `op`, different `aggregateType`. kotlinx cannot
+        // discriminate that with an annotation, so reaching this line at all is what says
+        // [SyncChangeSerializer] reads both keys rather than the first one it finds.
+        val profile = assertIs<HealthProfileUpsertChangeDto>(page.changes[2])
+        assertEquals("me", profile.aggregateId)
+        assertEquals(171, profile.payload.heightCm)
+        assertEquals("1998-11-18", profile.payload.birthDate)
+    }
+
+    /**
+     * The health profile's payload, as a **value** and not as a shape.
+     *
+     * This is the lesson of `MutationIds`, applied where it was learned. `SyncOutbox` minted a
+     * UUIDv4 where `mutationIdSchema` says `z.uuidv7()`, every push came back
+     * `sync.invalid_payload`, and [ContractDrift] could not see it: a v4 and a v7 round-trip
+     * identically because they are the same shape. So the constraints `health-profile.ts` puts
+     * on *content* are checked here against the value the fixture actually carries — the
+     * owner's own 171 cm and 1998-11-18 — rather than against `Int?` and `String?`.
+     */
+    @Test
+    fun theHealthProfileFixtureCarriesValuesTheContractWouldAccept() {
+        val profile = SyncJson.instance.decodeFromString(
+            serializer<HealthProfilePayloadV1Dto>(),
+            ContractFixtures.read("health-profile-v1-valid.json"),
+        )
+
+        val heightCm = assertNotNull(profile.heightCm, "the valid instance states a height")
+        assertTrue(
+            heightCm in UserProfile.HEIGHT_RANGE_CM,
+            "$heightCm is outside the range Android enforces and the contract copied",
+        )
+
+        // `z.iso.date()` validates the calendar, not just the punctuation: it is what makes
+        // 1998-11-31 unrepresentable. `LocalDate.parse` is the same rule on this side.
+        val birthDate = assertNotNull(profile.birthDate, "the valid instance states a birth date")
+        assertEquals(LocalDate.of(1998, 11, 18), LocalDate.parse(birthDate))
+        assertEquals(
+            null,
+            MueValidation.validateBirthDate(LocalDate.parse(birthDate), LocalDate.now())
+                .errorMessage,
+            "the instance the contract ships must also satisfy the rule this app applies",
+        )
+
+        // The two rules are not the same rule, and that is deliberate. Android's is relative to
+        // the phone's clock; the contract's is a fixed 1900-2099, because a payload is a journal
+        // snapshot that has to stay parseable for as long as the journal exists. So the *client*
+        // is the one that refuses a birth date in the future, and it still does.
+        assertEquals(
+            MueValidation.BIRTH_DATE_ERROR,
+            MueValidation.validateBirthDate(LocalDate.parse(birthDate), LocalDate.of(1998, 11, 17))
+                .errorMessage,
+        )
+    }
+
+    /** The cleared profile: both keys present and null, which is not the same as absent. */
+    @Test
+    fun aClearedProfileStatesItsNullsRatherThanOmittingThem() {
+        val text = ContractFixtures.read("health-profile-v1-edge.json")
+        val cleared = SyncJson.instance.decodeFromString(
+            serializer<HealthProfilePayloadV1Dto>(),
+            text,
+        )
+
+        assertEquals(null, cleared.heightCm)
+        assertEquals(null, cleared.birthDate)
+
+        val written = SyncJson.instance.encodeToString(
+            serializer<HealthProfilePayloadV1Dto>(),
+            cleared,
+        )
+        assertTrue(written.contains("\"heightCm\":null"), "a cleared height is stated: $written")
+        assertTrue(written.contains("\"birthDate\":null"), "a cleared date is stated: $written")
+
+        // An omitted key is not a third state: it does not parse.
+        val failure = runCatching {
+            SyncJson.instance.decodeFromString(
+                serializer<HealthProfilePayloadV1Dto>(),
+                """{"heightCm":171}""",
+            )
+        }.exceptionOrNull()
+        assertIs<SerializationException>(failure)
+    }
+
+    /**
+     * The mutation the phone had been holding, decoded through the two-level union.
+     *
+     * `op` alone cannot choose this branch — the measurement upsert answers to the same value —
+     * so this passing is what says the Kotlin serializer reads `aggregateType` too.
+     */
+    @Test
+    fun theHealthProfileUpsertIsSelectedByBothDiscriminators() {
+        val envelope = SyncJson.instance.decodeFromString(
+            serializer<MutationEnvelopeDto>(),
+            ContractFixtures.read("mutation-upsert-health-profile-v1.json"),
+        )
+
+        val upsert = assertIs<HealthProfileUpsertMutationDto>(envelope)
+        assertEquals(WIRE_HEALTH_PROFILE_AGGREGATE_ID, upsert.aggregateId)
+        assertEquals(WIRE_OP_UPSERT, upsert.op)
+        assertEquals(null, upsert.baseRevision)
+        assertEquals(171, upsert.payload.heightCm)
+
+        val measurement = SyncJson.instance.decodeFromString(
+            serializer<MutationEnvelopeDto>(),
+            ContractFixtures.read("mutation-upsert-measurement-v1.json"),
+        )
+        assertIs<MeasurementUpsertMutationDto>(measurement)
+    }
+
+    /** A discriminator this build does not know is a readable failure, never a wrong branch. */
+    @Test
+    fun anUnknownAggregateTypeOnAnUpsertIsRefusedRatherThanGuessed() {
+        for (
+            body in listOf(
+                """{"op":"upsert","aggregateType":"recipe","aggregateId":"r-1"}""",
+                """{"op":"patch","aggregateType":"measurement","aggregateId":"2026-08-25"}""",
+                """{"aggregateType":"measurement","aggregateId":"2026-08-25"}""",
+                """{"op":3,"aggregateType":"measurement"}""",
+            )
+        ) {
+            val failure = runCatching {
+                SyncJson.instance.decodeFromString(serializer<MutationEnvelopeDto>(), body)
+            }.exceptionOrNull()
+
+            assertIs<SerializationException>(failure, "unreadable body must not throw past sync: $body")
+        }
     }
 
     /** FR-SYNC-006 and FR-SYNC-007 in one body: applied, duplicate and rejected side by side. */
@@ -188,9 +325,42 @@ class ContractDriftTest {
     @Test
     fun theDeclaredSchemaVersionsAreTheOnesTheOutboxWrites() {
         assertEquals(
-            mapOf(WIRE_AGGREGATE_MEASUREMENT to listOf(WIRE_MEASUREMENT_PAYLOAD_VERSION)),
+            mapOf(
+                WIRE_AGGREGATE_ACTIVITY_SESSION to listOf(WIRE_ACTIVITY_SESSION_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_CUSTOM_EXERCISE to listOf(WIRE_CUSTOM_EXERCISE_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_FOOD to listOf(WIRE_FOOD_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_FOOD_LOG_ENTRY to listOf(WIRE_FOOD_LOG_ENTRY_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_HEALTH_PROFILE to listOf(WIRE_HEALTH_PROFILE_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_MEAL_PLAN_ENTRY to listOf(WIRE_MEAL_PLAN_ENTRY_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_MEASUREMENT to listOf(WIRE_MEASUREMENT_PAYLOAD_VERSION),
+                WIRE_AGGREGATE_RECIPE to listOf(WIRE_RECIPE_PAYLOAD_VERSION),
+            ),
             SyncWire.SUPPORTED_SCHEMA_VERSIONS,
         )
+    }
+
+    /**
+     * Every aggregate type the client will *send* is one it also declares it can *apply*, and
+     * has a local table for.
+     *
+     * The health profile spent this whole feature's life failing the first half: it was
+     * journalled at every save and `SENDABLE_LOCAL_AGGREGATE_TYPES` could not carry it, so
+     * `Data & sync` showed a pending count that could never reach zero. This is the assertion
+     * that would have said so.
+     */
+    @Test
+    fun everySendableTypeIsOneThisBuildCanAlsoDeclareAndApply() {
+        for (localType in SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES) {
+            val wireType = SyncWire.SUPPORTED_SCHEMA_VERSIONS.keys
+                .firstOrNull { SyncWire.localAggregateType(it) == localType }
+            assertNotNull(wireType, "$localType may be sent and is declared by no wire type")
+        }
+        for (wireType in SyncWire.SUPPORTED_SCHEMA_VERSIONS.keys) {
+            assertNotNull(
+                SyncWire.localAggregateType(wireType),
+                "$wireType is declared applicable and has no local store",
+            )
+        }
     }
 
     private fun decodePullResponse(file: String): PullResponseDto =

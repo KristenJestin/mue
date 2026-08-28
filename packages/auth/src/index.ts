@@ -1,5 +1,5 @@
 export { createAuth, type AuthHandle, type CreateAuthOptions, type MueAuth } from "./auth";
-export { readAuthConfig, type AuthConfig, type Env } from "./config";
+export { oauthIssuer, readAuthConfig, type AuthConfig, type Env } from "./config";
 export { MUE_SCOPES, OAUTH_SCOPES, SCOPE_DESCRIPTIONS, isMueScope, type MueScope } from "./scopes";
 export {
   createPinnedMetadataFetch,
@@ -9,4 +9,12 @@ export {
   type PinnedFetchOptions,
 } from "./cimd-transport";
 export { classifyAddress, isPubliclyRoutable, type AddressVerdict } from "./ssrf";
-export { listSessions, listAgents, revokeSession, revokeAgent } from "./administration";
+export {
+  listSessions,
+  listAgents,
+  revokeSession,
+  revokeAgent,
+  type AgentRevocation,
+  type AgentSummary,
+  type SessionSummary,
+} from "./administration";

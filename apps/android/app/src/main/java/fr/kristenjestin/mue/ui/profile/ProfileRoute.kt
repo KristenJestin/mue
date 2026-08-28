@@ -18,6 +18,11 @@ import androidx.compose.runtime.setValue
  * réglages d'appareil — « invisibles depuis les écrans principaux ». C'est la troisième pile de
  * l'application, écrite sur le modèle exact des deux premières.
  *
+ * [ServerSettings] (sync PRD 9.1) et [FoodPreferences] (PRD_FOOD 6.7) l'ont rejointe : ce sont des
+ * sous-écrans du même onglet, et une seconde mécanique de pile à côté de celle-ci aurait admis un
+ * état qui n'existe pas — deux sous-écrans ouverts en même temps, sans rien dans le type pour dire
+ * lequel le retour doit refermer. Une liste de routes rend cet état impossible par construction.
+ *
  * Chaque route sait s'écrire comme une seule chaîne, si bien que la pile entière traverse un
  * `Bundle` en texte et revient après une mort de processus (PRD 16.3).
  */
@@ -40,6 +45,22 @@ sealed interface ProfileRoute {
     /** Le flux d'appairage, ouvert par `Add a scale` et par lui seul (FR-SCALE-010). */
     data object ScaleScan : ProfileRoute {
         override val key: String = "scaleScan"
+    }
+
+    /** `Server settings` : associer un serveur, s'y reconnecter, le laisser partir (sync PRD 9.1). */
+    data object ServerSettings : ProfileRoute {
+        override val key: String = "serverSettings"
+    }
+
+    /**
+     * `Food preferences` (PRD_FOOD 6.7 et 13.2), sur l'onglet qui tient déjà toutes les options.
+     *
+     * L'écran est venu ici entier plutôt que le seul bouton : le laisser dans `FoodRoute` aurait
+     * fait empiler cet onglet-ci sur la pile d'un autre, si bien que la barre aurait affiché
+     * `Food` pendant que ce gestionnaire-ci était celui qui devait le refermer.
+     */
+    data object FoodPreferences : ProfileRoute {
+        override val key: String = "foodPreferences"
     }
 
     /**
@@ -70,6 +91,8 @@ sealed interface ProfileRoute {
             key == Profile.key -> Profile
             key == Scales.key -> Scales
             key == ScaleScan.key -> ScaleScan
+            key == ServerSettings.key -> ServerSettings
+            key == FoodPreferences.key -> FoodPreferences
             key.startsWith("$SCALE_DETAIL_KEY$ID_SEPARATOR") ->
                 ScaleDetail(key.substringAfter(ID_SEPARATOR))
 

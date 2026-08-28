@@ -1,7 +1,6 @@
 package fr.kristenjestin.mue.ui.food.add
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,16 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -35,7 +34,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.domain.model.FoodSource
 import fr.kristenjestin.mue.ui.activity.ActivityIcons
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueIcon
+import fr.kristenjestin.mue.ui.components.MuePeriodPill
 import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MueSearchField
@@ -49,6 +50,18 @@ import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
 private val BackIconSize: Dp = 18.dp
+
+/**
+ * The glyph tile in front of a search result: the prototype's `h-11 w-11 rounded-2xl`, so 44 dp.
+ *
+ * The prototype gives every leading tile in the module the *same* corner — `rounded-2xl` — and
+ * varies only the side: 40 dp on a journal line, 44 dp here and in the catalogue, 56 dp on a
+ * recipe. This one had drifted twice over: 48 dp because [MueMinTouchTarget] was read as a
+ * proportion rather than as a rule about targets, and `shapes.small` where every visually
+ * identical row in the module uses `shapes.field`, so the same object was drawn with two
+ * different radii depending on which screen it appeared on.
+ */
+private val ResultTileSize: Dp = 44.dp
 
 /**
  * PRD_FOOD 11's shared selector, and the way in FR-FOOD-002 opens (PRD_FOOD 9.4).
@@ -85,6 +98,11 @@ internal fun FoodPickerRoute(
 /**
  * The picker as it is drawn: one search bar, one source filter, one list (PRD_FOOD 9.4).
  *
+ * The list carries **two headings** when nothing has been typed — the recently used, then the
+ * catalogue they head — exactly as the `Foods` view draws the same two lists. It is one scroll and
+ * not two: the head is often short and often empty, and a second scrolling region for it would
+ * strand the catalogue below the fold.
+ *
  * The list is lazy because the catalogue is not small — 1 038 entries are seeded on first launch —
  * and because a search that matches half of them must still scroll like a list of ten.
  *
@@ -104,6 +122,26 @@ internal fun FoodPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
+    val list = rememberLazyListState()
+
+    /*
+     * Back to the top whenever this stops being the same list.
+     *
+     * `LazyColumn` re-anchors on the **key** of whatever was first visible, so an item inserted
+     * *above* that key scrolls itself out of sight instead of pushing the list down. The recents
+     * are read from the journal and land a frame after the catalogue does, which is exactly that
+     * case: the head appeared in the state, the `Catalogue` heading stayed pinned to the top, and
+     * the whole head sat above the viewport where nobody could see it. The `Foods` view never met
+     * this because its first three items — the title, the search and the filter — are always
+     * there, so its anchor cannot move.
+     *
+     * Resetting on the terms rather than on the rows is also the honest behaviour: a list that has
+     * become the answer to a different question starts at its own beginning, not in the middle of
+     * the last one.
+     */
+    LaunchedEffect(state.query, state.isRecent, state.hasRecent) {
+        list.scrollToItem(0)
+    }
 
     MueSubScreenScaffold(
         title = FoodAddMessages.PICKER_TITLE,
@@ -121,7 +159,13 @@ internal fun FoodPickerScreen(
             value = state.query,
             onValueChange = onQueryChange,
             modifier = Modifier
-                .padding(top = spacing.md)
+                /*
+                 * The header's ramp, in full. This field is fixed chrome above the list rather
+                 * than a row inside it, so the twelve dp it used to keep left the top of the box
+                 * half-dissolved *permanently* — no amount of scrolling moves a control that
+                 * does not scroll.
+                 */
+                .padding(top = MueContentTopFade)
                 .testTag(FoodTestTags.SEARCH_FIELD),
             placeholder = FoodAddMessages.SEARCH_PLACEHOLDER,
             label = FoodAddMessages.SEARCH_LABEL,
@@ -142,14 +186,8 @@ internal fun FoodPickerScreen(
             modifier = Modifier.padding(top = spacing.md),
         )
 
-        MueText(
-            text = state.sectionTitle,
-            style = MueTheme.typography.label,
-            color = MueTheme.colors.textTertiary,
-            modifier = Modifier.padding(top = spacing.lg, bottom = spacing.sm),
-        )
-
         LazyColumn(
+            state = list,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -157,6 +195,21 @@ internal fun FoodPickerScreen(
             verticalArrangement = Arrangement.spacedBy(spacing.sm),
             contentPadding = PaddingValues(bottom = spacing.xxxl),
         ) {
+            /*
+             * PRD_FOOD 9.4: the recently used head the list, they do not replace it. The heading
+             * is inside the scroll rather than above it so that the catalogue's own heading can
+             * follow the rows it belongs to — which is what the `Foods` view already does with
+             * the same two lists.
+             */
+            if (state.hasRecent) {
+                item(key = "recentTitle") { SectionTitle(state.recentTitle) }
+                items(items = state.recent, key = { "recent:${it.id}" }) { row ->
+                    FoodResultRow(row = row, onClick = { onPicked(FoodId(row.id)) })
+                }
+            }
+
+            item(key = "sectionTitle") { SectionTitle(state.sectionTitle) }
+
             items(items = state.results, key = { it.id }) { row ->
                 FoodResultRow(row = row, onClick = { onPicked(FoodId(row.id)) })
             }
@@ -196,6 +249,17 @@ internal fun FoodPickerScreen(
     }
 }
 
+/** The word over a run of rows, worded and spaced as the `Foods` view words and spaces its own. */
+@Composable
+private fun SectionTitle(title: String) {
+    MueText(
+        text = title,
+        style = MueTheme.typography.label,
+        color = MueTheme.colors.textTertiary,
+        modifier = Modifier.padding(top = MueTheme.spacing.md, bottom = MueTheme.spacing.xxs),
+    )
+}
+
 /**
  * PRD_FOOD 9.4's one filter, as a scrolling row of chips.
  *
@@ -221,36 +285,22 @@ private fun SourceFilter(
     }
 }
 
+/**
+ * One provenance filter, drawn by the pill the rest of the app already uses.
+ *
+ * This had been a private copy of `MuePeriodPill` with two values changed: a 48 dp minimum height
+ * instead of the pill's 40, and an outlined `accentSoft` selection instead of the filled `accent`
+ * one. Both showed. `All` is a three-letter word, so at 48 dp tall and 16 dp of side padding it
+ * came out taller than it was wide and drew a **circle**, while the identical `All` on `Foods`
+ * two taps away drew a capsule — one filter row contradicting the other. The prototype has a
+ * single pill (`rounded-full px-3 py-2`, amber when active) and uses it for every filter it has.
+ *
+ * The 48 dp target is not lost: `MuePeriodPill` wraps its 40 dp body in a 48 dp touch height, so
+ * PRD_FOOD 18 is satisfied by the component rather than by this call site.
+ */
 @Composable
 private fun SourceChip(option: FoodSourceFilterUiState, onClick: () -> Unit) {
-    val colors = MueTheme.colors
-    val shape = MueTheme.shapes.pill
-    Box(
-        modifier = Modifier
-            .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .background(if (option.selected) colors.accentSoft else colors.surfaceStrong)
-            .border(
-                width = if (option.selected) 2.dp else 1.dp,
-                color = if (option.selected) colors.accent else colors.surfaceBorder,
-                shape = shape,
-            )
-            .selectable(
-                selected = option.selected,
-                indication = null,
-                interactionSource = null,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(horizontal = MueTheme.spacing.lg, vertical = MueTheme.spacing.sm),
-        contentAlignment = Alignment.Center,
-    ) {
-        MueText(
-            text = option.label,
-            style = MueTheme.typography.chip,
-            color = if (option.selected) colors.onAccentSoft else colors.textTertiary,
-        )
-    }
+    MuePeriodPill(label = option.label, selected = option.selected, onClick = onClick)
 }
 
 /**
@@ -284,8 +334,8 @@ private fun FoodResultRow(row: FoodPickerRowUiState, onClick: () -> Unit) {
         ) {
             Box(
                 modifier = Modifier
-                    .size(MueMinTouchTarget)
-                    .clip(MueTheme.shapes.small)
+                    .size(ResultTileSize)
+                    .clip(MueTheme.shapes.field)
                     .background(colors.accentSoft),
                 contentAlignment = Alignment.Center,
             ) {
@@ -350,6 +400,29 @@ private fun FoodPickerNarrowPreview() {
     MuePreviewHost(padding = 0) {
         FoodPickerScreen(
             state = previewPickerState(),
+            onQueryChange = {},
+            onClearQuery = {},
+            onSourceSelected = {},
+            onPicked = {},
+            onCreateFood = {},
+            onBack = {},
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The picker on a phone that has never logged anything.
+ *
+ * What to look for: the catalogue, drawn. This is the state the first defect was reported from,
+ * and the head being empty is not a reason to show nothing.
+ */
+@Preview(name = "Food picker — nothing logged yet", showBackground = true, backgroundColor = 0xFF101012, heightDp = 800)
+@Composable
+private fun FoodPickerNothingLoggedPreview() {
+    MuePreviewHost(padding = 0) {
+        FoodPickerScreen(
+            state = previewPickerNothingLoggedState(),
             onQueryChange = {},
             onClearQuery = {},
             onSourceSelected = {},

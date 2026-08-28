@@ -10,6 +10,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -20,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import fr.kristenjestin.mue.domain.logic.FoodLabels
 import fr.kristenjestin.mue.domain.model.FoodId
 import fr.kristenjestin.mue.ui.food.FoodTestTags
+import fr.kristenjestin.mue.ui.profile.FoodPreferencesMessages
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -44,7 +46,6 @@ class FoodsScreenTest {
 
     private var opened: FoodId? = null
     private var created: Int = 0
-    private var preferences: Int = 0
     private var typed: String? = null
 
     private val shown = mutableStateOf(previewFoodsState())
@@ -179,16 +180,24 @@ class FoodsScreenTest {
         assertEquals(FoodCataloguePreviewData.rolledOats().id, opened)
     }
 
-    /** PRD_FOOD 6.7: the settings live in the preferences, and this is the door to them. */
+    /**
+     * The catalogue offers no way into the preferences, because it is not where they live.
+     *
+     * This replaces `thePreferencesAreReachableAndNamed`, which asserted the opposite about the
+     * wrench that used to sit in this view's header. PRD_FOOD 6.7 is unchanged and still met — the
+     * options live in the preferences rather than on a screen — but the door is `Profile`'s now,
+     * and `ProfileFoodPreferencesTest` is what asserts it opens.
+     *
+     * Named against [FoodPreferencesMessages] rather than against a spelled-out string, so a copy
+     * change cannot leave this agreeing with a word nothing draws. Both trees are asked: the
+     * wrench carried its name as a `contentDescription` and a card would carry it as text.
+     */
     @Test
-    fun thePreferencesAreReachableAndNamed() {
+    fun theCatalogueOffersNoWayIntoThePreferences() {
         setFoods(previewFoodsState())
 
-        compose.onNodeWithTag(FoodTestTags.OPEN_PREFERENCES)
-            .assertContentDescriptionContains(FoodCatalogueMessages.OPEN_PREFERENCES)
-        compose.onNodeWithTag(FoodTestTags.OPEN_PREFERENCES).performClick()
-
-        assertEquals(1, preferences)
+        compose.onNodeWithContentDescription(FoodPreferencesMessages.TITLE).assertDoesNotExist()
+        compose.onNodeWithText(FoodPreferencesMessages.TITLE).assertDoesNotExist()
     }
 
     // endregion
@@ -215,7 +224,6 @@ class FoodsScreenTest {
     fun everyControlClearsTheTouchMinimum() {
         setFoods(previewFoodsState())
 
-        assertTallEnough(FoodTestTags.OPEN_PREFERENCES)
         assertTallEnough(FoodTestTags.FOOD_SEARCH)
         assertTallEnough(FoodTestTags.CREATE_FOOD)
 
@@ -298,7 +306,6 @@ class FoodsScreenTest {
                     onSourceChange = {},
                     onOpenFood = { opened = it },
                     onCreateFood = { created++ },
-                    onOpenPreferences = { preferences++ },
                 )
             }
         }

@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.ui.food.catalogue
+package fr.kristenjestin.mue.ui.profile
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.height
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import org.junit.Assert.assertEquals
@@ -20,12 +19,16 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * The module's preferences sheet, and the one switch on it (PRD_FOOD 13.2, FR-FOOD-010).
+ * `Food preferences`, and the one switch on it (PRD_FOOD 13.2, FR-FOOD-010).
  *
- * The handle is `FoodTestTags.HIDE_ENERGY_TOGGLE`, reserved before the screen existed. The tag
- * names the effect someone comes here for; the switch is worded `Show energy`, which is the name
- * PRD_FOOD 13.2 gives the preference and the way every other switch in the app reads — on when
- * the thing it names is happening.
+ * The screen and this test came over from `ui.food.catalogue` together, unchanged but for the
+ * package and the two names below. Nothing about the assertions moved: the switch reads the same
+ * preference off the same repository, and a `Profile` screen was always what it was.
+ *
+ * The handle is [ProfileTestTags.HIDE_ENERGY_TOGGLE], reserved under that name before the screen
+ * existed and kept. The tag names the effect someone comes here for; the switch is worded
+ * `Show energy`, which is the name PRD_FOOD 13.2 gives the preference and the way every other
+ * switch in the app reads — on when the thing it names is happening.
  */
 @RunWith(AndroidJUnit4::class)
 class FoodPreferencesScreenTest {
@@ -39,22 +42,22 @@ class FoodPreferencesScreenTest {
     fun theSwitchIsOnWhenTheFiguresAreShown() {
         setPreferences(FoodPreferencesUiState(showEnergy = true))
 
-        compose.onNodeWithText(FoodCatalogueMessages.SHOW_ENERGY_TITLE).assertIsDisplayed()
-        compose.onNodeWithTag(FoodTestTags.HIDE_ENERGY_TOGGLE).assertIsOn()
+        compose.onNodeWithText(FoodPreferencesMessages.SHOW_ENERGY_TITLE).assertIsDisplayed()
+        compose.onNodeWithTag(ProfileTestTags.HIDE_ENERGY_TOGGLE).assertIsOn()
     }
 
     @Test
     fun theSwitchIsOffWhenTheFiguresAreHidden() {
         setPreferences(FoodPreferencesUiState(showEnergy = false))
 
-        compose.onNodeWithTag(FoodTestTags.HIDE_ENERGY_TOGGLE).assertIsOff()
+        compose.onNodeWithTag(ProfileTestTags.HIDE_ENERGY_TOGGLE).assertIsOff()
     }
 
     @Test
     fun turningItOffIsReported() {
         setPreferences(FoodPreferencesUiState(showEnergy = true))
 
-        compose.onNodeWithTag(FoodTestTags.HIDE_ENERGY_TOGGLE).performClick()
+        compose.onNodeWithTag(ProfileTestTags.HIDE_ENERGY_TOGGLE).performClick()
 
         assertEquals(listOf(false), toggles)
     }
@@ -64,7 +67,7 @@ class FoodPreferencesScreenTest {
     fun theSwitchSaysWhatItDoesAndWhatItDoesNot() {
         setPreferences(FoodPreferencesUiState(showEnergy = true))
 
-        compose.onNodeWithText(FoodCatalogueMessages.SHOW_ENERGY_BODY).assertIsDisplayed()
+        compose.onNodeWithText(FoodPreferencesMessages.SHOW_ENERGY_BODY).assertIsDisplayed()
     }
 
     /** PRD_FOOD 18: the whole card is the target, so it is far above the 48 dp minimum. */
@@ -72,7 +75,7 @@ class FoodPreferencesScreenTest {
     fun theSwitchClearsTheTouchMinimum() {
         setPreferences(FoodPreferencesUiState(showEnergy = true))
 
-        val height = compose.onNodeWithTag(FoodTestTags.HIDE_ENERGY_TOGGLE)
+        val height = compose.onNodeWithTag(ProfileTestTags.HIDE_ENERGY_TOGGLE)
             .getUnclippedBoundsInRoot()
             .height
 

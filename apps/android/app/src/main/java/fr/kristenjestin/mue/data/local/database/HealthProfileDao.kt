@@ -33,6 +33,21 @@ interface HealthProfileDao : SyncJournalDao {
     suspend fun insertIfAbsent(entity: HealthProfileEntity)
 
     /**
+     * Removes the single row. It exists for one caller and one case: a `delete` change arriving
+     * from the server for this aggregate.
+     *
+     * Sync PRD 13.4 gives the profile no deletion and `packages/domain` refuses a `delete`
+     * mutation for it outright, so no Mue Platform can produce such a change. The branch exists
+     * anyway because the alternative is worse: `RoomSyncStore.applyChange` must be total, and a
+     * change it threw on would roll back its page and leave the cursor stuck on data the phone
+     * can never move past (PRD 12.4 is about *not applying*, not about never advancing). So an
+     * unexpected tombstone is applied as what a tombstone means — the aggregate is gone — which
+     * loses nothing the server still holds and lets the cursor advance.
+     */
+    @Query("DELETE FROM health_profile WHERE id = 'me'")
+    suspend fun clear()
+
+    /**
      * [upsert] with the outbox row it was missing (FR-SYNC-001).
      *
      * Until this existed, `health_profile` journalled nothing: `DataStoreUserProfileRepository`

@@ -15,6 +15,7 @@ import fr.kristenjestin.mue.domain.model.MealPlanKey
 import fr.kristenjestin.mue.domain.model.MealSlot
 import fr.kristenjestin.mue.domain.model.RecipeId
 import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 /**
  * The screens of the Food tab (PRD_FOOD 7).
@@ -56,7 +57,7 @@ sealed interface FoodRoute {
         val label: String
     }
 
-    /** PRD_FOOD 10.1: opens on today, four moments, no header band and no daily summary. */
+    /** PRD_FOOD 10.1: opens on today, six moments, no header band and no daily summary. */
     data object Day : View {
         override val key: String = "day"
         override val label: String = "Day"
@@ -85,12 +86,20 @@ sealed interface FoodRoute {
      * already exists — FR-FOOD-008 reuses this very sheet to edit, as the Activity module's
      * `Log` route does.
      *
-     * [date] and [slot] travel together or not at all. Opening from a moment's `+` carries both;
-     * opening from anywhere else carries neither and FR-FOOD-007 lets the clock preselect the
-     * moment, which is a better default than half a target read back from a stale key.
+     * **A day may travel without a moment, and now usually does.** The `Day` screen's one add
+     * action hands over the journal being looked at and nothing else, so that FR-FOOD-007's clock
+     * decides the moment — `FoodAddDraft.forTarget` leaves it unpinned exactly when [slot] is
+     * null. A [slot] still means "this moment, whatever the hour says", which is what confirming
+     * a proposal and correcting a line both need.
      *
-     * The two readings are exclusive by construction — nothing builds one carrying both — and
-     * they use different separators, so the key itself says which of the two it is.
+     * All three shapes therefore have to survive a `Bundle`. A date-only route written as the
+     * bare [ADD_FOOD_KEY] would come back as a sheet aimed at **today** — so a process death
+     * while logging Tuesday's supper would have moved it to Wednesday, silently, in the one place
+     * nobody looks. It carries the ISO date instead, which `MealPlanKey.parseOrNull` rejects
+     * (it demands a separator and a known moment) and the branch below then reads on its own.
+     *
+     * The entry reading is exclusive by construction — nothing builds one carrying both — and it
+     * uses a different separator, so the key itself says which of the readings it is.
      */
     data class AddFood(
         val date: LocalDate? = null,
@@ -102,6 +111,8 @@ sealed interface FoodRoute {
                 entryId != null -> "$ADD_FOOD_KEY$ALTERNATE_SEPARATOR${entryId.value}"
                 date != null && slot != null ->
                     "$ADD_FOOD_KEY$ID_SEPARATOR${MealPlanKey(date, slot).aggregateId}"
+
+                date != null -> "$ADD_FOOD_KEY$ID_SEPARATOR$date"
 
                 else -> ADD_FOOD_KEY
             }
@@ -123,6 +134,22 @@ sealed interface FoodRoute {
         override val key: String = "foodPicker"
     }
 
+    /**
+     * FR-FOOD-004: the recipe a line is being built from, chosen the way a food is.
+     *
+     * A **sheet**, which is the whole point of it. `Use a recipe` used to `select(Recipes)`, and
+     * selecting a view replaces the root and takes the open sheet with it: somebody three taps
+     * into logging dinner was dropped onto the recipe catalogue, with the view switcher and the
+     * bottom bar back and no thread to the meal they were writing. This is pushed over the sheet
+     * exactly as [FoodPicker] is, so leaving it returns to `Add food` with the choice made.
+     *
+     * Parameterless for [FoodPicker]'s reason and with the same answer: what it chose is written
+     * into the add flow's own ViewModel, which both screens share.
+     */
+    data object RecipePicker : FoodRoute {
+        override val key: String = "recipePicker"
+    }
+
     /** FR-CATALOG-003: creating a personal food, or editing one that is not read-only. */
     data class FoodEditor(val foodId: FoodId? = null) : FoodRoute {
         override val key: String
@@ -130,19 +157,40 @@ sealed interface FoodRoute {
     }
 
     /**
-     * FR-PLAN-002: replacing the proposal on one moment.
+     * PRD_FOOD 12 and FR-PLAN-001: posing a proposal on a day, or replacing the one on a moment.
      *
-     * A proposal has no identifier of its own — PRD_FOOD 8.5 makes the `(date, moment)` pair its
-     * identity — so that pair is what the route carries, written with [MealPlanKey]'s own
-     * `aggregateId` rather than a second encoding of the same thing.
+     * ## It is a route, and it is the `Add food` sheet
+     *
+     * A proposal is a recipe, a serving count and a moment, and [AddFood] already asks for all
+     * three: `FoodAddStage.SERVINGS` is that form, and `RecipePicker` is how the recipe is
+     * chosen. Building a second screen would have meant a second stepper against the same
+     * `FoodValidation.validateConsumedServings`, a second moment panel and a second place for
+     * either to drift. So this route resolves to the same sheet, told to plan.
+     *
+     * ## Why it is not simply [AddFood] on a future date
+     *
+     * Deriving the intent from the date alone works for the day screen's own action — a day the
+     * journal refuses admits one honest meaning — but not for `Swap`. Replacing **today's**
+     * dinner proposal is planning on a day the journal would happily take a line, so the date
+     * cannot say which of the two the sheet is. The route says it instead.
+     *
+     * [slot] is null when the day screen opens it, which is what lets `MealSlotRules
+     * .plannedSlotFor` choose the moment from the dish and the day; it is set by `Swap`, which
+     * names the moment being replaced and pins it.
+     *
+     * ## This is `FoodRoute.Swap`, restored
+     *
+     * `Swap` was a `data class` carrying a [MealPlanKey] and answering `FoodPlaceholder` — a
+     * wordless empty `Box` with no title and no way out — so its action was withdrawn from the
+     * proposal card. It has a real screen now, and it is this one: replacing a proposal and posing
+     * one are the same gesture, so they are the same destination. Its old key still resolves here,
+     * which is what a stack saved by yesterday's build restores to.
      */
-    data class Swap(val plan: MealPlanKey) : FoodRoute {
-        override val key: String get() = "$SWAP_KEY$ID_SEPARATOR${plan.aggregateId}"
-    }
-
-    /** PRD_FOOD 6.7: the module's occasional settings live here and nowhere on a screen. */
-    data object Preferences : FoodRoute {
-        override val key: String = "preferences"
+    data class PlanMeal(val date: LocalDate, val slot: MealSlot? = null) : FoodRoute {
+        override val key: String
+            get() = slot
+                ?.let { "$PLAN_MEAL_KEY$ID_SEPARATOR${MealPlanKey(date, it).aggregateId}" }
+                ?: "$PLAN_MEAL_KEY$ID_SEPARATOR$date"
     }
 
     companion object {
@@ -150,7 +198,17 @@ sealed interface FoodRoute {
         private const val RECIPE_DETAIL_KEY = "recipeDetail"
         private const val RECIPE_EDITOR_KEY = "recipeEditor"
         private const val FOOD_EDITOR_KEY = "foodEditor"
-        private const val SWAP_KEY = "swap"
+        private const val PLAN_MEAL_KEY = "planMeal"
+
+        /**
+         * What [PlanMeal] used to be called, and what a stack saved by an older build carries.
+         *
+         * Still read, never written. `swap:2026-09-03:dinner` names exactly the day and moment
+         * [PlanMeal] takes, so a restored stack lands on the screen the reader was on rather than
+         * being dropped back to `Day` — and the destination it lands on is the one that finally
+         * does the job the placeholder never did.
+         */
+        private const val LEGACY_SWAP_KEY = "swap"
 
         /** Neither separator can occur in a stored UUID, in an ISO date or in a moment's id. */
         private const val ID_SEPARATOR = ':'
@@ -162,18 +220,29 @@ sealed interface FoodRoute {
         /**
          * The views the switcher actually offers: [VIEWS] less the ones still drawing nothing.
          *
-         * `Trends` is the one it leaves out, and leaving it out is the honest answer rather than
-         * an omission. Its route still draws `FoodPlaceholder`, which is a deliberately wordless
-         * empty `Box` — the right thing to show while a whole tab is unbuilt, and the wrong thing
-         * to reach through a control that offers it as the peer of three finished screens. A
-         * reader who taps `Trends` and lands on a blank canvas has found a defect, not an honest
-         * confession; the confession would need copy PRD_FOOD 17 does not write, over a screen
-         * that does not exist yet.
+         * **`Trends` is the one it leaves out, and it stays out.** The prototype draws four
+         * segments and PRD_FOOD 19 makes the prototype authoritative on layout, so this is the one
+         * place the track deliberately departs from it — because the fourth segment would lead
+         * somewhere. `FoodRoute.Trends` still answers `FoodPlaceholder`, a deliberately wordless
+         * empty `Box`: the right thing to show while a whole view is unbuilt, and the wrong thing
+         * to offer as the peer of three finished screens. A reader who taps it and lands on a blank
+         * canvas has found a defect, not an honest confession.
          *
-         * It costs nothing to put back: PRD_FOOD 10.5's screen lands, and its route stops
-         * answering `FoodPlaceholder`, and this list becomes [VIEWS]. The order is [VIEWS]' own,
-         * so the switcher and the animation that follows a view change never disagree about which
-         * way sideways is.
+         * The alternative considered was giving it an honest empty state and putting it in the
+         * track. It was rejected because PRD_FOOD 10.5 names five things `Trends` shows — seven
+         * bars, the mean of the filled days, the count of filled days, the line count, a tappable
+         * history — and an empty state is a statement about a screen that exists. Writing "no data
+         * yet" over a view that has none of those five would be a *fourth* screen invented to
+         * excuse the absence of the third, with copy PRD_FOOD 17 does not write.
+         *
+         * A three-segment track is also the better control at the largest font size: three shares
+         * of 360 dp is a third more room per name than four, which is what decides whether the
+         * words survive at all — see `FoodViewSwitcher`.
+         *
+         * It costs nothing to put back: PRD_FOOD 10.5's screen lands, its route stops answering
+         * `FoodPlaceholder`, and this list becomes [VIEWS]. The order is [VIEWS]' own, so the
+         * switcher and the animation that follows a view change never disagree about which way
+         * sideways is.
          */
         val SWITCHABLE: List<View> = VIEWS.filterNot { it == Trends }
 
@@ -182,10 +251,18 @@ sealed interface FoodRoute {
          * saved stack outlives the code that wrote it, and losing a screen is a better outcome
          * than a crash on the first frame after an update.
          *
-         * This is why it stays **total** as the six remaining screens land: a stack saved by a
-         * build that knew `swap` and restored by one that did not would otherwise take the app
-         * down before it drew anything. A half-readable sheet degrades the same way — a target
-         * whose date will not parse gives a plain `Add food`, which still works.
+         * This is why it stays **total**: a stack saved by a build that knew a key and restored by
+         * one that did not would otherwise take the app down before it drew anything. It is also
+         * what lets a key be *renamed* — `swap` became `planMeal` and both still resolve, to the
+         * same screen. A half-readable sheet degrades the same way: a target whose date will not
+         * parse gives a plain `Add food`, which still works.
+         *
+         * `preferences` is the first key to be **retired** rather than renamed: `Food preferences`
+         * left this stack for `Profile`'s, so there is nowhere in this module to redirect it to.
+         * It falls through to [Day], and [rooted] then drops it as a second view — a stack saved
+         * by yesterday's build as `[foods, preferences]` restores as `[foods]`, the very view the
+         * sheet was open over. The reader loses the sheet and keeps their place, which is what
+         * the total fallback was written for.
          */
         fun fromKey(key: String): FoodRoute = when {
             key == Day.key -> Day
@@ -193,13 +270,21 @@ sealed interface FoodRoute {
             key == Recipes.key -> Recipes
             key == Foods.key -> Foods
             key == FoodPicker.key -> FoodPicker
-            key == Preferences.key -> Preferences
+            key == RecipePicker.key -> RecipePicker
 
             key == ADD_FOOD_KEY -> AddFood()
-            key.startsWith("$ADD_FOOD_KEY$ID_SEPARATOR") ->
-                MealPlanKey.parseOrNull(key.substringAfter(ID_SEPARATOR))
+            /*
+             * A moment and its day, or a day on its own. `parseOrNull` answers the first and
+             * refuses everything else, so the ISO date is tried after it rather than before —
+             * `LocalDate.parse` would throw on `2026-08-28:lunch` and never reach the pair.
+             * A target that reads as neither degrades to a plain sheet, which still works.
+             */
+            key.startsWith("$ADD_FOOD_KEY$ID_SEPARATOR") -> {
+                val target = key.substringAfter(ID_SEPARATOR)
+                MealPlanKey.parseOrNull(target)
                     ?.let { AddFood(date = it.plannedOn, slot = it.slot) }
-                    ?: AddFood()
+                    ?: AddFood(date = localDateOrNull(target))
+            }
 
             key.startsWith("$ADD_FOOD_KEY$ALTERNATE_SEPARATOR") ->
                 AddFood(entryId = FoodLogEntryId(key.substringAfter(ALTERNATE_SEPARATOR)))
@@ -216,14 +301,37 @@ sealed interface FoodRoute {
                 FoodEditor(FoodId(key.substringAfter(ID_SEPARATOR)))
 
             /*
-             * The one sheet that cannot exist without its parameter: a swap with no proposal
-             * behind it has nothing to replace, so an unreadable one is dropped rather than
-             * opened empty.
+             * The one sheet that cannot exist without its parameter: a proposal has to be posed
+             * on a day, and PRD_FOOD 15 will not take "today" as a substitute for a date somebody
+             * chose. An unreadable one is dropped rather than opened on the wrong day.
+             *
+             * A moment and its day, or a day on its own — read in that order and for
+             * `AddFood`'s reason: `LocalDate.parse` throws on `2026-09-03:dinner`, so the pair
+             * has to be tried first.
              */
-            key.startsWith("$SWAP_KEY$ID_SEPARATOR") ->
-                MealPlanKey.parseOrNull(key.substringAfter(ID_SEPARATOR))?.let(::Swap) ?: Day
+            key.startsWith("$PLAN_MEAL_KEY$ID_SEPARATOR") ||
+                key.startsWith("$LEGACY_SWAP_KEY$ID_SEPARATOR") -> {
+                val target = key.substringAfter(ID_SEPARATOR)
+                MealPlanKey.parseOrNull(target)
+                    ?.let { PlanMeal(date = it.plannedOn, slot = it.slot) }
+                    ?: localDateOrNull(target)?.let { PlanMeal(date = it) }
+                    ?: Day
+            }
 
             else -> Day
+        }
+
+        /**
+         * An ISO day, or null — never a throw.
+         *
+         * [fromKey]'s own contract: a key written by another build outlives the code that wrote
+         * it, and losing the day a sheet was aimed at is a better outcome than taking the first
+         * frame down. A null here gives a plain `Add food`, which opens on today.
+         */
+        private fun localDateOrNull(value: String): LocalDate? = try {
+            LocalDate.parse(value)
+        } catch (_: DateTimeParseException) {
+            null
         }
     }
 }
@@ -274,17 +382,6 @@ class FoodStack internal constructor(entries: List<FoodRoute>) {
      */
     fun pop(count: Int = 1) {
         entries = entries.take((entries.size - count).coerceAtLeast(1))
-    }
-
-    /**
-     * Swaps the sheet on top for another, leaving nothing behind it.
-     *
-     * `Swap` is a handover rather than a journey: FR-PLAN-002 replaces the proposal and going
-     * back must reach the day, not the sheet that was already answered. On a bare view — which
-     * is never popped — this is simply a push.
-     */
-    fun replaceTop(sheet: FoodRoute) {
-        entries = entries.take((entries.size - 1).coerceAtLeast(1)) + sheet
     }
 
     /**

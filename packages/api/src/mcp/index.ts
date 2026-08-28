@@ -14,8 +14,19 @@ export {
   type ActivitySessionPayload,
   type ActivitySessionView,
 } from "./activity";
-export { decodeListCursor, encodeListCursor, InvalidCursorError } from "./cursor";
-export { createActivitySessionService, isUsingProvisionalActivityWrite } from "./domain-bridge";
+export {
+  decodeListCursor,
+  decodePairKey,
+  encodeListCursor,
+  encodePairKey,
+  InvalidCursorError,
+} from "./cursor";
+export {
+  createAgentMutationService,
+  createActivitySessionService,
+  isUsingProvisionalActivityWrite,
+  type AgentMutationService,
+} from "./domain-bridge";
 export { envelopeSchema, toolFailure, toolSuccess } from "./errors";
 export { IdentityError, isAgentRevoked, readAgentIdentity, type AgentIdentity } from "./identity";
 export {
@@ -24,16 +35,39 @@ export {
   MUE_MCP_SERVER_INFO,
   PRD_REQUESTED_PROTOCOL_VERSION,
 } from "./protocol";
+export {
+  CLIENT_REGISTRATION_PATH,
+  createClientRegistrationApp,
+  createPairingWindow,
+  DEFAULT_PAIRING_MINUTES,
+  MAX_PAIRING_MINUTES,
+  nativeApplicationType,
+  PAIRING_PATH,
+  type ClientRegistrationOptions,
+  type PairingState,
+  type PairingWindow,
+} from "./registration";
 export { createMcpApp, createOAuthDiscoveryApp, MCP_PATH, type McpRouteOptions } from "./route";
 export { buildMcpServer, type BuildMcpServerOptions } from "./server";
 export type {
+  ActivityStatistics,
   AgentAuditEntry,
+  AgentMutationCommand,
+  AgentMutationResult,
+  AggregateMetadata,
   CreateActivityCommand,
   CreateActivityResult,
+  ListActivitiesQuery,
+  ListActivitiesResult,
+  ListCustomExercisesQuery,
+  ListCustomExercisesResult,
   ListWeightMeasurementsQuery,
   ListWeightMeasurementsResult,
   MueMcpServices,
+  StoredAggregate,
+  SyncStatus,
   WeightMeasurementView,
+  WeightStatistics,
 } from "./services";
 export { createMueMcpServices } from "./store";
 export {

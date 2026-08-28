@@ -84,6 +84,66 @@ const STYLES = `
   button[disabled] { opacity: .55; cursor: progress; }
   [role="alert"] { color: var(--danger); }
   .quiet { font-size: .85rem; }
+
+  /* Settings -> Agents. Every selector below is scoped to a class this sheet did not
+     have before, so the sign-in and consent pages render exactly as they did. */
+  h2 { font-size: 1.15rem; line-height: 1.3; margin: 2rem 0 .6rem; }
+  h3 { font-size: 1rem; margin: 0 0 .6rem; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: .75rem;
+    padding: 1.25rem;
+    margin: 0 0 1rem;
+  }
+  section.card > h2 { margin-top: 0; }
+  ul.cards > li { margin: 0 0 1rem; }
+  /* Section 9.3: a duration is a value, so it uses tabular figures and does not
+     reflow while it counts. */
+  .countdown {
+    font-size: 2.75rem;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    margin: 0 0 .25rem;
+  }
+  /* Section 12: no status is carried by colour alone -- the badge always says the
+     word, and the colour only repeats it. */
+  .badge {
+    display: inline-block;
+    font-size: .7rem;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: .15rem .45rem;
+    border-radius: .3rem;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    vertical-align: middle;
+  }
+  .badge.revoked { color: var(--danger); border-color: var(--danger); }
+  dl { margin: 0 0 1rem; font-size: .9rem; }
+  dt { color: var(--muted); font-size: .78rem; margin: .7rem 0 .15rem; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+  .chips code { font-size: .8rem; }
+  label.inline { display: flex; align-items: center; gap: .6rem; margin: 0 0 1rem; }
+  label.inline > span { margin: 0; }
+  input[type="number"] {
+    width: 5.5rem;
+    padding: .55rem .6rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: .4rem;
+    color: var(--text);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+  }
+  button.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #1a1409;
+    font-weight: 600;
+  }
 `;
 
 export const Route = createRootRoute({

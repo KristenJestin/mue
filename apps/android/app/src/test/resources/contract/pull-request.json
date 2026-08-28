@@ -2,7 +2,28 @@
   "cursor": "eyJ2IjoxLCJzZXEiOiI5MDA3MTk5MjU0NzQwOTkzIn0",
   "limit": 100,
   "supportedSchemaVersions": {
+    "activitySession": [
+      1
+    ],
+    "customExerciseDefinition": [
+      1
+    ],
+    "food": [
+      1
+    ],
+    "foodLogEntry": [
+      1
+    ],
+    "healthProfile": [
+      1
+    ],
+    "mealPlanEntry": [
+      1
+    ],
     "measurement": [
+      1
+    ],
+    "recipe": [
       1
     ]
   }

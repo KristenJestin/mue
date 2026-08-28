@@ -49,12 +49,14 @@ import kotlinx.serialization.SerializationException
  *    request.
  * 5. **The cursor advances only after a page is applied**, in the same transaction, and never
  *    past a change this build cannot apply (PRD 12.4).
- * 6. **A send selects only what it can send.** `health_profile` is journalled at every save and
- *    `packages/contracts` has no branch for it, so those rows are `pending` and undeliverable
- *    until the contract grows one. [SyncStore.pending] filters them out *before* the window is
- *    taken, so however many of them accumulate they can never fill it and stall the measurements
- *    behind them — FR-SYNC-007's "une mutation invalide ne bloque pas indéfiniment toutes les
- *    mutations suivantes", applied to a mutation the client rather than the server cannot take.
+ * 6. **A send selects only what it can send.** The four food aggregates are journalled at
+ *    every save and `packages/contracts` has no branch for them, so those rows are `pending`
+ *    and undeliverable until the contract grows one.
+ *    [SyncStore.pending] filters them out *before* the window is taken, so however many of them
+ *    accumulate they can never fill it and stall the measurements behind them — FR-SYNC-007's
+ *    "une mutation invalide ne bloque pas indéfiniment toutes les mutations suivantes", applied
+ *    to a mutation the client rather than the server cannot take. `healthProfile` was in that
+ *    set until `AGGREGATE_TYPES` named it; it drains now, like a weight.
  *
  * ## The cursor
  *
@@ -76,11 +78,11 @@ class SyncEngine(
 ) {
 
     /**
-     * The result of the recovery started in [init] — the [Result] and not the count, so a
+     * The result of the recovery started in [init] — the [Result] and not the counts, so a
      * recovery that failed can be told apart from one that found nothing and retried in [sync]
      * instead of being latched at zero for the life of the process.
      */
-    private val recovery = CompletableDeferred<Result<Int>>()
+    private val recovery = CompletableDeferred<Result<Recovery>>()
 
     /**
      * One synchronisation at a time. `Sync now`, the periodic worker and the foreground trigger
@@ -90,8 +92,31 @@ class SyncEngine(
     private val gate = Mutex()
 
     init {
-        scope.launch { recovery.complete(runCatching { store.requeueInflight() }) }
+        scope.launch { recovery.complete(runCatching { recover() }) }
     }
+
+    /**
+     * Everything that has to happen before a send, because nothing else ever will.
+     *
+     * The two passes are here together because they answer the same question. A queue can be
+     * left in a state no future run of the application can leave on its own, and each of them is
+     * one way that happens: a process killed mid-send strands rows `inflight`, and a build that
+     * changed how a row is *written* strands the rows already written. Neither is repaired by
+     * retrying, and neither is visible as anything but a counter that will not fall.
+     *
+     * The order is not free. [SyncStore.repairUnsendableMutationIds] refuses to touch an
+     * `inflight` row — it may be on the wire under the identifier it holds — so
+     * [SyncStore.requeueInflight] runs first and hands it rows that are `pending` again. A
+     * legacy row a killed process left behind is therefore repaired in the same engine start
+     * rather than one start later.
+     */
+    private suspend fun recover(): Recovery = Recovery(
+        requeued = store.requeueInflight(),
+        repaired = store.repairUnsendableMutationIds(),
+    )
+
+    /** What [recover] did, so a run can report both numbers rather than sum them into one. */
+    private data class Recovery(val requeued: Int, val repaired: Int)
 
     /**
      * Runs one full synchronisation and reports what happened.
@@ -103,11 +128,13 @@ class SyncEngine(
      */
     suspend fun sync(): SyncOutcome = gate.withLock {
         // A recovery that failed at construction is retried here rather than latched at zero. A
-        // row left `inflight` by a killed process holds a change that exists on the phone and
-        // nowhere else, so swallowing the single attempt to unstick it would strand that change
-        // for the whole life of the process. Retrying is one `UPDATE`, and it is idempotent: its
-        // `WHERE state = 'inflight'` matches nothing once the rows are back.
-        val recovered = recovery.await().getOrElse { store.requeueInflight() }
+        // row left `inflight` by a killed process, or one carrying an identifier no server will
+        // read, holds a change that exists on the phone and nowhere else, so swallowing the
+        // single attempt to unstick it would strand that change for the whole life of the
+        // process. Both passes are idempotent — `WHERE state = 'inflight'` matches nothing once
+        // the rows are back, and a row whose identifier has been re-minted is no longer a
+        // candidate for re-minting — so retrying costs a statement and risks nothing.
+        val recovered = recovery.await().getOrElse { recover() }
 
         val serverUrl = store.serverUrl()
         val deviceId = store.deviceId()
@@ -231,7 +258,7 @@ class SyncEngine(
 
     // --- pull -------------------------------------------------------------------------------
 
-    private suspend fun pull(push: PushTally, recovered: Int): SyncOutcome {
+    private suspend fun pull(push: PushTally, recovered: Recovery): SyncOutcome {
         var pages = 0
         var changes = 0
         var hasMore = false
@@ -288,7 +315,8 @@ class SyncEngine(
         }
 
         return SyncOutcome.Completed(
-            recovered = recovered,
+            recovered = recovered.requeued,
+            repaired = recovered.repaired,
             applied = push.applied,
             duplicates = push.duplicates,
             rejected = push.rejected,
@@ -347,14 +375,24 @@ sealed interface SyncOutcome {
     data class Completed(
         /** Rows a previous process left `inflight` and this engine returned to the queue. */
         val recovered: Int,
+        /**
+         * Rows an older build wrote with an identifier `mutationIdSchema` refuses, given one it
+         * accepts at this engine's start (see [OutboxRepair]).
+         *
+         * It defaults to zero so that the ordinary case — a database with nothing wrong in it —
+         * needs no new argument anywhere, and so that a run reports the number rather than
+         * folding it into [recovered]: the two are different repairs of different damage, and a
+         * log that summed them would hide which one actually happened.
+         */
+        val repaired: Int = 0,
         val applied: Int,
         /** FR-SYNC-006 replays. A number greater than zero means a response was lost, not lost data. */
         val duplicates: Int,
         /** FR-SYNC-007. Kept, marked, and surfaced as `Sync issue`. */
         val rejected: Int,
         /**
-         * Journalled rows the contract has no wire branch for yet — the health profile of PRD
-         * 13.4. Still `pending`, never selected by a send, and blocking nothing behind them.
+         * Journalled rows the contract has no wire branch for yet — the four food aggregates of
+         * PRD 10.1. Still `pending`, never selected by a send, and blocking nothing behind them.
          */
         val deferred: Int,
         /** Outbox rows whose stored payload could not be read back. Kept and marked. */

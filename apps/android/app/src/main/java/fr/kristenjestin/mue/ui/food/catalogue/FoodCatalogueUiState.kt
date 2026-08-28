@@ -70,6 +70,15 @@ data class FoodRowUiState(
 
     val hasFigures: Boolean get() = figures.isNotEmpty()
 
+    /**
+     * The one line under the name: the prototype's `(brand||source)`.
+     *
+     * Kept as `brand · source` where the prototype chooses between the two, because
+     * FR-CATALOG-004 asks every food to say where it came from and a branded product printing
+     * only `Demo brand` would have stopped saying it was scanned.
+     */
+    val metaLabel: String get() = listOfNotNull(brand, sourceLabel).joinToString(META_SEPARATOR)
+
     companion object {
 
         fun of(food: Food, showEnergy: Boolean = true): FoodRowUiState {
@@ -106,6 +115,9 @@ data class FoodRowUiState(
         }
     }
 }
+
+/** The prototype's `·` between a brand and its provenance. */
+private const val META_SEPARATOR: String = " · "
 
 /**
  * The `Foods` view (PRD_FOOD 7 and 9.4): one search bar, one source filter, one list.

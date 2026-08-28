@@ -40,14 +40,26 @@ internal object FoodTestTags {
     /** PRD_FOOD 22 and 12: what a day still to come says about itself. */
     const val FUTURE_DAY: String = "food:futureDay"
 
-    /** One of the four moments, always present whether it holds anything or not. */
+    /** PRD_FOOD 17: the one line a day with neither an entry nor a proposal draws. */
+    const val DAY_EMPTY: String = "food:dayEmpty"
+
+    /** One of the six moments, drawn when it holds a line or a proposal and not before. */
     fun slot(slot: MealSlot): String = "food:slot:${slot.id}"
 
     /** A moment's own total, which PRD_FOOD 10.1 only shows once it holds a line. */
     fun slotTotal(slot: MealSlot): String = "food:slotTotal:${slot.id}"
 
-    /** The add action inside a moment, which PRD_FOOD 10.1 keeps present at all times. */
-    fun addToSlot(slot: MealSlot): String = "food:addToSlot:${slot.id}"
+    /**
+     * The day's one add action, pinned at the foot of the screen.
+     *
+     * It replaces the six `addToSlot(slot)` handles this file used to publish. That is the
+     * owner's instruction over PRD_FOOD 10.1's "toujours présent" — and it is the same handle
+     * shape `CREATE_FOOD` and `CREATE_RECIPE` already have on the other two views, because it is
+     * now the same control in the same place. **No moment is named**, here or on the tap: the
+     * hour decides it on the sheet (FR-FOOD-007), which is exactly what a per-moment `+` was
+     * overriding.
+     */
+    const val ADD_TO_DAY: String = "food:addToDay"
 
     /** One journal line, in any of PRD_FOOD 10.2's three forms. */
     fun logEntry(entryId: String): String = "food:logEntry:$entryId"
@@ -65,8 +77,18 @@ internal object FoodTestTags {
 
     fun dismissPlan(slot: MealSlot): String = "food:dismissPlan:${slot.id}"
 
-    const val SWAP_SHEET: String = "food:swapSheet"
-    const val SWAP_SEARCH: String = "food:swapSearch"
+    /**
+     * FR-PLAN-001's confirmation, and the control that answers it.
+     *
+     * They replace `SWAP_SHEET` and `SWAP_SEARCH`, which named a screen that never existed:
+     * `FoodRoute.Swap` drew a wordless empty `Box`. Replacing a proposal is now the same sheet as
+     * posing one, so what needed a handle was the question asked before a row is overwritten.
+     */
+    const val REPLACE_PLAN_DIALOG: String = "food:replacePlanDialog"
+    const val REPLACE_PLAN_CONFIRM: String = "food:replacePlanConfirm"
+
+    /** PRD_FOOD 8.5, stated once on the planning sheet: only a recipe can be proposed. */
+    const val PLAN_ONLY_RECIPES: String = "food:planOnlyRecipes"
 
     // endregion
 
@@ -103,8 +125,14 @@ internal object FoodTestTags {
     const val SCANNER_PREVIEW: String = "food:scannerPreview"
     const val BARCODE_FIELD: String = "food:barcodeField"
 
-    /** The step back to the four paths, from whichever one was taken (PRD_FOOD 7). */
-    const val ADD_BACK_TO_PATHS: String = "food:addBackToPaths"
+    /**
+     * FR-FOOD-004: the recipe a line is being built from, on the sheet.
+     *
+     * Its own name rather than [LOG_RECIPE]'s, which belongs to a different control on a
+     * different screen — the action PRD_FOOD 11 puts on a recipe's own card. This one is the
+     * chosen recipe, and what it does when tapped is open the picker again.
+     */
+    const val CHOSEN_RECIPE: String = "food:chosenRecipe"
 
     const val QUICK_NAME_FIELD: String = "food:quickNameField"
     const val QUICK_ENERGY_FIELD: String = "food:quickEnergyField"
@@ -113,7 +141,17 @@ internal object FoodTestTags {
     const val QUANTITY_FIELD: String = "food:quantityField"
     const val UNIT_PICKER: String = "food:unitPicker"
     const val SERVINGS_STEPPER: String = "food:servingsStepper"
+    /**
+     * The moment, which is **derived and not asked for** (FR-FOOD-007).
+     *
+     * [SLOT_FIELD] is the one quiet line the sheet draws for it: what the hour decided, and the
+     * way to overrule it. [SLOT_PICKER] is the list of moments inside the panel that line opens,
+     * which is where the choosing now happens — it used to be a grid of tiles on the form itself,
+     * asking for a fact the hour beside it had already given.
+     */
+    const val SLOT_FIELD: String = "food:slotField"
     const val SLOT_PICKER: String = "food:slotPicker"
+    const val SLOT_SHEET: String = "food:slotSheet"
     const val TIME_FIELD: String = "food:timeField"
 
     /** PRD_FOOD 10.3: what the sheet says when the hour and the moment disagree. */
@@ -136,7 +174,25 @@ internal object FoodTestTags {
 
     fun favouriteRecipe(recipeId: String): String = "food:favouriteRecipe:$recipeId"
 
+    /**
+     * FR-FOOD-004's picker: the recipe a line is built from, chosen over the `Add food` sheet.
+     *
+     * Its own handle rather than [RECIPE_LIST]'s, because it is not the `Recipes` view: it has no
+     * switcher, no bottom action and no favourites, and a test that could not tell the two apart
+     * would pass on the very confusion this screen exists to end.
+     */
+    const val RECIPE_PICKER: String = "food:recipePicker"
+
     const val RECIPE_DETAIL: String = "food:recipeDetail"
+
+    /**
+     * The facts block, which is the first thing the card draws.
+     *
+     * It exists so `FoodSubScreenHeaderTest` can measure where the content column actually
+     * begins — the one assertion that cannot be made from a string, because a control faded to
+     * nothing is still in the semantics tree with all of its text.
+     */
+    const val RECIPE_FACTS: String = "food:recipeFacts"
     const val RECIPE_SERVINGS: String = "food:recipeServings"
     const val RECIPE_PER_SERVING: String = "food:recipePerServing"
     const val LOG_RECIPE: String = "food:logRecipe"
@@ -184,11 +240,11 @@ internal object FoodTestTags {
 
     // endregion
 
-    // region preferences (PRD_FOOD 6.7 and FR-FOOD-010)
-
-    const val PREFERENCES: String = "food:preferences"
-    const val OPEN_PREFERENCES: String = "food:openPreferences"
-    const val HIDE_ENERGY_TOGGLE: String = "food:hideEnergyToggle"
-
-    // endregion
+    /*
+     * The preferences region that used to close this file is gone, along with the screen and the
+     * button it handled. `Food preferences` is a `Profile` screen now (PRD_FOOD 6.7 is satisfied
+     * either way — it asks that the options live in the preferences, not that they live here), so
+     * its three handles moved to `ProfileTestTags` with the nodes they name. A tag belongs to
+     * whoever draws the node.
+     */
 }

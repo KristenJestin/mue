@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.ui.food.catalogue
+package fr.kristenjestin.mue.ui.profile
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** What the module's preferences sheet draws (PRD_FOOD 13.2, FR-FOOD-010). */
+/** What `Food preferences` draws (PRD_FOOD 13.2, FR-FOOD-010). */
 @Immutable
 data class FoodPreferencesUiState(
     val showEnergy: Boolean = UserPreferences.DEFAULT.showEnergy,
@@ -30,6 +30,11 @@ data class FoodPreferencesUiState(
  * It goes through [UserPreferencesRepository] rather than through a store of its own, beside
  * `hapticsEnabled` and with a setter of its own — so two screens writing two different
  * preferences can never overwrite one another's field.
+ *
+ * That repository is what let the screen change tabs without changing a line of its wiring:
+ * nothing here was ever Food's. `ProfileViewModel` reads the same file for `hapticsEnabled`, and
+ * the two are now neighbours in the same package for the first time — which is also why
+ * `FoodPreferencesScreen` could finally drop its private copy of `ProfileSwitchRow`.
  *
  * The initial value is `true`, which is [UserPreferences.DEFAULT]. `rememberTimerHaptics` starts
  * its own flag at `false` on the argument that a phone which buzzes against the owner's wishes is

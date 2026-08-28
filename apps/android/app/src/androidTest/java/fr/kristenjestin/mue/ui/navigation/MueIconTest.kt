@@ -200,7 +200,7 @@ class MueIconTest {
     }
 
     /**
-     * PRD_FOOD 19: the four moments are told apart by their glyph, and so is every provenance.
+     * PRD_FOOD 19: the six moments are told apart by their glyph, and so is every provenance.
      *
      * Two moments sharing a vector would leave the day screen reading as one repeated heading —
      * the same failure `onlyTheOtherMovementFallsBackOnTheGenericGlyph` guards for the Activity

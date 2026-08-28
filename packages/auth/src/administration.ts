@@ -59,10 +59,30 @@ export async function revokeSession(handle: DatabaseHandle, sessionId: string): 
 export interface AgentSummary {
   readonly clientId: string;
   readonly name: string | null;
+  /**
+   * What the client is *registered* for -- the scopes it is allowed to ask for.
+   *
+   * Better Auth writes the server's whole allowed set here on a dynamic registration,
+   * whatever the client put in its `scope` field, so this is close to a constant and
+   * is emphatically not a list of permissions anyone granted. Read
+   * {@link AgentSummary.grantedScopes} for that.
+   */
   readonly scopes: readonly string[];
+  /**
+   * What the owner actually approved on the consent page, and therefore what the
+   * agent holds. Empty for a client that registered and was never authorised, and
+   * empty again after {@link revokeAgent}, which drops the consent row.
+   */
+  readonly grantedScopes: readonly string[];
   readonly disabled: boolean;
   /** Discovered through a Client ID Metadata Document rather than registered. */
   readonly discovered: boolean;
+  /**
+   * When the client row was written -- that is, when the owner's pairing window let
+   * this agent register. Better Auth leaves the column nullable, so a row created by
+   * a path that did not stamp it reads as unknown rather than as the epoch.
+   */
+  readonly registeredAt: Date | null;
   readonly lastUsedAt: Date | null;
 }
 
@@ -76,6 +96,26 @@ export async function listAgents(handle: DatabaseHandle): Promise<AgentSummary[]
     .groupBy(oauthAccessToken.clientId)
     .as("last_use");
 
+  /**
+   * The consents, gathered separately and joined in memory.
+   *
+   * A `left join` would multiply the client rows by their consents -- one per user,
+   * and the account model allows more than one -- and folding an array column back
+   * together across those duplicates needs `unnest` and `array_agg`. This server
+   * holds a handful of clients, so the second round trip is cheaper than the SQL it
+   * replaces, and this way `grantedScopes` is plainly the union of the consents.
+   */
+  const consents = await handle.db
+    .select({ clientId: oauthConsent.clientId, scopes: oauthConsent.scopes })
+    .from(oauthConsent);
+
+  const granted = new Map<string, Set<string>>();
+  for (const consent of consents) {
+    const scopes = granted.get(consent.clientId) ?? new Set<string>();
+    for (const scope of consent.scopes) scopes.add(scope);
+    granted.set(consent.clientId, scopes);
+  }
+
   const rows = await handle.db
     .select({
       clientId: oauthClient.clientId,
@@ -83,6 +123,7 @@ export async function listAgents(handle: DatabaseHandle): Promise<AgentSummary[]
       scopes: oauthClient.scopes,
       disabled: oauthClient.disabled,
       discoveryId: oauthClient.clientDiscoveryId,
+      registeredAt: oauthClient.createdAt,
       lastUsedAt: lastUse.lastUsedAt,
     })
     .from(oauthClient)
@@ -93,8 +134,10 @@ export async function listAgents(handle: DatabaseHandle): Promise<AgentSummary[]
     clientId: row.clientId,
     name: row.name,
     scopes: row.scopes ?? [],
+    grantedScopes: [...(granted.get(row.clientId) ?? [])],
     disabled: row.disabled === true,
     discovered: row.discoveryId !== null,
+    registeredAt: row.registeredAt,
     lastUsedAt: row.lastUsedAt === null ? null : new Date(row.lastUsedAt),
   }));
 }

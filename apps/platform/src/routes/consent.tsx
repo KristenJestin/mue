@@ -10,6 +10,11 @@ import { useEffect, useMemo, useState } from "react";
  * and hands the same signed query back. The signature is what makes that safe -- a
  * tampered `scope` or `redirect_uri` fails verification on the server.
  *
+ * Those are two different strings, and this file keeps them apart on purpose. What is
+ * *displayed* is read from the router, the only source both halves of a server-rendered
+ * page agree on. What is *handed back* is read from the address bar, because the router
+ * cannot carry it -- see {@link signedOAuthQuery}.
+ *
  * The file is named for the route it serves. `readAuthConfig().consentPage` defaults to
  * `/consent`, so with file-based routing the default configuration now resolves to a
  * page that exists; `MUE_CONSENT_PAGE` only has to be set to move it somewhere else.
@@ -61,10 +66,15 @@ export interface ConsentRequest {
   readonly clientName: string;
   readonly scopes: readonly string[];
   readonly resource: string | null;
-  /** The signed query, handed back verbatim. */
-  readonly oauthQuery: string;
 }
 
+/**
+ * What to show the owner: derived, lossy, and sent nowhere.
+ *
+ * It deliberately no longer carries the query to hand back. It used to, taken from the
+ * same string, and that is precisely how this page came to fail verification: the string
+ * it is given is the router's, and the router's is not the server's.
+ */
 export function readConsentRequest(search: string): ConsentRequest | null {
   const params = new URLSearchParams(search);
   const clientId = params.get("client_id");
@@ -78,8 +88,47 @@ export function readConsentRequest(search: string): ConsentRequest | null {
     clientName: clientId,
     scopes,
     resource: params.get("resource"),
-    oauthQuery: search.replace(/^\?/, ""),
   };
+}
+
+/**
+ * The signed query to hand back: the address bar, byte for byte.
+ *
+ * `useRouterState().location.searchStr` is *not* the query the server sent. TanStack
+ * Router computes it, in `parseLocation`, as
+ *
+ *     stringifySearch(parseSearch(search))
+ *
+ * -- it parses the query into a plain object and serialises that object back out. The
+ * default pair is lossy in two ways this particular query trips over
+ * (`@tanstack/router-core`, `src/qss.ts` and `src/searchParams.ts`):
+ *
+ *  - `decode` collects a repeated key into an array, and `encode` writes every key
+ *    exactly once, with `URLSearchParams.set` and a JSON value. This query repeats one:
+ *    `setSignedOAuthQueryParameterNames` appends `ba_param` once per signed parameter
+ *    name, so the eleven `ba_param=ba_iat&ba_param=client_id&...` the server sent come
+ *    back as a single `ba_param=["ba_iat","client_id",...]`;
+ *  - `parseSearchWith(JSON.parse)` replaces any value that happens to be valid JSON with
+ *    what it parses to, so a `state` of `12e5` would return as `1200000`.
+ *
+ * `verifyOAuthQueryParams` sorts what comes back, re-signs it and compares. Ordering and
+ * percent-encoding are therefore free -- both sides end at `URLSearchParams.toString()`,
+ * so `%20` against `+` and `%3A` against `:` all survive -- but a key that arrived eleven
+ * times and left once is a different message, and the answer is `invalid_signature`,
+ * rendered in red under the Allow button.
+ *
+ * The address bar has no opinion to impose: it holds the bytes the 302 put there. Nothing
+ * rewrites it, because TanStack touches history only in `commitLocation`, which runs on a
+ * navigation and never on the load that brought the owner here.
+ *
+ * `addressBar` is a parameter rather than a read of `window` buried in the body, so that
+ * a test can hand one in. The page leaves it out: there is no `window` while the page is
+ * server-rendered, and no submission there either, so the router's own string is returned
+ * in that case as a value nothing displays and nobody posts.
+ */
+export function signedOAuthQuery(routerSearch: string, addressBar?: string): string {
+  const raw = addressBar ?? (typeof window === "undefined" ? routerSearch : window.location.search);
+  return raw.replace(/^\?/, "");
 }
 
 async function loadClientName(clientId: string): Promise<string | null> {
@@ -99,7 +148,7 @@ async function loadClientName(clientId: string): Promise<string | null> {
 }
 
 async function decide(
-  request: ConsentRequest,
+  oauthQuery: string,
   accept: boolean,
   grantedScopes: readonly string[],
 ): Promise<string> {
@@ -112,7 +161,7 @@ async function decide(
       // Sent only on acceptance: on a refusal there is nothing to narrow, and Better
       // Auth rejects a scope that was not originally requested.
       ...(accept ? { scope: grantedScopes.join(" ") } : {}),
-      oauth_query: request.oauthQuery,
+      oauth_query: oauthQuery,
     }),
   });
 
@@ -159,7 +208,9 @@ export function OAuthConsentPage(): React.ReactElement {
   const submit = (accept: boolean) => {
     setBusy(true);
     setProblem(null);
-    decide(request, accept, granted)
+    // Read here rather than during render: a submission only ever happens in a browser,
+    // which is the one place the address bar is both present and still untouched.
+    decide(signedOAuthQuery(searchStr), accept, granted)
       .then((url) => {
         window.location.assign(url);
       })

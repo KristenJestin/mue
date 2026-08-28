@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only. This file lives in `app/src/debug/`, is referenced by a manifest that
+  lives in `app/src/debug/` too, and neither is compiled into `release` — check the merged
+  release manifest, not this comment: `app/build/intermediates/merged_manifests/release/`.
+
+  Since Android 7 (API 24) an application ignores every certificate authority the phone's
+  owner installed himself unless it says otherwise here. That default is right for a
+  shipped app and this file does not change it for one.
+
+  What it buys: PRD_SERVER_SYNC_MCP 16 admits nothing but HTTPS, and `ServerAddresses.parse`
+  enforces it before a socket is opened — `http://` is refused by name, with no exception
+  for loopback and none for a private address range. So a Mue Platform running on a PC at
+  192.168.1.100 has to present a real certificate, and no public authority will ever issue
+  one for an address on somebody's home WiFi. The way out is a certificate authority that
+  exists only on that network (`scripts/dev-tls-cert.ts` at the repository root), installed
+  on the phone by hand, and an application build that agrees to look at it.
+
+  `cleartextTrafficPermitted="false"` is stated rather than left to the platform default.
+  It is already false from API 28 onward, but this app runs from API 26, and the point of
+  the file is to widen who may vouch for a certificate — not to stop requiring one. Written
+  here, a debug build over-the-air is held to section 16 on Android 8 as well.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- The platform store, unchanged: every public authority still applies. -->
+            <certificates src="system" />
+            <!--
+              And, in a debug build, whatever the owner installed under Settings → Security →
+              Encryption & credentials → Install a certificate → CA certificate. Nothing is
+              trusted that the person holding the phone did not put there himself.
+
+              `AcceptsUserCertificates` is suppressed because its message is, here, false: it
+              says "in the release version of your app", and lint says it of every occurrence
+              it meets because it analyses a variant and not a source set. This file is in
+              `src/debug/`. The release APK's binary manifest carries no `networkSecurityConfig`
+              attribute at all — `aapt2 dump xmltree app-release-unsigned.apk` over
+              `AndroidManifest.xml` lists eleven attributes on `<application>` and `0x01010527`
+              is not among them — and `lintVitalRelease` passes on that variant with nothing to
+              say. Left unsuppressed, the warning would be a permanent false alarm on a build
+              everyone looks at, which is how a real one later gets scrolled past.
+            -->
+            <certificates src="user" tools:ignore="AcceptsUserCertificates" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

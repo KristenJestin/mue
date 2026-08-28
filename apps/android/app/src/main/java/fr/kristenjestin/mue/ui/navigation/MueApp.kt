@@ -18,7 +18,10 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.kristenjestin.mue.data.sync.SyncScheduler
 import fr.kristenjestin.mue.timer.TimerIntents
 import fr.kristenjestin.mue.timer.TimerLaunch
 import fr.kristenjestin.mue.timer.TimerNotifications
@@ -82,6 +85,18 @@ fun MueApp() {
     LaunchedEffect(timerState.isLoading, timerState.timer?.id, timerState.timer?.status) {
         if (!timerState.isLoading) TimerNotifications.refresh(context)
     }
+
+    /*
+     * Sync PRD 9.4's "au retour au premier plan", the one trigger of its six that had nowhere to
+     * live: `MueApplication` covers the app start and `SyncScheduler` the period, but a process
+     * kept alive for a day and brought back from the launcher fires neither.
+     *
+     * It enqueues rather than synchronises. The unique work is `REPLACE`d, so the first
+     * composition firing this alongside the application start costs nothing but the newer of two
+     * identical requests, and a phone with no server paired enqueues work that returns
+     * `NotPaired` and succeeds (PRD 21).
+     */
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { SyncScheduler.syncNow(context) }
 
     // PRD 6.5: where a notification tap actually lands. `MainActivity` can deliver the intent
     // but not navigate; it posts here, and this is the only place that consumes it.

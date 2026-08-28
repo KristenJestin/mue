@@ -1,7 +1,5 @@
 package fr.kristenjestin.mue.ui.food.recipes
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,14 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -36,6 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.kristenjestin.mue.domain.model.RecipeId
+import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueDivider
 import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MueIcons
@@ -43,6 +37,7 @@ import fr.kristenjestin.mue.ui.components.MuePreviewHost
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
 import fr.kristenjestin.mue.ui.components.MueSplitRow
+import fr.kristenjestin.mue.ui.components.MueStepper
 import fr.kristenjestin.mue.ui.components.MueStickyActionRamp
 import fr.kristenjestin.mue.ui.components.MueStickyBottomAction
 import fr.kristenjestin.mue.ui.components.MueSubScreenScaffold
@@ -50,13 +45,9 @@ import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.food.FoodTestTags
 import fr.kristenjestin.mue.ui.food.day.announcedAs
-import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueTheme
 
 private val BackIconSize: Dp = 18.dp
-
-/** How far a disabled servings step fades — visible, plainly inert, as on the `Day` header. */
-private const val DisabledStepAlpha = 0.2f
 
 /**
  * The card of one recipe (PRD_FOOD 11), wired to the saved recipes and the catalogue.
@@ -160,7 +151,10 @@ internal fun RecipeDetailScreen(
                     // viewport ends above the solid block, and the ramp draws over live content.
                     .padding(bottom = (actionHeight - MueStickyActionRamp).coerceAtLeast(0.dp))
                     .verticalScroll(scroll)
-                    .padding(bottom = MueStickyActionRamp),
+                    // The header's ramp, reserved inside the scroll exactly as the band's is
+                    // below it: at rest nothing sits under the title, and once the card moves
+                    // the ramp dissolves what leaves.
+                    .padding(top = MueContentTopFade, bottom = MueStickyActionRamp),
                 verticalArrangement = Arrangement.spacedBy(spacing.lg),
             ) {
                 if (state.isMissing) {
@@ -217,9 +211,9 @@ private fun MissingRecipe() {
 @Composable
 private fun RecipeFacts(state: RecipeDetailUiState) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = MueTheme.spacing.md),
+        // No top padding of its own: the scroll now reserves the header's ramp for every child,
+        // and a second gap here would sit the facts a line and a half below the title.
+        modifier = Modifier.fillMaxWidth().testTag(FoodTestTags.RECIPE_FACTS),
         verticalArrangement = Arrangement.spacedBy(MueTheme.spacing.xs),
     ) {
         RecipeFactRow(facts = state.facts)
@@ -236,6 +230,12 @@ private fun RecipeFacts(state: RecipeDetailUiState) {
  * The count changes what is *shown* and never what is stored. Both ends of the range are
  * PRD_FOOD 15's, asked of `FoodValidation` in [RecipeDetailUiState.stepped] rather than restated
  * here, and a step that would leave the range simply disables its control.
+ *
+ * The shared [MueStepper], as everywhere a count is entered. It used to be a pair of mirrored
+ * chevrons — a `chevron-left` the app had never imported, drawn by reflecting the right-hand one
+ * — and it is now the same `−` and `+` as the add sheet's two counters. The card that
+ * [MueStepper] draws for itself replaces the `MueSurfaceCard` this used to sit in, so the control
+ * is one box rather than a box inside a box.
  */
 @Composable
 private fun ServingsChooser(
@@ -243,88 +243,19 @@ private fun ServingsChooser(
     onFewer: () -> Unit,
     onMore: () -> Unit,
 ) {
-    MueSurfaceCard(shape = MueTheme.shapes.field, contentPadding = PaddingValues(MueTheme.spacing.md)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.md),
-        ) {
-            StepButton(
-                iconName = MueIcons.CHEVRON_RIGHT,
-                label = RecipeMessages.FEWER_SERVINGS,
-                enabled = state.canRemoveServing,
-                mirrored = true,
-                testTag = RecipeTestTags.FEWER_SERVINGS,
-                onClick = onFewer,
-            )
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .announcedAs("${RecipeMessages.SERVINGS}, ${state.servingsLabel}"),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                MueText(
-                    text = RecipeMessages.SERVINGS,
-                    style = MueTheme.typography.label,
-                    color = MueTheme.colors.textTertiary,
-                )
-                MueText(
-                    text = state.servingsLabel,
-                    style = MueTheme.typography.bodyStrong,
-                    modifier = Modifier.testTag(FoodTestTags.RECIPE_SERVINGS),
-                )
-            }
-
-            StepButton(
-                iconName = MueIcons.CHEVRON_RIGHT,
-                label = RecipeMessages.MORE_SERVINGS,
-                enabled = state.canAddServing,
-                mirrored = false,
-                testTag = RecipeTestTags.MORE_SERVINGS,
-                onClick = onMore,
-            )
-        }
-    }
-}
-
-/**
- * One step of the servings counter.
- *
- * `chevron-left` is the one Lucide glyph the app has never imported and a drawable is not this
- * screen's to add, so the right-hand chevron is mirrored — the same answer `Day` gave, and a
- * stroked chevron is symmetrical about its own axis so the reflection is the missing vector.
- */
-@Composable
-private fun StepButton(
-    iconName: String,
-    label: String,
-    enabled: Boolean,
-    mirrored: Boolean,
-    testTag: String,
-    onClick: () -> Unit,
-) {
-    val colors = MueTheme.colors
-    Box(
-        modifier = Modifier
-            .size(MueMinTouchTarget)
-            .clip(MueTheme.shapes.field)
-            .background(colors.surfaceStrong)
-            .alpha(if (enabled) 1f else DisabledStepAlpha)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .testTag(testTag),
-        contentAlignment = Alignment.Center,
-    ) {
-        MueIcon(
-            iconName = iconName,
-            contentDescription = label,
-            tint = colors.textSecondary,
-            size = 18.dp,
-            // A stroked chevron is symmetrical about its own axis, so the reflection is the
-            // very shape the `chevron-left` nobody imported would have drawn.
-            modifier = if (mirrored) Modifier.graphicsLayer { scaleX = -1f } else Modifier,
-        )
-    }
+    MueStepper(
+        label = RecipeMessages.SERVINGS,
+        value = state.servingsLabel,
+        onDecrement = onFewer,
+        onIncrement = onMore,
+        decrementLabel = RecipeMessages.FEWER_SERVINGS,
+        incrementLabel = RecipeMessages.MORE_SERVINGS,
+        canDecrement = state.canRemoveServing,
+        canIncrement = state.canAddServing,
+        valueTestTag = FoodTestTags.RECIPE_SERVINGS,
+        decrementTestTag = RecipeTestTags.FEWER_SERVINGS,
+        incrementTestTag = RecipeTestTags.MORE_SERVINGS,
+    )
 }
 
 /**

@@ -184,7 +184,9 @@ describe("FR-SYNC-007 — a partial failure", () => {
       upsert("2026-08-10", 7000),
       upsert("2026-08-11", 999_999),
       upsert("2026-08-12", 7100),
-      { ...upsert("2026-08-13", 7200), aggregateType: "recipe" },
+      // Not `recipe`: that used to be a type this server did not synchronise, and it is now one
+      // of the eight. An aggregate the matrix has never named is what this branch is about.
+      { ...upsert("2026-08-13", 7200), aggregateType: "sleepSession" },
       upsert("2026-08-14", 7300),
     ]);
 
@@ -292,7 +294,7 @@ describe("section 12.4 — a payload version the peer did not declare", () => {
 
 describe("section 12.3 — the cursor", () => {
   test("pages, reports hasMore and resumes exactly where it stopped", async () => {
-    const dates = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"];
+    const dates = ["2025-09-01", "2025-09-02", "2025-09-03", "2025-09-04", "2025-09-05"];
     await submitMutations(
       handle,
       context,
@@ -326,8 +328,8 @@ describe("section 12.3 — the cursor", () => {
   });
 
   test("carries the metadata the phone stores, and a payload snapshot", async () => {
-    await submitMutations(handle, context, [upsert("2026-09-10", 7000)]);
-    await submitMutations(handle, context, [upsert("2026-09-10", 7500)]);
+    await submitMutations(handle, context, [upsert("2025-09-10", 7000)]);
+    await submitMutations(handle, context, [upsert("2025-09-10", 7500)]);
 
     const result = page(await pull(null));
     expect(result.changes).toHaveLength(2);
@@ -336,8 +338,8 @@ describe("section 12.3 — the cursor", () => {
 
     // The journal keeps what was accepted, not a pointer to today's row: the
     // replaced version stays auditable (sections 13.1 and 13.2).
-    expect(older.payload).toEqual({ date: "2026-09-10", weightCg: 7000 });
-    expect(newer.payload).toEqual({ date: "2026-09-10", weightCg: 7500 });
+    expect(older.payload).toEqual({ date: "2025-09-10", weightCg: 7000 });
+    expect(newer.payload).toEqual({ date: "2025-09-10", weightCg: 7500 });
     expect(older.meta.revision).toBe("1");
     expect(newer.meta.revision).toBe("2");
     expect(older.meta.createdAt).toBe(newer.meta.createdAt);
@@ -352,24 +354,24 @@ describe("section 12.3 — the cursor", () => {
 describe("FR-SYNC-005 — deletions", () => {
   test("writes a tombstone and refuses an offline resurrection", async () => {
     const created = accepted(
-      at((await submitMutations(handle, context, [upsert("2026-10-01", 7000)])).results, 0),
+      at((await submitMutations(handle, context, [upsert("2025-10-01", 7000)])).results, 0),
     );
     const deleted = accepted(
       at(
-        (await submitMutations(handle, context, [remove("2026-10-01", created.revision)])).results,
+        (await submitMutations(handle, context, [remove("2025-10-01", created.revision)])).results,
         0,
       ),
     );
     expect(deleted.revision).toBe("2");
 
-    const stale = await submitMutations(handle, context, [upsert("2026-10-01", 6900)]);
+    const stale = await submitMutations(handle, context, [upsert("2025-10-01", 6900)]);
     const error = refused(at(stale.results, 0));
     expect(error.code).toBe("sync.aggregate_deleted");
     expect(error.currentRevision).toBe("2");
 
     // A restoration is an explicit mutation based on the current tombstone.
     const restored = await submitMutations(handle, context, [
-      upsert("2026-10-01", 6900, { baseRevision: "2" }),
+      upsert("2025-10-01", 6900, { baseRevision: "2" }),
     ]);
     expect(accepted(at(restored.results, 0)).revision).toBe("3");
 
@@ -380,7 +382,7 @@ describe("FR-SYNC-005 — deletions", () => {
   });
 
   test("accepts a delete for a date the server never received", async () => {
-    const response = await submitMutations(handle, context, [remove("2026-10-05", null)]);
+    const response = await submitMutations(handle, context, [remove("2025-10-05", null)]);
     expect(accepted(at(response.results, 0)).revision).toBe("1");
     const changes = page(await pull(null)).changes;
     expect(changes).toHaveLength(1);
@@ -393,16 +395,16 @@ describe("FR-SYNC-005 — deletions", () => {
 
 describe("section 13.2 — one measurement per date", () => {
   test("replaces the value and keeps the replaced one in the journal", async () => {
-    await submitMutations(handle, context, [upsert("2026-11-01", 7000)]);
+    await submitMutations(handle, context, [upsert("2025-11-01", 7000)]);
     await submitMutations(handle, context, [
-      upsert("2026-11-01", 7300, { origin: { type: "agent", id: "agent-under-test" } }),
+      upsert("2025-11-01", 7300, { origin: { type: "agent", id: "agent-under-test" } }),
     ]);
 
-    expect(await rowsFor("2026-11-01")).toBe(1);
+    expect(await rowsFor("2025-11-01")).toBe(1);
     const rows = await handle.db
       .select({ weightCg: measurements.weightCg, revision: measurements.revision })
       .from(measurements)
-      .where(and(eq(measurements.userId, USER), eq(measurements.date, "2026-11-01")));
+      .where(and(eq(measurements.userId, USER), eq(measurements.date, "2025-11-01")));
     expect(rows[0]).toEqual({ weightCg: 7300, revision: 2n });
     expect(await journalLength()).toBe(2);
   });
@@ -413,13 +415,13 @@ describe("FR-SYNC-008 — the age of the last Android state", () => {
     expect(await readLastAndroidSyncAt(handle, context)).toBeNull();
 
     await submitMutations(handle, context, [
-      upsert("2026-12-01", 7000, { origin: { type: "agent", id: "agent-under-test" } }),
+      upsert("2025-12-01", 7000, { origin: { type: "agent", id: "agent-under-test" } }),
     ]);
     // An agent's write is not a phone synchronising, so it must not be read as one.
     expect(await readLastAndroidSyncAt(handle, context)).toBeNull();
     expect(page(await pull(null)).lastAndroidSyncAt).toBeNull();
 
-    await submitMutations(handle, context, [upsert("2026-12-02", 7100)]);
+    await submitMutations(handle, context, [upsert("2025-12-02", 7100)]);
     const seen = page(await pull(null)).lastAndroidSyncAt;
     expect(seen).not.toBeNull();
     expect(Date.parse(String(seen))).toBeLessThanOrEqual(Date.now() + 1000);
@@ -429,12 +431,12 @@ describe("FR-SYNC-008 — the age of the last Android state", () => {
 describe("ordering under concurrency", () => {
   test("assigns consecutive sequences to overlapping pushes", async () => {
     const dates = [
-      "2027-01-01",
-      "2027-01-02",
-      "2027-01-03",
-      "2027-01-04",
-      "2027-01-05",
-      "2027-01-06",
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+      "2026-01-05",
+      "2026-01-06",
     ];
     const responses = await Promise.all(
       dates.map((date, index) =>
@@ -449,7 +451,7 @@ describe("ordering under concurrency", () => {
   });
 
   test("never shows a sequence before its predecessor is visible", async () => {
-    const dates = Array.from({ length: 8 }, (_, index) => `2027-02-0${index + 1}`);
+    const dates = Array.from({ length: 8 }, (_, index) => `2026-02-0${index + 1}`);
 
     const holes: string[] = [];
     let reading = true;
@@ -477,7 +479,7 @@ describe("ordering under concurrency", () => {
   });
 
   test("keeps one mutation_log row for a mutation pushed twice at once", async () => {
-    const mutation = upsert("2027-03-01", 7000);
+    const mutation = upsert("2026-03-01", 7000);
     const [left, right] = await Promise.all([
       submitMutations(handle, context, [mutation]),
       submitMutations(handle, context, [mutation]),

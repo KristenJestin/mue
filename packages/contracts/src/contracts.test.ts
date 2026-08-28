@@ -3,6 +3,12 @@ import type { ZodType } from "zod";
 import { cursorPayloadSchema, cursorSchema } from "./cursor";
 import { mueErrorSchema } from "./errors";
 import { CONTRACT_FIXTURES } from "./fixtures";
+import {
+  HEALTH_PROFILE_AGGREGATE_ID,
+  HEIGHT_MAX_CM,
+  HEIGHT_MIN_CM,
+  healthProfilePayloadV1Schema,
+} from "./health-profile";
 import { measurementPayloadV1Schema } from "./measurement";
 import { aggregateMetaSchema } from "./meta";
 import { mutationEnvelopeSchema, syncChangeSchema } from "./mutation";
@@ -103,6 +109,68 @@ describe("measurement payload v1", () => {
   });
 });
 
+/**
+ * The health profile's rules, fed real values.
+ *
+ * That is the point of this block rather than a style. `SyncOutbox` once minted a UUIDv4 where
+ * `mutationIdSchema` says `z.uuidv7()`, every push a phone made came back
+ * `sync.invalid_payload`, and the Android drift detector could not see it — it compares
+ * *shapes*, and a v4 and a v7 have the same shape. So every constraint below that narrows a
+ * value rather than its type is exercised with a value that is really at the boundary, on both
+ * sides of it.
+ */
+describe("health profile payload v1", () => {
+  test("accepts the owner's own profile, the one his phone could not send", () => {
+    expectRoundTrip(healthProfilePayloadV1Schema, { heightCm: 171, birthDate: "1998-11-18" });
+  });
+
+  test("accepts both height bounds and refuses the centimetre outside each", () => {
+    expectRoundTrip(healthProfilePayloadV1Schema, {
+      heightCm: HEIGHT_MIN_CM,
+      birthDate: null,
+    });
+    expectRoundTrip(healthProfilePayloadV1Schema, {
+      heightCm: HEIGHT_MAX_CM,
+      birthDate: null,
+    });
+    for (const heightCm of [HEIGHT_MIN_CM - 1, HEIGHT_MAX_CM + 1]) {
+      expect(healthProfilePayloadV1Schema.safeParse({ heightCm, birthDate: null }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  test("refuses a height that is not a whole number of centimetres", () => {
+    expect(
+      healthProfilePayloadV1Schema.safeParse({ heightCm: 171.5, birthDate: null }).success,
+    ).toBe(false);
+  });
+
+  test("both fields may be null, and null is a stated value rather than an omission", () => {
+    expectRoundTrip(healthProfilePayloadV1Schema, { heightCm: null, birthDate: null });
+    expect(healthProfilePayloadV1Schema.safeParse({ heightCm: 171 }).success).toBe(false);
+    expect(healthProfilePayloadV1Schema.safeParse({ birthDate: "1998-11-18" }).success).toBe(false);
+  });
+
+  test("refuses a date that reads as one and is not a day: 1998-11-31 has no thirty-first", () => {
+    expect(
+      healthProfilePayloadV1Schema.safeParse({ heightCm: 171, birthDate: "1998-11-31" }).success,
+    ).toBe(false);
+    expect(
+      healthProfilePayloadV1Schema.safeParse({ heightCm: 171, birthDate: "2027-02-29" }).success,
+    ).toBe(false);
+    expectRoundTrip(healthProfilePayloadV1Schema, { heightCm: 171, birthDate: "2028-02-29" });
+  });
+
+  test("refuses a year outside 1900-2099, and a timestamp where a date belongs", () => {
+    for (const birthDate of ["1899-12-31", "2100-01-01", "1998-11-18T00:00:00.000Z"]) {
+      expect(healthProfilePayloadV1Schema.safeParse({ heightCm: 171, birthDate }).success).toBe(
+        false,
+      );
+    }
+  });
+});
+
 const upsert = {
   mutationId: "0198f0a1-2b3c-7d4e-8f90-a1b2c3d4e5f6",
   aggregateType: "measurement",
@@ -155,6 +223,70 @@ describe("mutation envelope", () => {
     expect(mutationEnvelopeSchema.safeParse({ ...upsert, payloadSchemaVersion: 2 }).success).toBe(
       false,
     );
+  });
+});
+
+const profileUpsert = {
+  mutationId: "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071",
+  aggregateType: "healthProfile",
+  aggregateId: HEALTH_PROFILE_AGGREGATE_ID,
+  op: "upsert",
+  baseRevision: null,
+  payloadSchemaVersion: 1,
+  payload: { heightCm: 171, birthDate: "1998-11-18" },
+  origin: { type: "android", id: "device-1" },
+  clientOccurredAt: "2026-08-25T06:12:04.902Z",
+};
+
+describe("the health profile is one aggregate per account", () => {
+  test("round-trips the upsert of the single profile", () => {
+    expectRoundTrip(mutationEnvelopeSchema, profileUpsert);
+    expectRoundTrip(syncChangeSchema, {
+      sequence: "9007199254740995",
+      aggregateType: "healthProfile",
+      aggregateId: HEALTH_PROFILE_AGGREGATE_ID,
+      op: "upsert",
+      payloadSchemaVersion: 1,
+      payload: { heightCm: 171, birthDate: "1998-11-18" },
+      meta: {
+        id: HEALTH_PROFILE_AGGREGATE_ID,
+        revision: "2",
+        createdAt: "2026-08-25T06:12:04.900Z",
+        updatedAt: "2026-08-25T06:12:04.950Z",
+        deletedAt: null,
+        originType: "agent",
+        originId: "agent-claude",
+        lastMutationId: "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071",
+      },
+    });
+  });
+
+  /**
+   * The rival row, refused by the wire. A second device that minted its own identifier for
+   * "its" profile could not express the mutation at all, which is what makes section 13.4's
+   * "un agrégat unique" structural rather than a rule the server has to remember.
+   */
+  test("refuses any aggregate id but the constant, so no rival profile is expressible", () => {
+    for (const aggregateId of ["me-2", "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071", "2026-08-25"]) {
+      expect(mutationEnvelopeSchema.safeParse({ ...profileUpsert, aggregateId }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  test("carries the payload its own aggregateType declares and no other", () => {
+    expect(
+      mutationEnvelopeSchema.safeParse({
+        ...profileUpsert,
+        payload: { date: "2026-08-25", weightCg: 7_000 },
+      }).success,
+    ).toBe(false);
+    expect(
+      mutationEnvelopeSchema.safeParse({
+        ...upsert,
+        payload: { heightCm: 171, birthDate: "1998-11-18" },
+      }).success,
+    ).toBe(false);
   });
 });
 

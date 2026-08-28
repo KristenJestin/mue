@@ -58,6 +58,11 @@ import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.components.rememberMueLocale
 import fr.kristenjestin.mue.ui.scale.ScaleMessages
 import fr.kristenjestin.mue.ui.scale.ScaleTestTags
+import fr.kristenjestin.mue.ui.sync.DataSyncSection
+import fr.kristenjestin.mue.ui.sync.DataSyncUiState
+import fr.kristenjestin.mue.ui.sync.SyncMessages
+import fr.kristenjestin.mue.ui.sync.SyncStatus
+import fr.kristenjestin.mue.ui.sync.SyncViewModel
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.timer.TimerMessages
 import java.time.LocalDate
@@ -84,12 +89,33 @@ private const val NOT_SET = "Not set"
  *
  * The bottom tab bar is drawn by the navigation layer, above this screen, so that it never
  * moves during a tab transition (PRD 8).
+ *
+ * Cet écran est la **racine** de la pile de l'onglet, pas la pile elle-même : les trois portes
+ * qu'il ouvre — `Scales` (FR-SCALE-010), `Server settings` (sync PRD 9.1) et `Food preferences`
+ * (PRD_FOOD 6.7) — remontent à `ProfileNavHost`, qui tient la pile pour tous les sous-écrans à la
+ * fois. Un booléen par sous-écran admettrait un état qui ne peut pas exister — deux ouverts en
+ * même temps, sans rien dans le type pour dire lequel le retour doit refermer — et c'est
+ * exactement ce qu'une pile modélisée comme une liste de routes rend impossible.
  */
 @Composable
-fun ProfileScreen(modifier: Modifier = Modifier, onOpenScales: () -> Unit = {}) {
+fun ProfileScreen(
+    modifier: Modifier = Modifier,
+    onOpenScales: () -> Unit = {},
+    onOpenServerSettings: () -> Unit = {},
+    onOpenFoodPreferences: () -> Unit = {},
+) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    /*
+     * Sync PRD 9.1's section reads its own state holder rather than borrowing `ProfileViewModel`.
+     * They share nothing — one is a form over DataStore and Room's profile row, the other is the
+     * outbox and the `sync_state` row — and the settings screen needs the very same instance,
+     * which it gets because both take it from the activity's store.
+     */
+    val syncViewModel: SyncViewModel = viewModel(factory = SyncViewModel.Factory)
+    val syncState by syncViewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(viewModel, context) {
         viewModel.events.collect { event ->
@@ -117,6 +143,7 @@ fun ProfileScreen(modifier: Modifier = Modifier, onOpenScales: () -> Unit = {}) 
 
     ProfileScreen(
         state = state,
+        syncState = syncState,
         onDisplayNameChange = viewModel::onDisplayNameChange,
         onHeightChange = viewModel::onHeightChange,
         onBirthDateChange = viewModel::onBirthDateChange,
@@ -126,6 +153,9 @@ fun ProfileScreen(modifier: Modifier = Modifier, onOpenScales: () -> Unit = {}) 
         onHapticsEnabledChange = viewModel::onHapticsEnabledChange,
         onExport = viewModel::exportWeightData,
         onOpenScales = onOpenScales,
+        onSyncNow = syncViewModel::syncNow,
+        onOpenServerSettings = onOpenServerSettings,
+        onOpenFoodPreferences = onOpenFoodPreferences,
         modifier = modifier,
         showNotificationSettings = !notifications.isGranted && !notifications.canRequest,
         onOpenNotificationSettings = {
@@ -145,6 +175,10 @@ internal fun ProfileScreen(
     onHapticsEnabledChange: (Boolean) -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    syncState: DataSyncUiState = DataSyncUiState(),
+    onSyncNow: () -> Unit = {},
+    onOpenServerSettings: () -> Unit = {},
+    onOpenFoodPreferences: () -> Unit = {},
     today: LocalDate = LocalDate.now(),
     showNotificationSettings: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
@@ -224,6 +258,19 @@ internal fun ProfileScreen(
                     modifier = Modifier.testTag(ProfileTestTags.HAPTICS_TOGGLE),
                 )
 
+                /*
+                 * PRD_FOOD 6.7's options, in the section this app keeps its options in.
+                 *
+                 * They used to be behind a wrench in the Food catalogue's header — the one
+                 * trailing control in the app that was a button rather than a chip, and the one
+                 * that made the wordmark move. Here the door costs Food's header nothing and
+                 * costs this screen a card in a section that already exists.
+                 */
+                FoodPreferencesCard(
+                    onOpen = onOpenFoodPreferences,
+                    modifier = Modifier.padding(top = spacing.md),
+                )
+
                 if (showNotificationSettings) {
                     NotificationSettingsCard(
                         onOpen = onOpenNotificationSettings,
@@ -269,6 +316,23 @@ internal fun ProfileScreen(
                         )
                     }
                 }
+            }
+
+            /*
+             * Sync PRD 9.1, in the section the PRD names, on the screen the PRD names.
+             *
+             * It is the *only* place in the app that mentions a server. 9.1 ends with "L'absence
+             * de serveur associé n'affiche aucune alerte sur les écrans principaux", so Entry,
+             * Progress, Activity and Food gained nothing at all — no badge, no banner, no dot.
+             * A person who never pairs a server never learns that one exists unless they come
+             * here and read.
+             */
+            ProfileSection(title = SyncMessages.SECTION_TITLE) {
+                DataSyncSection(
+                    state = syncState,
+                    onSyncNow = onSyncNow,
+                    onOpenServerSettings = onOpenServerSettings,
+                )
             }
 
             // Leaves the last card breathing room above the tab bar, as on Progress.
@@ -530,7 +594,10 @@ private fun StatusLine(message: String, color: Color, assertive: Boolean = false
 private val PreviewToday: LocalDate = LocalDate.of(2026, 8, 23)
 
 @Composable
-private fun ProfilePreview(state: ProfileUiState) {
+private fun ProfilePreview(
+    state: ProfileUiState,
+    syncState: DataSyncUiState = DataSyncUiState(),
+) {
     MueTheme {
         ProfileScreen(
             state = state,
@@ -541,6 +608,7 @@ private fun ProfilePreview(state: ProfileUiState) {
             onSaveConfirmationFinished = {},
             onHapticsEnabledChange = {},
             onExport = {},
+            syncState = syncState,
             today = PreviewToday,
         )
     }
@@ -577,6 +645,23 @@ private fun ProfileNoBmiPreview() {
     ProfilePreview(ProfileUiState(hapticsEnabled = false))
 }
 
+/** Sync PRD 9.1 with a server behind it, which is the state the section is really for. */
+@Preview(name = "Profile — synced", widthDp = 390, heightDp = 1600)
+@Composable
+private fun ProfileSyncedPreview() {
+    ProfilePreview(
+        state = ProfileUiState(displayName = "Kris", heightInput = "180"),
+        syncState = DataSyncUiState(
+            status = SyncStatus.CHANGES_PENDING,
+            serverName = "mue.home.arpa",
+            account = "kris@example.org",
+            lastSuccessAt = 1_756_240_000_000L,
+            outstandingChanges = 2,
+            undeliverableChanges = 1,
+        ),
+    )
+}
+
 @Preview(name = "Profile — validation error", widthDp = 390, heightDp = 1500)
 @Composable
 private fun ProfileErrorPreview() {
@@ -584,7 +669,10 @@ private fun ProfileErrorPreview() {
         ProfileUiState(
             displayName = "Kris",
             heightInput = "999",
-            birthDate = LocalDate.of(2030, 1, 1),
+            // Un aperçu de l'état invalide, donc une date qui reste future quel que
+            // soit le jour où l'aperçu est rendu : 2030 cessait de démontrer ce qu'il
+            // démontre en 2030.
+            birthDate = LocalDate.of(2999, 1, 1),
             heightError = MueValidation.HEIGHT_ERROR,
             birthDateError = MueValidation.BIRTH_DATE_ERROR,
             export = ExportState.Failed(ProfileViewModel.EXPORT_ERROR),

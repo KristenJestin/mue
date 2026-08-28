@@ -1,0 +1,15 @@
+{
+  "customMovementName": "Bouldering warm-up",
+  "durationSeconds": 40,
+  "environment": "unknown",
+  "equipment": [],
+  "exercises": [],
+  "id": "5c81d0a4-2e77-4b39-9a06-1d4f7c3b8e92",
+  "metrics": [],
+  "movement": "other",
+  "notes": null,
+  "perceivedEffort": null,
+  "source": "timer",
+  "startedAtTime": null,
+  "startedOn": "2024-02-29"
+}

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { REPO_ROOT, buildFixtureFiles, buildFixtureManifest, fixtureDirectory } from "./fixtures";
+import { AGGREGATE_TYPES } from "./primitives";
+import { CURRENT_PAYLOAD_SCHEMA_VERSIONS } from "./versions";
 import { buildOpenApiDocument, canonicalJson } from "./openapi";
 
 const OPENAPI_PATH = join(REPO_ROOT, "packages", "contracts", "openapi.json");
@@ -44,15 +46,81 @@ describe("android contract fixtures", () => {
     }
   });
 
-  test("the manifest names one valid and one edge instance per payload version", () => {
+  /**
+   * Every payload the contract can carry, not just the first one. An aggregate added without
+   * its own pair of instances would ship a wire shape the Android drift detector never reads,
+   * which is the state `healthProfile` was in for as long as it had no branch at all.
+   */
+  test("the manifest names one valid and one edge instance per payload schema", () => {
     const manifest = buildFixtureManifest() as {
       fixtures: { file: string; schema: string; kind: string }[];
     };
-    const measurement = manifest.fixtures.filter((f) => f.schema === "MeasurementPayloadV1");
-    expect(measurement.map((f) => f.kind).sort()).toEqual(["edge", "valid"]);
+    // Derived from the declared aggregate types rather than listed, so an aggregate added to
+    // `AGGREGATE_TYPES` is required to bring its pair of instances with it. The list used to be
+    // written out here, and a written list is one nobody extends.
+    for (const schema of Object.keys(CURRENT_PAYLOAD_SCHEMA_VERSIONS).map(payloadComponent)) {
+      const instances = manifest.fixtures.filter((f) => f.schema === schema);
+      expect([schema, instances.map((f) => f.kind).sort()]).toEqual([schema, ["edge", "valid"]]);
+    }
     expect(manifest.fixtures.filter((f) => f.kind === "error").length).toBeGreaterThanOrEqual(4);
   });
+
+  /**
+   * The payload schemas of `CURRENT_PAYLOAD_SCHEMA_VERSIONS` and the instances on disk are the
+   * same set. This is the assertion that would have failed on the day `healthProfile` was
+   * added to `AGGREGATE_TYPES` with no fixture behind it.
+   */
+  test("every aggregate type the server declares has instances on disk", () => {
+    const manifest = buildFixtureManifest() as { fixtures: { schema: string }[] };
+    const schemas = new Set(manifest.fixtures.map((f) => f.schema));
+    for (const aggregateType of Object.keys(CURRENT_PAYLOAD_SCHEMA_VERSIONS)) {
+      const component = payloadComponent(aggregateType);
+      expect([aggregateType, schemas.has(component)]).toEqual([aggregateType, true]);
+    }
+  });
 });
+
+/**
+ * PRD section 10.1's matrix, transcribed, and the assertion the whole of this work exists to
+ * make true.
+ *
+ * The matrix marks eight aggregates `Synchronisé: Oui` and section 10.2 names them one by one.
+ * `AGGREGATE_TYPES` is what decides whether a journalled mutation can ever be *sent* —
+ * `SyncWire.SENDABLE_LOCAL_AGGREGATE_TYPES` is derived from it, and a type absent from it is a
+ * type whose outbox rows stay pending for ever, silently, with a `Changes pending` counter that
+ * never falls. Six of the eight were in that state, two of them journalling rows daily.
+ *
+ * So the list is pinned against the document rather than against itself. A future aggregate is
+ * expected to fail this test until the matrix is updated in the same change.
+ */
+describe("PRD section 10.1", () => {
+  test("every aggregate the matrix marks synchronised is one the contract can express", () => {
+    expect([...AGGREGATE_TYPES]).toEqual([
+      "activitySession",
+      "customExerciseDefinition",
+      "food",
+      "foodLogEntry",
+      "healthProfile",
+      "mealPlanEntry",
+      "measurement",
+      "recipe",
+    ]);
+  });
+
+  test("each of them declares a payload version this build can apply", () => {
+    for (const aggregateType of AGGREGATE_TYPES) {
+      expect([aggregateType, CURRENT_PAYLOAD_SCHEMA_VERSIONS[aggregateType]]).toEqual([
+        aggregateType,
+        [1],
+      ]);
+    }
+  });
+});
+
+/** The `openapi.json` component id a payload schema registers itself under. */
+function payloadComponent(aggregateType: string): string {
+  return `${aggregateType.charAt(0).toUpperCase()}${aggregateType.slice(1)}PayloadV1`;
+}
 
 /** Returns the dotted path of every object whose keys are not in ascending order. */
 function unsortedKeyPaths(value: unknown, path = "$"): string[] {

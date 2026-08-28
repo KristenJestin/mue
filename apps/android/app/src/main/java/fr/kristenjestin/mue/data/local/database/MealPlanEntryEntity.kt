@@ -75,10 +75,16 @@ data class MealPlanEntryEntity(
     companion object {
         const val TABLE_NAME = "meal_plan_entry"
 
-        /** The order of the day, for the same reason as `FoodLogEntryEntity.SLOT_ORDER`. */
-        const val SLOT_ORDER =
-            "CASE slot WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 " +
-                "WHEN 'snack' THEN 2 WHEN 'dinner' THEN 3 ELSE 4 END"
+        /**
+         * The order of the day, which is `FoodLogEntryEntity.SLOT_ORDER`'s own string and not a
+         * second copy of it.
+         *
+         * A `const val` may be initialised from another `const val`, so Room still gets the
+         * compile-time constant its `@Query` needs while the moments are transcribed into SQL
+         * exactly once. The two were separate copies of the same `CASE`, which is the arrangement
+         * where a sixth moment reaches the journal's ordering and not the planner's.
+         */
+        const val SLOT_ORDER: String = FoodLogEntryEntity.SLOT_ORDER
     }
 }
 

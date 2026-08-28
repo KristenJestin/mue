@@ -142,6 +142,16 @@ internal object RecipeMessages {
     const val NAME_PLACEHOLDER: String = "Sheet-pan salmon"
     const val TYPE_LABEL: String = "Moment"
     const val SERVINGS_LABEL: String = "Servings"
+
+    /**
+     * The two ends of the base-servings stepper.
+     *
+     * A whole serving each way, because PRD_FOOD 15 makes this field a whole number — the step
+     * that applies it is `RecipeDraft.steppedBaseServings`, which asks `FoodValidation` whether
+     * the neighbour is legal rather than testing 1 and 12 itself.
+     */
+    const val FEWER_BASE_SERVINGS: String = "One serving fewer"
+    const val MORE_BASE_SERVINGS: String = "One serving more"
     const val PREP_TIME_LABEL: String = "Preparation time"
     const val PREP_TIME_SUFFIX: String = "min"
     const val DESCRIPTION_LABEL: String = "Description"

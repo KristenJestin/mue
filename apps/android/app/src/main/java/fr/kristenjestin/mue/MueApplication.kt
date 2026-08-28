@@ -1,12 +1,17 @@
 package fr.kristenjestin.mue
 
 import android.app.Application
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import fr.kristenjestin.mue.data.sync.SyncScheduler
 import fr.kristenjestin.mue.di.AppContainer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the single dependency container for the whole app.
@@ -55,6 +60,51 @@ class MueApplication : Application() {
             // periodic one. Both are WorkManager requests, so an unpaired phone, a phone with no
             // network and a phone on a low battery all enqueue and none of them runs.
             SyncScheduler.onApplicationStart(this@MueApplication)
+        }
+
+        startLiveSync()
+    }
+
+    /**
+     * Sync PRD 9.4's live channel, and the only place its lifetime is decided.
+     *
+     * ## Why the process lifecycle and not a screen
+     *
+     * "Foreground" is a property of the application, not of a composition. Scoped to
+     * [ProcessLifecycleOwner] the connection opens once when Mue becomes visible and closes once
+     * when it stops, so rotating the phone, walking between the five tabs or opening the timer
+     * does not close and reopen a socket — the 700 ms debounce [ProcessLifecycleOwner] already
+     * carries is exactly what a configuration change needs and exactly what a hand-rolled
+     * activity counter gets wrong.
+     *
+     * It was first written as a `LaunchedEffect` in `MueApp`, which was wrong twice over: it tied
+     * a network connection to the lifetime of a composition, and it made the channel invisible to
+     * any test that does not pump a Compose frame clock. The instrumented test that proves a
+     * server write arrives on the phone failed for exactly that reason and was right to.
+     *
+     * ## What it costs when nobody is looking
+     *
+     * Nothing. `repeatOnLifecycle` cancels the whole thing at `ON_STOP`: no socket, no timer, no
+     * wakelock, and no work at all in a process that has been killed. The deferred worker of PRD
+     * 19 remains the only thing that runs then, which is why this is an addition to PRD 9.4's
+     * triggers and not a replacement for any of them.
+     *
+     * ## And on the cold start path
+     *
+     * Nothing either. Registering the observer is a couple of objects; [SyncContainer.liveSync]
+     * is resolved *inside* the block, after the application is actually visible, so an HTTP
+     * client is built by the launch that shows a screen rather than by the one that measures it.
+     */
+    private fun startLiveSync() {
+        val owner = ProcessLifecycleOwner.get()
+        owner.lifecycleScope.launch {
+            owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // `lifecycleScope` is the main dispatcher, and the channel's loop has no business
+                // there: it opens sockets, reads Room and waits. Cancellation still arrives
+                // through `withContext`, so `ON_STOP` closes the connection as directly as if it
+                // ran here.
+                withContext(Dispatchers.IO) { container.sync.liveSync.run() }
+            }
         }
     }
 }

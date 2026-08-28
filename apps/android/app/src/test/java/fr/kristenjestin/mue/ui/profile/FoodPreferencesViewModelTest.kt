@@ -1,4 +1,4 @@
-package fr.kristenjestin.mue.ui.food.catalogue
+package fr.kristenjestin.mue.ui.profile
 
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import fr.kristenjestin.mue.ui.entry.FakeUserPreferencesRepository

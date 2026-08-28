@@ -26,6 +26,15 @@ class FakeUserProfileRepository(initial: UserProfile = UserProfile.EMPTY) : User
 
     val stored: UserProfile get() = state.value
 
+    /**
+     * A profile that arrived from somewhere other than this screen — a sync pull applying the
+     * server's copy (PRD 13.4). It is not a [save]: nothing on the phone typed it, so it must
+     * not count towards [saveCount].
+     */
+    fun arrive(profile: UserProfile) {
+        state.value = profile
+    }
+
     override val profile: Flow<UserProfile> = state
 
     override suspend fun save(profile: UserProfile) {

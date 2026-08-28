@@ -2,27 +2,29 @@ package fr.kristenjestin.mue.ui.food
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -33,9 +35,20 @@ import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
-import kotlin.math.roundToInt
 
 private val SwitcherIconSize: Dp = 18.dp
+
+/** The prototype's `p-1`: the frame's inner margin, which is what makes the track *contained*. */
+private val TrackPadding: Dp = 4.dp
+
+/**
+ * The room a drawn label needs to itself inside its segment, beyond its own glyphs.
+ *
+ * Half of it falls either side of a centred label, so two neighbouring names keep a whole gutter
+ * between them. `MueBottomBar`'s `TabLabelGutter` is the same quantity for the same reason, and
+ * `Food Pro…` running into `Pro…` is what its absence looks like.
+ */
+private val SegmentLabelGutter: Dp = 12.dp
 
 /**
  * Which view is showing and how to change it, published for the screens rather than passed to
@@ -61,18 +74,24 @@ internal val LocalFoodViewSelection = staticCompositionLocalOf<FoodViewSelection
  *
  * The prototype puts the switcher exactly here — between `MUE` and the scrolling section, at the
  * screen gutter — and so does this. It sits in [MueScreenScaffold]'s own header slot, which means
- * it is drawn edge to edge and stays clear of the ramp the content below dissolves into: the rail
- * can scroll past the gutter, and what fades under it is the journal rather than the control.
+ * it stays clear of the ramp the content below dissolves into: what fades under it is the journal
+ * rather than the control.
  *
  * A view screen calls this instead of [MueScreenScaffold] and gains the switcher by doing nothing
  * else. A sheet calls `MueSubScreenScaffold` and therefore cannot show one, which is the right
  * answer without a single condition being written: a sheet is a modal over a view, and switching
  * views from inside one would leave the sheet with nothing behind it.
+ *
+ * **There is no `trailing` slot.** It existed for exactly one control — the wrench that opened
+ * `Food preferences` from the catalogue — and that control now lives in `Profile`, beside the
+ * app's other preferences. `Day` and `Recipes` never passed one, so the parameter went from one
+ * caller to none, and a slot nothing fills is an invitation to put a second 48 dp button back in
+ * the row this module has already had to defend twice. What Food's header holds is the wordmark
+ * and the switcher; anything else belongs to the content below it or to another screen.
  */
 @Composable
 internal fun FoodViewScaffold(
     modifier: Modifier = Modifier,
-    trailing: @Composable (() -> Unit)? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     topFade: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
@@ -80,7 +99,6 @@ internal fun FoodViewScaffold(
     val selection = LocalFoodViewSelection.current
     MueScreenScaffold(
         modifier = modifier,
-        trailing = trailing,
         verticalArrangement = verticalArrangement,
         topFade = topFade,
         header = selection?.let { current ->
@@ -98,34 +116,45 @@ internal fun FoodViewScaffold(
 }
 
 /**
- * The switcher over PRD_FOOD 7's views, which the module has been missing since its first screen.
+ * The switcher over PRD_FOOD 7's views: **a contained track of equal segments**, as the prototype
+ * draws it.
  *
- * [FoodRoute.View] has described this control from the beginning — "siblings reached by a
- * switcher" — and [FoodTestTags.VIEW_SWITCHER] and [FoodTestTags.view] were agreed for it before
- * any screen landed. Nothing ever drew it. The consequence was not cosmetic: `Foods` was reachable
- * only through a back door (a search that finds nothing offering to create a food), `Recipes` only
- * through `Use a recipe` inside the add sheet, and the owner's report says exactly that — *"je peux
- * pas créer de food sans ajouter via « add what you ate »"*. Three of four views had no front door.
+ * `food.html` is unambiguous about the shape and PRD_FOOD 19 says outright that "le prototype fait
+ * autorité pour la mise en page" — a rounded frame at the screen gutter, a faint fill, four pixels
+ * of inner margin, and inside it segments of equal width of which the selected one is solid amber
+ * on dark ink. What shipped instead was a row of free-floating pills that scrolled sideways, which
+ * is a different control.
  *
- * **It is a rail, not a set of equal segments.** Four names across 360 dp is 90 dp each, and at
- * twice the font scale `Recipes` alone needs more than that: laid out as segments they would all
- * be cut, which is the very defect that cost the tab bar nine fixes today — `Progress` and
- * `Profile` both reaching the glass as `Pro…`. [fr.kristenjestin.mue.ui.components.MueBottomBar]
- * answers it by measuring its labels and dropping every one of them below the width they need,
- * because a permanent bar cannot scroll and five glyphs are still five distinguishable glyphs.
+ * ## The reason the track was rejected, and what answers it
  *
- * This control can scroll, and that is the better answer here for one reason: the complaint being
- * fixed is that a view could not be *found*. Answering it with three anonymous glyphs would be
- * half a fix. A rail gives each name the width it asks for and lets the row overflow, so **every
- * label is drawn whole at every font scale** — never measured, never dropped, never ellipsised.
- * The guarantee is structural rather than computed: a child of a horizontally scrolling [Row] is
- * measured with an unbounded width, so [MueText] lays its label out at its intrinsic size and has
- * nothing to ellipsise. Two views therefore cannot draw the same stump, because there are no
- * stumps.
+ * The objection was real and is not waved away here: segments of equal width are the layout where
+ * a long name gets **cut in the middle**. Three segments inside a 360 dp screen leave about 95 dp
+ * each, and at font scale 2.0 `Recipes` alone wants more than that — the exact defect that cost
+ * the tab bar nine commits, with `Progress` and `Profile` both reaching the glass as `Pro…`.
  *
- * What it costs is that at the largest font scale not every name is on screen at once. That is the
- * honest trade: the reader who asked for large text gets large text and a row that moves, rather
- * than small text or no text.
+ * So this measures, exactly as [fr.kristenjestin.mue.ui.components.MueBottomBar] does. Every label
+ * is laid out at this control's own type style, at the current density and font scale, and the
+ * widest is compared against one segment's share less [SegmentLabelGutter]. Below that, the track
+ * drops **every** label and keeps the glyphs, whose names move into their `contentDescription` so
+ * TalkBack still announces `Recipes, tab, selected`. Three distinguishable icons in three segments
+ * is a control that still works; three stumps of the same three letters is not.
+ *
+ * The widest label decides for all of them, again as in the bar: a track with two words and one
+ * glyph in it would read as two kinds of thing.
+ *
+ * Nothing here reads a `dp` breakpoint, so a longer view name, a denser script or a wider phone
+ * each move the threshold by themselves.
+ *
+ * ## The rejected alternatives
+ *
+ * *Shrinking the labels* so they fit: refused for the bar's reason, which has not changed — a
+ * reader who sets the largest font is asking for large text, and answering with small text
+ * punishes exactly the reader who asked.
+ *
+ * *Keeping the scrolling rail*: it did draw every name whole, and that was its argument. But it is
+ * not the control the prototype draws, it gives no impression of how many views there are, and a
+ * horizontally scrolling row inside a vertically scrolling screen is a gesture conflict on the one
+ * control whose job was to make the views findable in the first place.
  */
 @Composable
 internal fun FoodViewSwitcher(
@@ -135,90 +164,129 @@ internal fun FoodViewSwitcher(
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = MueTheme.spacing.screenHorizontal,
 ) {
-    val scroll = rememberScrollState()
-    val selectedIndex = views.indexOf(selected).coerceAtLeast(0)
-
-    /*
-     * Brings the current view into sight when the rail is too narrow to hold them all.
-     *
-     * Positioned by index rather than by measured offset: `maxValue` is zero exactly while
-     * everything fits, so at an ordinary font scale this does nothing at all, and when it does
-     * scroll the two ends are exact — the first name flush left, the last flush right. With three
-     * or four names that is precise enough to put the middle ones on screen too, and it needs
-     * neither an experimental relocation API nor coordinate arithmetic that a padding modifier
-     * could quietly offset by a gutter.
-     */
-    LaunchedEffect(selectedIndex, scroll.maxValue) {
-        if (scroll.maxValue > 0) {
-            val last = (views.size - 1).coerceAtLeast(1)
-            scroll.scrollTo((scroll.maxValue.toFloat() * selectedIndex / last).roundToInt())
-        }
-    }
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(scroll)
-            // Inside the scroll, so the gutter travels with the names instead of clipping them.
-            .padding(horizontal = horizontalPadding)
-            .selectableGroup()
-            .testTag(FoodTestTags.VIEW_SWITCHER),
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(
+        modifier = modifier.fillMaxWidth().padding(horizontal = horizontalPadding),
     ) {
-        views.forEach { view ->
-            ViewPill(
-                view = view,
-                selected = view == selected,
-                onClick = { onSelect(view) },
-            )
+        val segments = views.size.coerceAtLeast(1)
+        val labelled = labelsFitInSegment(
+            views = views,
+            share = (maxWidth - TrackPadding * 2) / segments,
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                /*
+                 * Before the padding, deliberately.
+                 *
+                 * A semantics modifier reports the bounds of the coordinator at *its* position in
+                 * the chain, so a tag written after `.padding(...)` measures the space inside the
+                 * frame rather than the frame. Sat at the end, as it was, it reported 48 dp on a
+                 * track that was really 56 — which is a handle that cannot see the very defect
+                 * this control was reported for. Every other use of the tag is an `assertExists`,
+                 * to which the position makes no difference.
+                 */
+                .testTag(FoodTestTags.VIEW_SWITCHER)
+                .clip(MueTheme.shapes.field)
+                .background(MueTheme.colors.surface)
+                /*
+                 * Horizontally only. The prototype's inner margin exists on all four sides, and
+                 * on three of them it still does — but taken vertically as well it was *added*
+                 * to a segment that had just been raised to the 48 dp touch minimum, which made
+                 * the track 56 dp and pushed the whole tab down by eight: "ton bouton avec la
+                 * clé à molette là, il est plus gros, du coup ça décale légèrement vers le bas
+                 * toute la tab". The margin is now drawn *inside* each segment instead, by
+                 * [ViewSegment], where it insets the fill without inflating the track.
+                 */
+                .padding(horizontal = TrackPadding)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            views.forEach { view ->
+                ViewSegment(
+                    view = view,
+                    selected = view == selected,
+                    labelled = labelled,
+                    onClick = { onSelect(view) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
 
 /**
- * One view's name, with its glyph.
+ * Whether every view's name can be drawn whole inside [share] of the track, gutter included.
  *
- * `selectable` merges the pill into a single node carrying the label, [Role.Tab] and the selected
- * state, which is everything TalkBack needs to announce `Foods, tab, selected` — the arrangement
- * the bottom bar uses, and the one lesson that bar paid for. The icon stays silent because the
- * name is beside it; unlike the bar's, this label is never dropped, so the name is never the
- * icon's to carry.
- *
- * The selection is carried by three things and never by colour alone (PRD 15 and PRD_FOOD 18): the
- * fill, the border, and the state `selectable` publishes.
+ * The labels are laid out with the switcher's own type style, at the current density and font
+ * scale, so the answer follows the reader's text size without a breakpoint being written down.
  */
 @Composable
-private fun ViewPill(
+private fun labelsFitInSegment(views: List<FoodRoute.View>, share: Dp): Boolean {
+    val measurer = rememberTextMeasurer()
+    val style = MueTheme.typography.chip
+    val room = with(LocalDensity.current) { (share - SegmentLabelGutter).roundToPx() }
+
+    return remember(measurer, views, style, room) {
+        room > 0 && views.all { view ->
+            measurer.measure(view.label, style, maxLines = 1).size.width <= room
+        }
+    }
+}
+
+/**
+ * One segment of the track: a name, or the glyph that stands in for it.
+ *
+ * `selectable` merges the segment into a single node carrying the label, [Role.Tab] and the
+ * selected state, which is everything TalkBack needs to announce `Foods, tab, selected` — the
+ * arrangement the bottom bar uses, and the one lesson that bar paid for.
+ *
+ * The selection is carried by the fill, by the ink, and by the state `selectable` publishes, never
+ * by colour alone (PRD 15 and PRD_FOOD 18). The unselected segments have no fill of their own: the
+ * prototype gives the frame one fill and the active segment another, and outlining the inactive
+ * ones would draw three boxes where the prototype draws one.
+ */
+@Composable
+private fun ViewSegment(
     view: FoodRoute.View,
     selected: Boolean,
+    labelled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = MueTheme.colors
-    val shape = MueTheme.shapes.pill
+    val shape = MueTheme.shapes.small
 
     val container by animateColorAsState(
-        targetValue = if (selected) colors.accentSoft else colors.surfaceStrong,
+        targetValue = if (selected) colors.accent else Color.Transparent,
         animationSpec = MueMotion.spec(MueMotion.TabChangeMillis),
-        label = "viewPillContainer",
-    )
-    val border by animateColorAsState(
-        targetValue = if (selected) colors.accent else colors.surfaceBorder,
-        animationSpec = MueMotion.spec(MueMotion.TabChangeMillis),
-        label = "viewPillBorder",
+        label = "viewSegmentContainer",
     )
     val content by animateColorAsState(
-        targetValue = if (selected) colors.onAccentSoft else colors.textSecondary,
+        targetValue = if (selected) colors.onAccent else colors.textTertiary,
         animationSpec = MueMotion.spec(MueMotion.TabChangeMillis),
-        label = "viewPillContent",
+        label = "viewSegmentContent",
     )
 
-    Row(
-        modifier = Modifier
+    Box(
+        modifier = modifier
+            /*
+             * The **segment** is the target, so the floor is on the segment and not on the frame
+             * around it: sized off the frame, a 48 dp track leaves each button 40 dp once the
+             * prototype's inner margin is taken off either side — under the minimum PRD_FOOD 18
+             * sets, on the control whose whole job is to be tappable.
+             *
+             * What follows is the ordering that keeps that target *without* the track growing to
+             * hold it. `selectable` sits **above** the vertical inset, so the hit area is the
+             * whole 48 dp; the inset below it is what the fill is drawn inside, so the amber
+             * block is the prototype's 40 dp. A target may be larger than what it draws, and here
+             * it is — which is why the track is back to 48 dp and nothing under it moved.
+             *
+             * Both facts are measured: `everySegmentIsBigEnoughToTap` reads this node's bounds
+             * (the layout node is the full 48 dp however the inset falls inside it) and
+             * `theTrackDoesNotGrowToHoldItsTouchTargets` reads the track's.
+             */
             .heightIn(min = MueMinTouchTarget)
-            .clip(shape)
-            .background(container)
-            .border(if (selected) 2.dp else 1.dp, border, shape)
             .selectable(
                 selected = selected,
                 indication = null,
@@ -226,27 +294,37 @@ private fun ViewPill(
                 role = Role.Tab,
                 onClick = onClick,
             )
-            .padding(horizontal = MueTheme.spacing.lg, vertical = MueTheme.spacing.sm)
+            .padding(vertical = TrackPadding)
+            .clip(shape)
+            .background(container)
+            .padding(horizontal = MueTheme.spacing.xs)
             .testTag(FoodTestTags.view(view)),
-        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        MueIcon(
-            iconName = FoodIcons.forView(view),
-            tint = content,
-            size = SwitcherIconSize,
-        )
-        /*
-         * `maxLines = 1` and nothing else. The row it sits in scrolls, so the constraint reaching
-         * this label is unbounded and there is no width for it to be cut to — which is what makes
-         * "drawn whole or not at all" hold without a measurement being taken anywhere.
-         */
-        MueText(
-            text = view.label,
-            style = MueTheme.typography.chip,
-            color = content,
-            maxLines = 1,
-        )
+        if (labelled) {
+            /*
+             * `maxLines = 1` and no ellipsis worth reaching: the segment was measured wide enough
+             * for this very string before `labelled` was allowed to be true, so the constraint
+             * this label meets is one it already fits inside.
+             */
+            MueText(
+                text = view.label,
+                style = MueTheme.typography.chip,
+                color = content,
+                maxLines = 1,
+            )
+        } else {
+            MueIcon(
+                iconName = FoodIcons.forView(view),
+                tint = content,
+                size = SwitcherIconSize,
+                /*
+                 * Alone in the segment, the glyph has to carry the name itself. `selectable`
+                 * above merges it up, so TalkBack still says `Recipes, tab, selected`.
+                 */
+                contentDescription = view.label,
+            )
+        }
     }
 }
 
@@ -270,12 +348,16 @@ private fun FoodViewSwitcherPreview() {
 }
 
 /**
- * The rail on the narrowest phone the app supports at the largest font scale.
+ * The track on the narrowest phone the app supports at the largest font scale.
  *
- * What to look for: three whole words. Not `Rec…`, not three bare glyphs — the row simply runs
- * past the right edge and scrolls, and the selected name is the one brought into sight. Laid out
- * as equal segments this is where `Recipes` would have been cut, which is the tab bar's defect
- * moved one level down.
+ * What to look for: **three whole glyphs and no words**. Not `Rec…`, not `Recipe` over `s` — at
+ * this scale `Recipes` does not fit a third of 360 dp, so every label goes and the icons stay,
+ * which is the same answer `MueBottomBar` gives one level up. The track itself does not move: the
+ * frame, the segments and the amber fill are the ones at the ordinary scale.
+ *
+ * `onNodeWithText("Recipes")` could never see the difference — the semantics string is `Recipes`
+ * whatever the glyphs do — which is why this is a preview to look at, and why the switcher's own
+ * instrumented test reads the drawn layout instead.
  */
 @Preview(
     name = "Food views · 360 dp · largest font",

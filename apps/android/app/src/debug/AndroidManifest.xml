@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The debug overlay. AGP merges it into `app/src/main/AndroidManifest.xml` for the `debug`
+  build type and for `debugAndroidTest`, and for nothing else — `release` never sees this
+  file, so the shipped application keeps the platform trust store exactly as Android
+  configured it.
+
+  It adds one attribute and declares no component. `android:networkSecurityConfig` is
+  absent from the main manifest, so the merger contributes it rather than overriding
+  anything, and no `tools:replace` is needed or wanted: the day the main manifest gains a
+  config of its own, this should fail the build loudly instead of silently winning.
+
+  Read `app/src/debug/res/xml/network_security_config.xml` for why a debug build needs it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+
+</manifest>

@@ -13,7 +13,7 @@ import java.io.File
 import kotlin.test.assertNotNull
 
 /**
- * The sixteen files under `src/test/resources/contract`, and the Kotlin consumer they were
+ * The nineteen files under `src/test/resources/contract`, and the Kotlin consumer they were
  * committed for.
  *
  * `packages/contracts/src/fixtures.ts` emits them: every instance is `.parse`d by its own Zod
@@ -37,8 +37,16 @@ object ContractFixtures {
      * mode that let sixteen fixtures land unconsumed in the first place.
      */
     val CONSUMERS: Map<String, KSerializer<*>> = mapOf(
+        "ActivitySessionPayloadV1" to serializer<ActivitySessionPayloadV1Dto>(),
         "AggregateMeta" to serializer<AggregateMetaDto>(),
+        "CustomExerciseDefinitionPayloadV1" to
+            serializer<CustomExerciseDefinitionPayloadV1Dto>(),
+        "FoodLogEntryPayloadV1" to serializer<FoodLogEntryPayloadV1Dto>(),
+        "FoodPayloadV1" to serializer<FoodPayloadV1Dto>(),
+        "HealthProfilePayloadV1" to serializer<HealthProfilePayloadV1Dto>(),
+        "MealPlanEntryPayloadV1" to serializer<MealPlanEntryPayloadV1Dto>(),
         "MeasurementPayloadV1" to serializer<MeasurementPayloadV1Dto>(),
+        "RecipePayloadV1" to serializer<RecipePayloadV1Dto>(),
         "MueError" to serializer<MueErrorDto>(),
         "MutationEnvelope" to serializer<MutationEnvelopeDto>(),
         "PullRequest" to serializer<PullRequestDto>(),

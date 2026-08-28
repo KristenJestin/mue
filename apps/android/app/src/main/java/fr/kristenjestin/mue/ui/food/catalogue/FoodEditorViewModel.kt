@@ -51,13 +51,15 @@ class FoodEditorViewModel(
     private val foods: FoodCatalogueRepository,
     private val foodId: FoodId?,
     prefillName: String? = null,
+    /** PRD_FOOD 17: the code an Open Food Facts lookup found nothing for. */
+    prefillBarcode: String? = null,
     private val savedStateHandle: SavedStateHandle,
     private val newId: () -> FoodId = FoodId::random,
 ) : ViewModel() {
 
     private val draft = MutableStateFlow(
         FoodEditorDraft.fromJson(savedStateHandle[KEY_DRAFT])
-            ?: FoodEditorDraft.blank(prefillName),
+            ?: FoodEditorDraft.blank(prefillName, prefillBarcode),
     )
 
     /**
@@ -274,6 +276,7 @@ class FoodEditorViewModel(
         fun factory(
             foodId: FoodId?,
             prefillName: String? = null,
+            prefillBarcode: String? = null,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
@@ -282,6 +285,7 @@ class FoodEditorViewModel(
                     foods = app.container.food.foodCatalogueRepository,
                     foodId = foodId,
                     prefillName = prefillName,
+                    prefillBarcode = prefillBarcode,
                     savedStateHandle = createSavedStateHandle(),
                 )
             }
@@ -296,8 +300,12 @@ class FoodEditorViewModel(
  * after the other, and a shared store entry would hand the second the first's abandoned draft.
  */
 @Composable
-fun foodEditorViewModel(foodId: FoodId?, prefillName: String? = null): FoodEditorViewModel =
+fun foodEditorViewModel(
+    foodId: FoodId?,
+    prefillName: String? = null,
+    prefillBarcode: String? = null,
+): FoodEditorViewModel =
     viewModel(
         key = "foodEditor:${foodId?.value ?: "new"}",
-        factory = FoodEditorViewModel.factory(foodId, prefillName),
+        factory = FoodEditorViewModel.factory(foodId, prefillName, prefillBarcode),
     )

@@ -28,16 +28,41 @@ class AppContainer(private val applicationContext: Context) {
 
     private val database: MueDatabase by lazy { MueDatabase.build(applicationContext) }
 
+    /**
+     * The Room handle, for the one thing the repositories can no longer be asked to do.
+     *
+     * `RoomActivityRepository` now journals every save, which is the whole point of this change —
+     * and it means the state every phone is *in* has become unreachable through public API: a
+     * session that exists in `activity_sessions` with no outbox row and no `sync_aggregate_state`
+     * row, because it was written by a build that had no outbox at all. `LiveAllAggregatesSyncTest`
+     * has to reproduce that to prove the backfill reaches it, and `ActivityDao.saveDetail` is the
+     * only way left to write a session without journalling one.
+     *
+     * `internal` rather than `val`: the Android Gradle plugin makes the instrumented tests a
+     * friend module of the variant they test, so this is visible to them and to nothing that ships.
+     */
+    internal val roomDatabase: MueDatabase get() = database
+
     val measurementRepository: MeasurementRepository by lazy {
         RoomMeasurementRepository(database.measurementDao(), sync.outbox)
     }
 
+    /**
+     * The same [SyncContainer.outbox] every other repository is given, and not a second instance.
+     *
+     * Both of these were built without one, so nothing journalled a session or a personal
+     * exercise definition and PRD 10.1 marked both `Synchronisé: Oui` all the same. One shared
+     * outbox is what keeps `mutation_id`, the pending state and the payload schema version
+     * identical for every aggregate the engine drains — and it is what makes the `minted` signal
+     * cover a session, so saving one now schedules a send instead of waiting for the hourly
+     * worker.
+     */
     val activityRepository: ActivityRepository by lazy {
-        RoomActivityRepository(database.activityDao())
+        RoomActivityRepository(database.activityDao(), sync.outbox)
     }
 
     val exerciseCatalogRepository: ExerciseCatalogRepository by lazy {
-        RoomExerciseCatalogRepository(database.exerciseCatalogDao())
+        RoomExerciseCatalogRepository(database.exerciseCatalogDao(), sync.outbox)
     }
 
     val userProfileRepository: UserProfileRepository by lazy {

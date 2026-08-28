@@ -36,8 +36,6 @@ object FoodCatalogueMessages {
 
     const val CREATE_FOOD: String = "New food"
 
-    const val OPEN_PREFERENCES: String = "Food preferences"
-
     /** PRD_FOOD 18: the list scrolls, so its length has to be sayable as well as visible. */
     fun resultCount(count: Int): String = if (count == 1) "$count food" else "$count foods"
 
@@ -195,21 +193,13 @@ object FoodCatalogueMessages {
 
     // endregion
 
-    // region `Preferences` (PRD_FOOD 13.2, FR-FOOD-010)
-
-    const val PREFERENCES_TITLE: String = "Food preferences"
-
-    /**
-     * PRD_FOOD 13.2 names the preference `Show energy`, so that is what the switch says, and it
-     * is phrased the way it reads when it is **on** — as every other switch in the app is.
+    /*
+     * PRD_FOOD 13.2's `Preferences` region left this file with the screen that read it.
+     *
+     * `Food preferences` is drawn by `Profile` now, and this object is documented as every word
+     * the **catalogue** puts on screen — a dictionary a view no longer opens. The three strings
+     * are `FoodPreferencesMessages`, beside the screen, word for word.
      */
-    const val SHOW_ENERGY_TITLE: String = "Show energy"
-
-    const val SHOW_ENERGY_BODY: String =
-        "Energy and macronutrient figures throughout Food. Turn it off and every screen, search " +
-            "and entry keeps working: only the numbers go."
-
-    // endregion
 
     /** One kind of quotation mark for the whole module, so a test can name what it will read. */
     fun quoted(text: String): String = "“$text”"

@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
@@ -63,7 +64,7 @@ data class ActivityDetailRows(
 )
 
 @Dao
-interface ActivityDao {
+interface ActivityDao : SyncJournalDao {
 
     /**
      * One ordering for the whole app: most recent day first, timed sessions before untimed ones
@@ -206,6 +207,44 @@ interface ActivityDao {
         )
     }
 
+    /**
+     * The identifier a received exercise should point at, resolving a definition this phone may
+     * not hold.
+     *
+     * `strength_exercises.exercise_definition_id` is a `RESTRICT` foreign key, so applying a
+     * session whose definition has not arrived would abort the transaction that carries the
+     * cursor — the phone would stop synchronising on a page it could never get past. The session
+     * payload therefore carries a snapshot of each definition, and this is what turns it back into
+     * a row.
+     *
+     * Three outcomes, in order, and the third is PRD_ACTIVITIES 9.2 rather than an invention:
+     *
+     * 1. the identifier is already known — use it;
+     * 2. it is not, and the folded name is free — insert the snapshot under its own identifier;
+     * 3. it is not, and another definition already holds the folded name — *"un nom déjà présent
+     *    dans le catalogue […] réutilise la définition existante"*, so the exercise points at the
+     *    incumbent. Nothing is renamed and nothing is deleted here: this is a session pointing at
+     *    an exercise, not a definition arriving as an aggregate of its own.
+     */
+    @Transaction
+    suspend fun resolveDefinition(snapshot: ExerciseDefinitionEntity): String {
+        findDefinitionById(snapshot.id)?.let { return it }
+        findDefinitionIdByFoldedName(snapshot.nameFolded)?.let { return it }
+        insertDefinitionIfAbsent(snapshot)
+        return findDefinitionById(snapshot.id)
+            ?: findDefinitionIdByFoldedName(snapshot.nameFolded)
+            ?: snapshot.id
+    }
+
+    @Query("SELECT id FROM exercise_definitions WHERE id = :id")
+    suspend fun findDefinitionById(id: String): String?
+
+    @Query("SELECT id FROM exercise_definitions WHERE name_folded = :nameFolded")
+    suspend fun findDefinitionIdByFoldedName(nameFolded: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDefinitionIfAbsent(definition: ExerciseDefinitionEntity)
+
     @Upsert
     suspend fun upsertSession(session: ActivitySessionEntity)
 
@@ -261,6 +300,62 @@ interface ActivityDao {
         insertEquipment(equipment)
         insertExercises(exercises)
         insertSets(sets)
+    }
+
+    /**
+     * The same save, plus the outbox row, in **one** transaction (FR-SYNC-001).
+     *
+     * The five business tables and `sync_mutations` commit together or not at all, which is the
+     * whole of "toute création, modification ou suppression depuis Android est enregistrée
+     * localement en premier ; la même transaction ajoute une mutation dans la file d'envoi". A
+     * session written without its mutation is a session that exists on this phone and nowhere
+     * else — which is exactly what happened to every session ever recorded, because nothing
+     * journalled one.
+     *
+     * There is one mutation for the whole aggregate, not five. PRD 10.2 makes the session atomic,
+     * and five rows would be five chances for four of them to arrive.
+     */
+    @Transaction
+    suspend fun saveDetailWithMutation(
+        session: ActivitySessionEntity,
+        metrics: List<ActivityMetricEntity>,
+        equipment: List<SessionEquipmentEntity>,
+        exercises: List<StrengthExerciseEntity>,
+        sets: List<StrengthSetEntity>,
+        mutation: SyncMutationEntity,
+    ) {
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
+        saveDetail(session, metrics, equipment, exercises, sets)
+        insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
+        )
+        markAggregateAlive(row.aggregateType, row.aggregateId, row.mutationId)
+        enqueueMutation(row.copy(baseRevision = baseRevision))
+    }
+
+    /**
+     * The rows go through SQLite's own cascade; the tombstone stays (FR-SYNC-005).
+     *
+     * Without the tombstone a session deleted here and still held by the server would come back
+     * on the next pull as an ordinary change and be silently re-created — the resurrection
+     * FR-SYNC-005 exists to prevent.
+     */
+    @Transaction
+    suspend fun deleteSessionWithMutation(sessionId: String, mutation: SyncMutationEntity) {
+        val row = sequenced(mutation)
+        val baseRevision = revisionOf(row.aggregateType, row.aggregateId)
+        deleteSession(sessionId)
+        insertAggregateStateIfAbsent(
+            SyncAggregateStateEntity(row.aggregateType, row.aggregateId)
+        )
+        markAggregateDeleted(
+            aggregateType = row.aggregateType,
+            aggregateId = row.aggregateId,
+            deletedAt = row.createdAt,
+            mutationId = row.mutationId,
+        )
+        enqueueMutation(row.copy(baseRevision = baseRevision))
     }
 }
 

@@ -1,6 +1,322 @@
 {
   "components": {
     "schemas": {
+      "ActivityEnvironment": {
+        "description": "Where the session happened, `unknown` when the preset does not impose one.",
+        "enum": [
+          "indoor",
+          "outdoor",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "ActivityEquipmentType": {
+        "description": "A known piece of gear, or `other` with a free name (PRD_ACTIVITIES 8.4).",
+        "enum": [
+          "barbell",
+          "bicycle",
+          "bodyweight",
+          "climbing_wall",
+          "dumbbells",
+          "elliptical_machine",
+          "kettlebell",
+          "machine",
+          "other",
+          "pool",
+          "resistance_bands",
+          "rowing_machine",
+          "stationary_bike",
+          "treadmill",
+          "yoga_mat"
+        ],
+        "type": "string"
+      },
+      "ActivityMetric": {
+        "description": "One measured quantity of a session, in the integer unit its kind determines.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ActivityMetricKind"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ActivityMetricSource"
+          },
+          "value": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ActivityMetricKind": {
+        "description": "The measured quantity. Its canonical unit is derived from the kind and never carried, so an impossible pair (a distance in kilocalories) cannot be expressed.",
+        "enum": [
+          "average_heart_rate",
+          "average_pace",
+          "average_speed",
+          "cadence",
+          "distance",
+          "elevation_gain",
+          "estimated_energy",
+          "incline",
+          "power",
+          "reported_speed",
+          "steps"
+        ],
+        "type": "string"
+      },
+      "ActivityMetricSource": {
+        "description": "Where a metric's value came from (PRD_ACTIVITIES 8.3).",
+        "enum": [
+          "calculated",
+          "equipment",
+          "manual",
+          "wearable"
+        ],
+        "type": "string"
+      },
+      "ActivityMovement": {
+        "description": "The movement of a session (PRD_ACTIVITIES 8.2).",
+        "enum": [
+          "climbing",
+          "cycling",
+          "dancing",
+          "elliptical",
+          "hiking",
+          "mobility",
+          "other",
+          "pilates",
+          "rowing",
+          "running",
+          "strength_training",
+          "swimming",
+          "team_sport",
+          "walking",
+          "yoga"
+        ],
+        "type": "string"
+      },
+      "ActivitySessionPayloadV1": {
+        "description": "A finished session with its metrics, equipment, exercises and sets, payload schema version 1. The aggregate is atomic: PRD section 10.2 forbids a session appearing without its mandatory children.",
+        "properties": {
+          "customMovementName": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "durationSeconds": {
+            "maximum": 359940,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/ActivityEnvironment"
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/SessionEquipment"
+            },
+            "maxItems": 60,
+            "type": "array"
+          },
+          "exercises": {
+            "items": {
+              "$ref": "#/components/schemas/StrengthExercise"
+            },
+            "maxItems": 60,
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityMetric"
+            },
+            "maxItems": 11,
+            "type": "array"
+          },
+          "movement": {
+            "$ref": "#/components/schemas/ActivityMovement"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "perceivedEffort": {
+            "anyOf": [
+              {
+                "maximum": 10,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/ActivitySource"
+          },
+          "startedAtTime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedOn": {
+            "$ref": "#/components/schemas/LocalDate"
+          }
+        },
+        "required": [
+          "customMovementName",
+          "durationSeconds",
+          "environment",
+          "equipment",
+          "exercises",
+          "id",
+          "metrics",
+          "movement",
+          "notes",
+          "perceivedEffort",
+          "source",
+          "startedAtTime",
+          "startedOn"
+        ],
+        "type": "object"
+      },
+      "ActivitySessionUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "activitySession",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ActivitySessionPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "ActivitySessionUpsertMutation": {
+        "description": "Upsert of a whole activity session, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "activitySession",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ActivitySessionPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
+      "ActivitySource": {
+        "description": "How the session entered Mue. `agent` is an MCP creation and is not one of Android's three ids; an unknown id degrades to `manual` on the client.",
+        "enum": [
+          "agent",
+          "health_connect",
+          "manual",
+          "timer"
+        ],
+        "type": "string"
+      },
       "AggregateId": {
         "description": "Stable aggregate identifier. A UUID when the aggregate has no natural key, the natural key when it has one (a Measurement is identified by its local date).",
         "examples": [
@@ -61,9 +377,31 @@
         "type": "object"
       },
       "AggregateType": {
-        "description": "The synchronised aggregate kinds. V1 carries one.",
+        "description": "The synchronised aggregate kinds (PRD section 10.2).",
         "enum": [
-          "measurement"
+          "activitySession",
+          "customExerciseDefinition",
+          "food",
+          "foodLogEntry",
+          "healthProfile",
+          "mealPlanEntry",
+          "measurement",
+          "recipe"
+        ],
+        "type": "string"
+      },
+      "BirthDate": {
+        "allOf": [
+          {
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          {
+            "pattern": "^(?:19|20)\\d{2}-"
+          }
+        ],
+        "description": "ISO-8601 calendar date of birth, year 1900-2099. The bound is absolute so a journalled payload never expires; the author's own rule (not in the future, not more than 120 years back) is the client's, and this server does not re-adjudicate it (PRD section 14.4).",
+        "examples": [
+          "1998-11-18"
         ],
         "type": "string"
       },
@@ -102,6 +440,137 @@
         "required": [
           "seq",
           "v"
+        ],
+        "type": "object"
+      },
+      "CustomExerciseDefinitionPayloadV1": {
+        "description": "A personal exercise definition, payload schema version 1. It carries no `isCustom`: a provided definition is not personal data and cannot be expressed here (PRD section 10.1).",
+        "properties": {
+          "equipment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityEquipmentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "trackingMode": {
+            "$ref": "#/components/schemas/ExerciseTrackingMode"
+          }
+        },
+        "required": [
+          "equipment",
+          "id",
+          "name",
+          "trackingMode"
+        ],
+        "type": "object"
+      },
+      "CustomExerciseDefinitionUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "customExerciseDefinition",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CustomExerciseDefinitionPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "CustomExerciseDefinitionUpsertMutation": {
+        "description": "Upsert of a personal exercise definition, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "customExerciseDefinition",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/CustomExerciseDefinitionPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
         ],
         "type": "object"
       },
@@ -204,6 +673,597 @@
         ],
         "type": "object"
       },
+      "Estimation": {
+        "description": "Whether the line's numbers were weighed or estimated. PRD_FOOD 13.2 makes an approximation visible rather than hidden.",
+        "enum": [
+          "approximate",
+          "measured"
+        ],
+        "type": "string"
+      },
+      "ExerciseDefinitionSnapshot": {
+        "description": "The definition an exercise points at, copied into the session so the session can always be applied (PRD section 10.2).",
+        "properties": {
+          "equipment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityEquipmentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "isCustom": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "trackingMode": {
+            "$ref": "#/components/schemas/ExerciseTrackingMode"
+          }
+        },
+        "required": [
+          "equipment",
+          "id",
+          "isCustom",
+          "name",
+          "trackingMode"
+        ],
+        "type": "object"
+      },
+      "ExerciseTrackingMode": {
+        "description": "Which fields a set of this exercise carries (PRD_ACTIVITIES 9.2).",
+        "enum": [
+          "duration",
+          "reps_only",
+          "weight_and_duration",
+          "weight_and_reps"
+        ],
+        "type": "string"
+      },
+      "FoodLogEntryPayloadV1": {
+        "description": "One consumption with its own nutritional snapshot, payload schema version 1. Self-contained: it does not depend on its food or its recipe having arrived (PRD section 10.2).",
+        "properties": {
+          "amountLabel": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "carbsMilligrams": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "consumedAt": {
+            "$ref": "#/components/schemas/LocalTime"
+          },
+          "consumedOn": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "energyMilliKcal": {
+            "maximum": 5000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimation": {
+            "$ref": "#/components/schemas/Estimation"
+          },
+          "fatMilligrams": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fibreMilligrams": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fromPlan": {
+            "$ref": "#/components/schemas/MealPlanAggregateId"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FoodLogKind"
+          },
+          "portionsThousandths": {
+            "$ref": "#/components/schemas/UsualPortionsThousandths"
+          },
+          "proteinMilligrams": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantityThousandths": {
+            "maximum": 5000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "quantityUnit": {
+            "$ref": "#/components/schemas/QuantityUnit"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/MealSlot"
+          },
+          "sourceRef": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "weighedCooked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "consumedAt",
+          "consumedOn",
+          "estimation",
+          "id",
+          "kind",
+          "slot",
+          "title",
+          "weighedCooked"
+        ],
+        "type": "object"
+      },
+      "FoodLogEntryUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "foodLogEntry",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FoodLogEntryPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "FoodLogEntryUpsertMutation": {
+        "description": "Upsert of one journal line with its snapshot, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "foodLogEntry",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FoodLogEntryPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
+      "FoodLogKind": {
+        "description": "Whether the line came from a food, a recipe or a quick add (PRD_FOOD 10.2).",
+        "enum": [
+          "food",
+          "quick",
+          "recipe"
+        ],
+        "type": "string"
+      },
+      "FoodPayloadV1": {
+        "description": "A custom food or a copied Open Food Facts product, payload schema version 1. Unknown nutrients are absent keys, never zero (PRD_FOOD 13.1).",
+        "properties": {
+          "barcode": {
+            "maxLength": 14,
+            "minLength": 8,
+            "pattern": "^\\d+$",
+            "type": "string"
+          },
+          "brand": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "carbsMilligrams": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cookedLabel": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "cookedRatioThousandths": {
+            "maximum": 5000,
+            "minimum": 300,
+            "type": "integer"
+          },
+          "energyMilliKcal": {
+            "maximum": 900000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fatMilligrams": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fibreMilligrams": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "imageRef": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "proteinMilligrams": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rawLabel": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "referenceUnit": {
+            "$ref": "#/components/schemas/ReferenceUnit"
+          },
+          "servingLabel": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "servingThousandths": {
+            "maximum": 2000000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FoodSource"
+          },
+          "sourceId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceVersion": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cookedLabel",
+          "id",
+          "name",
+          "rawLabel",
+          "referenceUnit",
+          "source"
+        ],
+        "type": "object"
+      },
+      "FoodSource": {
+        "description": "Where a synchronised food came from. The embedded Ciqual catalogue is deliberately not a member: PRD_FOOD 21.1 marks it as reference data rather than personal data.",
+        "enum": [
+          "custom",
+          "open_food_facts"
+        ],
+        "type": "string"
+      },
+      "FoodUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "food",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FoodPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "FoodUpsertMutation": {
+        "description": "Upsert of a custom food or a copied product, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "food",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/FoodPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
+      "HealthProfilePayloadV1": {
+        "description": "Health profile (PRD section 13.4), payload schema version 1. One aggregate per account, identified by the constant `me`. Both fields are nullable and both are always present: null is a stated empty value, never an omission.",
+        "properties": {
+          "birthDate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BirthDate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heightCm": {
+            "anyOf": [
+              {
+                "maximum": 230,
+                "minimum": 120,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "birthDate",
+          "heightCm"
+        ],
+        "type": "object"
+      },
+      "HealthProfileUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "const": "me",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "healthProfile",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealthProfilePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "HealthProfileUpsertMutation": {
+        "description": "Upsert of the single health profile, payload schema version 1. The aggregate identifier is the constant `me`.",
+        "properties": {
+          "aggregateId": {
+            "const": "me",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "healthProfile",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/HealthProfilePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
       "Instant": {
         "description": "ISO-8601 instant in UTC, always suffixed with Z.",
         "examples": [
@@ -232,6 +1292,157 @@
         ],
         "format": "date",
         "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+        "type": "string"
+      },
+      "LocalTime": {
+        "description": "ISO-8601 local time, hours and minutes only, no zone.",
+        "examples": [
+          "18:00"
+        ],
+        "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+        "type": "string"
+      },
+      "MealPlanAggregateId": {
+        "description": "The business key of a proposal, `<date>:<slot>`. The separator is a colon: `aggregateIdSchema`'s alphabet has no `/`.",
+        "examples": [
+          "2026-09-01:dinner"
+        ],
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}:(?:breakfast|morning_snack|lunch|snack|dinner|evening_snack)$",
+        "type": "string"
+      },
+      "MealPlanEntryPayloadV1": {
+        "description": "One meal proposal, payload schema version 1. At most one per date and moment; the identifier is `<plannedOn>:<slot>` (PRD_FOOD 21.3).",
+        "properties": {
+          "consumedLogEntryId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "plannedOn": {
+            "$ref": "#/components/schemas/LocalDate"
+          },
+          "plannedServingsThousandths": {
+            "$ref": "#/components/schemas/ServingsThousandths"
+          },
+          "recipeId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/MealSlot"
+          }
+        },
+        "required": [
+          "plannedOn",
+          "plannedServingsThousandths",
+          "recipeId",
+          "slot"
+        ],
+        "type": "object"
+      },
+      "MealPlanEntryUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "$ref": "#/components/schemas/MealPlanAggregateId"
+          },
+          "aggregateType": {
+            "const": "mealPlanEntry",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/MealPlanEntryPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "MealPlanEntryUpsertMutation": {
+        "description": "Upsert of one meal proposal, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "$ref": "#/components/schemas/MealPlanAggregateId"
+          },
+          "aggregateType": {
+            "const": "mealPlanEntry",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/MealPlanEntryPayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
+      "MealSlot": {
+        "description": "The moment of the day a line or a proposal belongs to (PRD_FOOD 8.4).",
+        "enum": [
+          "breakfast",
+          "dinner",
+          "evening_snack",
+          "lunch",
+          "morning_snack",
+          "snack"
+        ],
         "type": "string"
       },
       "MeasurementPayloadV1": {
@@ -453,7 +1664,7 @@
         "description": "One mutation (PRD section 12.2). Replaying it never repeats its effect.",
         "oneOf": [
           {
-            "$ref": "#/components/schemas/MeasurementUpsertMutation"
+            "$ref": "#/components/schemas/UpsertMutation"
           },
           {
             "$ref": "#/components/schemas/DeleteMutation"
@@ -694,6 +1905,15 @@
         ],
         "type": "object"
       },
+      "QuantityUnit": {
+        "description": "The unit `quantityThousandths` is stated in. `serving` selects the serving scale; a weight or a volume selects the ingredient scale.",
+        "enum": [
+          "gram",
+          "millilitre",
+          "serving"
+        ],
+        "type": "string"
+      },
       "ReadinessCheckReport": {
         "properties": {
           "name": {
@@ -737,6 +1957,227 @@
         ],
         "type": "object"
       },
+      "RecipeIngredient": {
+        "description": "One ingredient, with a snapshot of its food's name so the recipe renders before the food arrives.",
+        "properties": {
+          "foodId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "foodName": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "position": {
+            "maximum": 40,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "quantityThousandths": {
+            "maximum": 5000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/ReferenceUnit"
+          }
+        },
+        "required": [
+          "foodId",
+          "id",
+          "position",
+          "quantityThousandths",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "RecipePayloadV1": {
+        "description": "A recipe with its ingredients, payload schema version 1. The list is never empty: PRD_FOOD 21.2 forbids a recipe appearing without it.",
+        "properties": {
+          "baseServings": {
+            "maximum": 12,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "imageRef": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeIngredient"
+            },
+            "maxItems": 40,
+            "minItems": 1,
+            "type": "array"
+          },
+          "isFavourite": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "prepTimeMinutes": {
+            "maximum": 1440,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "type": {
+            "$ref": "#/components/schemas/RecipeType"
+          }
+        },
+        "required": [
+          "baseServings",
+          "id",
+          "ingredients",
+          "isFavourite",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "RecipeType": {
+        "description": "Which meal a recipe belongs to (PRD_FOOD 8.3).",
+        "enum": [
+          "breakfast",
+          "main",
+          "snack"
+        ],
+        "type": "string"
+      },
+      "RecipeUpsertChange": {
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "recipe",
+            "type": "string"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AggregateMeta"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Sequence"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "meta",
+          "op",
+          "payload",
+          "payloadSchemaVersion",
+          "sequence"
+        ],
+        "type": "object"
+      },
+      "RecipeUpsertMutation": {
+        "description": "Upsert of a recipe with its ingredients, payload schema version 1.",
+        "properties": {
+          "aggregateId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "aggregateType": {
+            "const": "recipe",
+            "type": "string"
+          },
+          "baseRevision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Revision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientOccurredAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "mutationId": {
+            "$ref": "#/components/schemas/MutationId"
+          },
+          "op": {
+            "const": "upsert",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/RecipePayloadV1"
+          },
+          "payloadSchemaVersion": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "aggregateId",
+          "aggregateType",
+          "baseRevision",
+          "clientOccurredAt",
+          "mutationId",
+          "op",
+          "origin",
+          "payload",
+          "payloadSchemaVersion"
+        ],
+        "type": "object"
+      },
+      "ReferenceUnit": {
+        "description": "The unit the per-100 values are stated in (PRD_FOOD 8.6).",
+        "enum": [
+          "gram",
+          "millilitre"
+        ],
+        "type": "string"
+      },
       "Revision": {
         "$ref": "#/components/schemas/CounterString",
         "description": "Per-aggregate revision. Compared for optimistic concurrency; never used as a cursor.",
@@ -753,6 +2194,178 @@
           "9007199254740993"
         ]
       },
+      "ServingsThousandths": {
+        "description": "A serving count in thousandths, 0.25 to 10 in steps of 0.25 (PRD_FOOD 15). The step is part of the type: a value inside the range but off the quarter is refused.",
+        "examples": [
+          1500
+        ],
+        "maximum": 10000,
+        "minimum": 250,
+        "multipleOf": 250,
+        "type": "integer"
+      },
+      "SessionEquipment": {
+        "description": "A piece of gear attached to a session. `customName` is required for `other` and absent for every known type (PRD_ACTIVITIES 8.2 and 8.4).",
+        "properties": {
+          "customName": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "equipmentType": {
+            "$ref": "#/components/schemas/ActivityEquipmentType"
+          },
+          "position": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "customName",
+          "equipmentType",
+          "position"
+        ],
+        "type": "object"
+      },
+      "StrengthExercise": {
+        "description": "One exercise of a session, with its definition snapshot and its sets.",
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/ExerciseDefinitionSnapshot"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sets": {
+            "items": {
+              "$ref": "#/components/schemas/StrengthSet"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "definition",
+          "id",
+          "notes",
+          "position",
+          "sets"
+        ],
+        "type": "object"
+      },
+      "StrengthSet": {
+        "description": "One set. Every optional number is null when unrecorded and never zero (PRD_ACTIVITIES 9.4).",
+        "properties": {
+          "durationSeconds": {
+            "anyOf": [
+              {
+                "maximum": 359940,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "loadGrams": {
+            "anyOf": [
+              {
+                "maximum": 1000000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "perceivedEffort": {
+            "anyOf": [
+              {
+                "maximum": 10,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "repetitions": {
+            "anyOf": [
+              {
+                "maximum": 999,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setType": {
+            "$ref": "#/components/schemas/StrengthSetType"
+          }
+        },
+        "required": [
+          "durationSeconds",
+          "id",
+          "loadGrams",
+          "perceivedEffort",
+          "position",
+          "repetitions",
+          "setType"
+        ],
+        "type": "object"
+      },
+      "StrengthSetType": {
+        "description": "Working, warm-up or drop set (PRD_ACTIVITIES 9.4).",
+        "enum": [
+          "drop",
+          "warmup",
+          "working"
+        ],
+        "type": "string"
+      },
       "SupportedSchemaVersions": {
         "additionalProperties": {
           "items": {
@@ -765,6 +2378,9 @@
         "description": "Aggregate type to the payload schema versions the client can apply.",
         "examples": [
           {
+            "healthProfile": [
+              1
+            ],
             "measurement": [
               1
             ]
@@ -781,12 +2397,79 @@
         "description": "One accepted change from the server journal (PRD section 12.3).",
         "oneOf": [
           {
-            "$ref": "#/components/schemas/MeasurementUpsertChange"
+            "$ref": "#/components/schemas/UpsertChange"
           },
           {
             "$ref": "#/components/schemas/DeleteChange"
           }
         ]
+      },
+      "UpsertChange": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ActivitySessionUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/CustomExerciseDefinitionUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/FoodUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/FoodLogEntryUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/HealthProfileUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/MealPlanEntryUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/MeasurementUpsertChange"
+          },
+          {
+            "$ref": "#/components/schemas/RecipeUpsertChange"
+          }
+        ]
+      },
+      "UpsertMutation": {
+        "description": "An upsert, carrying the complete aggregate for its type (PRD section 12.2).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ActivitySessionUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/CustomExerciseDefinitionUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/FoodUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/FoodLogEntryUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/HealthProfileUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/MealPlanEntryUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/MeasurementUpsertMutation"
+          },
+          {
+            "$ref": "#/components/schemas/RecipeUpsertMutation"
+          }
+        ]
+      },
+      "UsualPortionsThousandths": {
+        "description": "A count of a food's usual servings, in thousandths: 0.5 to 20 in steps of 0.5 (PRD_FOOD 15).",
+        "examples": [
+          1500
+        ],
+        "maximum": 20000,
+        "minimum": 500,
+        "multipleOf": 500,
+        "type": "integer"
       }
     },
     "securitySchemes": {

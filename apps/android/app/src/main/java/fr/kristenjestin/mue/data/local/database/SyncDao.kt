@@ -50,14 +50,18 @@ interface SyncDao : SyncJournalDao {
      * oldest first — the query a send actually uses.
      *
      * [pendingMutations] is the queue as the user's `Data & sync` screen thinks of it; this is
-     * the queue as the network sees it, and the difference is not cosmetic. `health_profile` is
-     * journalled at every save (FR-SYNC-001) and `AGGREGATE_TYPES` in `packages/contracts` is
-     * `["measurement"]`, so those rows are `pending` and undeliverable *for as long as the
-     * contract lacks the branch* — they never drain. A send that took the oldest rows regardless
-     * of type would, once that many profile saves had accumulated, get back a window holding
-     * nothing sendable, and every measurement behind them would stop going out for good.
-     * FR-SYNC-007 forbids exactly that, so the type is part of the selection rather than a check
-     * made after the rows have already filled the window.
+     * the queue as the network sees it, and the difference is not cosmetic. The four food
+     * aggregates were journalled at every save (FR-SYNC-001) while `AGGREGATE_TYPES` in
+     * `packages/contracts` had no branch for any of them, so those rows were `pending` and
+     * undeliverable *for as long as the contract lacked the branch* — they never drained. A send
+     * that took the oldest rows regardless of type would, once that many meals had accumulated,
+     * get back a window holding nothing sendable, and every measurement behind them would stop
+     * going out for good. FR-SYNC-007 forbids exactly that, so the type is part of the selection
+     * rather than a check made after the rows have already filled the window.
+     *
+     * Every aggregate of PRD 10.1 is sendable today, so the filter excludes nothing — which is
+     * precisely when it is worth keeping, because the next one journalled ahead of its contract
+     * will find it already in place.
      *
      * The types are bound rather than spelled out, unlike `state` above: they are owned by
      * `SyncWire`, which is where the wire's vocabulary is translated, and a literal here would
@@ -93,6 +97,24 @@ interface SyncDao : SyncJournalDao {
     @Query("SELECT COUNT(*) FROM sync_mutations WHERE state = 'failed'")
     fun observeFailedCount(): Flow<Int>
 
+    /**
+     * PRD 9.1's "le nombre de changements locaux en attente", live.
+     *
+     * The observable twin of [countInState] with `'pending'` bound, and it exists because
+     * `Data & sync` has to be able to contradict itself the moment a weight is saved: the
+     * section is shown beside `Synced`, and a screen that says `Synced` while a row sits in the
+     * outbox lies about the only thing the outbox is for. [observeSyncState] cannot carry it —
+     * Room invalidates a Flow per table, and that one watches `sync_state`, which a new mutation
+     * does not touch.
+     *
+     * Every `pending` row is counted, of every aggregate type, including the ones this build has
+     * no wire branch for. They are what [countPendingOfOtherTypes] names separately, and they are
+     * still local changes that are not on the server, so hiding them here would produce the same
+     * comfortable lie in a smaller number.
+     */
+    @Query("SELECT COUNT(*) FROM sync_mutations WHERE state = 'pending'")
+    fun observePendingCount(): Flow<Int>
+
     @Query("UPDATE sync_mutations SET state = :state WHERE mutation_id IN (:mutationIds)")
     suspend fun setState(mutationIds: List<String>, state: String)
 
@@ -117,6 +139,187 @@ interface SyncDao : SyncJournalDao {
      */
     @Query("UPDATE sync_mutations SET state = 'pending' WHERE state = 'inflight'")
     suspend fun requeueInflight(): Int
+
+    /**
+     * Every row a repair pass might have something to say about, as the four columns it decides
+     * on — and no payload.
+     *
+     * `inflight` is excluded in SQL rather than in Kotlin so that a row on the wire is not even
+     * *read* by the pass, whatever `OutboxRepair.verdict` may later be changed to say about it.
+     * The projection is narrow for the same reason `pendingMutations` is not reused: this asks
+     * a question about identifiers, and hauling every stored payload through it to answer would
+     * make the cost of the pass the size of the outbox rather than its length.
+     */
+    @Query(
+        "SELECT mutation_id, state, attempt_count, last_error_code FROM sync_mutations " +
+            "WHERE state <> 'inflight' ORDER BY created_at ASC, rowid ASC"
+    )
+    suspend fun repairCandidates(): List<OutboxRepairCandidate>
+
+    /**
+     * Gives one stored row the identifier a current build would have minted for it, and puts it
+     * back in the queue.
+     *
+     * Four things it does *not* do, each on purpose:
+     *
+     * - It does not touch `created_at`. That column is the outbox's local sequence, and the two
+     *   mutations of one edit — the delete of the old date and the upsert of the new one — must
+     *   keep their order or the server applies a deletion to a row it has just created. A
+     *   `rowid` is unaffected by rewriting a primary key in SQLite, so the tie-break survives too.
+     * - It does not reset `attempt_count`. That is history, and the row really was refused.
+     * - It does not touch the payload, the aggregate or the base revision. This repairs an
+     *   identifier; anything else would be repairing the user's data, which FR-SYNC-007 forbids.
+     * - It does not widen its own `WHERE` beyond the id it was given. The caller has already
+     *   decided, per row, and a statement that re-decided would be a second place to keep the
+     *   rule.
+     *
+     * `last_error_code` and `last_error_message` **are** cleared: they describe a refusal of an
+     * identifier this row no longer carries, and leaving them would have `Data & sync` go on
+     * quoting "Every mutation needs a readable UUIDv7 `mutationId`" at a row that now has one.
+     *
+     * Rewriting a primary key is what this is, and it is sound here precisely because these rows
+     * were never accepted: no `sync_aggregate_state.last_mutation_id` can name one, since that
+     * column is only ever written from a server acknowledgement or a server change.
+     */
+    @Query(
+        "UPDATE sync_mutations SET mutation_id = :mutationId, state = 'pending', " +
+            "last_error_code = NULL, last_error_message = NULL " +
+            "WHERE mutation_id = :previousMutationId"
+    )
+    suspend fun remintMutationId(previousMutationId: String, mutationId: String)
+
+    /**
+     * Every finished session this database holds that has **never been journalled**, oldest first.
+     *
+     * `MIGRATION_2_3` created `activity_sessions` in version 3 and `MIGRATION_4_5` created
+     * `sync_mutations` empty in version 5, and until now nothing minted a row for a session at
+     * all — `RoomActivityRepository` took no outbox. So every session ever recorded is here: the
+     * metrics, the equipment, the exercises and the sets of real training, on one phone and
+     * nowhere else. A contract change does nothing for rows already written, and neither does an
+     * outbox added afterwards; this is what reaches back for them.
+     *
+     * ## The predicate is the guard, and there is no flag
+     *
+     * A session qualifies when it has **no `sync_aggregate_state` row and no `sync_mutations`
+     * row**. Both halves are load-bearing and together they make the pass idempotent by
+     * construction rather than by remembering — the same property `OutboxRepair` has, and the
+     * reason neither needs a `sync_state` column or a version bump to hang one on:
+     *
+     * - **no `sync_aggregate_state`** means no server has ever acknowledged this session and no
+     *   pull has ever delivered it. That is what makes minting an upsert safe: a session the
+     *   server already holds — one an agent created, or one another device sent — has a row here,
+     *   so this can never overwrite a remote version with a local one it knows nothing about.
+     * - **no `sync_mutations`** means nothing is already queued for it, in any state. A row
+     *   acknowledged and dropped has left `sync_aggregate_state` behind, so it fails the first
+     *   half; a row `failed` under FR-SYNC-007 is still here, so it fails the second. Neither is
+     *   re-minted, and a session backfilled once is never a candidate again.
+     */
+    @Query(
+        """
+        SELECT s.id FROM activity_sessions s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM sync_aggregate_state a
+            WHERE a.aggregate_type = :aggregateType AND a.aggregate_id = s.id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_mutations m
+            WHERE m.aggregate_type = :aggregateType AND m.aggregate_id = s.id
+        )
+        ORDER BY s.created_at ASC, s.id ASC
+        """
+    )
+    suspend fun unjournalledActivitySessions(aggregateType: String): List<String>
+
+    /**
+     * Every **personal** exercise definition that has never been journalled, oldest name first.
+     *
+     * `is_custom = 1` is the whole filter and it is PRD 10.1's own line: the seventeen definitions
+     * Mue ships are `Synchronisé: Non` — a versioned reference every phone already holds under the
+     * same hardcoded identifiers — so backfilling one would push reference data as personal data
+     * and let a rename of it reach another device.
+     *
+     * The rest of the predicate is [unjournalledActivitySessions]'s, for the same two reasons.
+     */
+    @Query(
+        """
+        SELECT d.id FROM exercise_definitions d
+        WHERE d.is_custom = 1
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_aggregate_state a
+            WHERE a.aggregate_type = :aggregateType AND a.aggregate_id = d.id
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM sync_mutations m
+            WHERE m.aggregate_type = :aggregateType AND m.aggregate_id = d.id
+        )
+        ORDER BY d.name_folded ASC
+        """
+    )
+    suspend fun unjournalledCustomExercises(aggregateType: String): List<String>
+
+    @Query("SELECT * FROM exercise_definitions WHERE id = :id")
+    suspend fun exerciseDefinition(id: String): ExerciseDefinitionEntity?
+
+    /**
+     * Every outbox row whose **aggregate identifier** a repair pass might have something to say
+     * about, as the three columns it decides on.
+     *
+     * Narrower than [repairCandidates] on purpose: the identifier defect this answers belongs to
+     * one aggregate type, so the type is in the `WHERE` rather than in Kotlin, and a phone whose
+     * outbox holds a thousand weights reads none of them. `inflight` is excluded in SQL for the
+     * same reason it is there: a row that may be on the wire is not even read.
+     */
+    @Query(
+        "SELECT mutation_id, aggregate_type, aggregate_id, state FROM sync_mutations " +
+            "WHERE state <> 'inflight' AND aggregate_type = :aggregateType " +
+            "ORDER BY created_at ASC, rowid ASC"
+    )
+    suspend fun aggregateIdRepairCandidates(aggregateType: String): List<AggregateIdRepairCandidate>
+
+    /**
+     * Gives one stored outbox row the aggregate identifier a current build would have written.
+     *
+     * It touches the identifier and nothing else — not the payload, not `created_at`, not
+     * `attempt_count`, not the mutation id. `MealPlanIdRepair` explains why rewriting *this*
+     * column is safe where rewriting it in general would not be: no row of this aggregate type
+     * has ever been sendable, so no server has recorded the old spelling and there is nothing to
+     * fork away from.
+     *
+     * `last_error_code` and `last_error_message` are cleared, as in [remintMutationId]: they would
+     * otherwise go on describing a refusal of an identifier the row no longer carries.
+     */
+    @Query(
+        "UPDATE sync_mutations SET aggregate_id = :aggregateId, state = 'pending', " +
+            "last_error_code = NULL, last_error_message = NULL " +
+            "WHERE mutation_id = :mutationId"
+    )
+    suspend fun renameMutationAggregateId(mutationId: String, aggregateId: String)
+
+    /** The per-aggregate metadata rows of one type, so the same rename reaches both tables. */
+    @Query("SELECT * FROM sync_aggregate_state WHERE aggregate_type = :aggregateType")
+    suspend fun aggregateStatesOfType(aggregateType: String): List<SyncAggregateStateEntity>
+
+    /**
+     * Moves one `sync_aggregate_state` row to the identifier its outbox rows now use.
+     *
+     * It has to happen, and it has to happen in the same transaction: this table is keyed by
+     * `(aggregate_type, aggregate_id)` and holds the local tombstone of FR-SYNC-005. A repair that
+     * renamed the outbox and left this behind would have the next save insert a *second* metadata
+     * row under the new spelling, with no `deleted_at` — and a proposal the user had deleted would
+     * quietly lose the tombstone that stops an old copy resurrecting it.
+     *
+     * `IGNORE` on the primary key would silently drop the row, so the rename is a plain `UPDATE`
+     * and the caller skips a row whose destination already exists.
+     */
+    @Query(
+        "UPDATE sync_aggregate_state SET aggregate_id = :aggregateId " +
+            "WHERE aggregate_type = :aggregateType AND aggregate_id = :previousAggregateId"
+    )
+    suspend fun renameAggregateState(
+        aggregateType: String,
+        previousAggregateId: String,
+        aggregateId: String,
+    )
 
     /**
      * The revision the server assigned to an accepted mutation, written on acknowledgement.
