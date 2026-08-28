@@ -103,7 +103,7 @@
       "schema": "MutationEnvelope"
     },
     {
-      "description": "The identifier that used to carry a `/`: `2026-09-01:dinner`.",
+      "description": "The identifier that used to carry a `/`: `2026-08-18:dinner`.",
       "file": "mutation-upsert-meal-plan-entry-v1.json",
       "kind": "edge",
       "schema": "MutationEnvelope"

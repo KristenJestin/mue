@@ -49,42 +49,27 @@ beforeEach(async () => {
 });
 
 /**
- * A day safely inside `pastEventDay`, computed rather than written down.
+ * The instance `packages/contracts` emitted for a fixture file, by name. Every byte of it, and
+ * no substitution of any field.
  *
- * Four committed fixtures date a *record of something that happened* in the future --
- * `measurement-v1-edge` and `activity-session-v1-edge` both on `2028-02-29`, and both food log
- * entries on `2026-09-01`. They were written as "a leap day" and "next month" at a time when
- * nothing judged a date, and the date policy now says all four are impossible: BR-009,
- * FR-ACTIVITY-005 and PRD_FOOD 15 each forbid one of them.
+ * This function used to rebase the day `pastEventDay` judges, because four fixtures dated a
+ * *record of something that happened* in the future -- `measurement-v1-edge` and
+ * `activity-session-v1-edge` on `2028-02-29`, both food log entries on `2026-09-01` -- and
+ * BR-009, FR-ACTIVITY-005 and PRD_FOOD 15 each forbid one of them. The rebasing was a workaround
+ * for a fixture the server would have refused, and it cost this file the one property it exists
+ * to have: that what is pushed here is exactly what Kotlin parses offline and what Android's
+ * drift detector reads. A test that edits the contract before sending it is testing an instance
+ * nobody ships.
  *
- * The fixtures are not corrected here. They are emitted into
- * `apps/android/app/src/test/resources/contract/`, so changing them is an Android change, and
- * this branch does not make one -- it is reported instead. Until they are regenerated, this file
- * rebases the judged day and leaves every other byte of the instance exactly as the contract
- * emitted it, which is what the file exists to push.
- */
-const RECORDED_DAY = (() => {
-  const day = new Date();
-  day.setUTCDate(day.getUTCDate() - 7);
-  return day.toISOString().slice(0, 10);
-})();
-
-/** The fields `pastEventDay` judges, by the payload that carries them. */
-const RECORDED_DAY_FIELDS = ["date", "startedOn", "consumedOn"] as const;
-
-/**
- * The instance `packages/contracts` emitted for a fixture file, by name, with any day the date
- * policy judges moved into the past. See [RECORDED_DAY]: a fixture whose own date the server
- * refuses cannot be pushed, and the fixture is the thing under test everywhere else.
+ * Those four fixtures now carry days that have already passed and always will have, so there is
+ * nothing left to rebase and a substitution here would only be able to hide a regression in
+ * them. If one of them ever moves into the future again, the right failure is this suite going
+ * red on `sync.invalid_payload`, which is what the server would say to the phone.
  */
 function fixture(file: string): Record<string, unknown> {
   const found = CONTRACT_FIXTURES.find((candidate) => candidate.file === file);
   if (found === undefined) throw new Error(`no contract fixture named ${file}`);
-  const value = { ...(found.value as Record<string, unknown>) };
-  for (const field of RECORDED_DAY_FIELDS) {
-    if (typeof value[field] === "string") value[field] = RECORDED_DAY;
-  }
-  return value;
+  return { ...(found.value as Record<string, unknown>) };
 }
 
 interface Envelope {
@@ -418,7 +403,7 @@ describe("a journal line", () => {
     expect(rows[0]?.consumedAt).toBe("20:15");
     expect(rows[0]?.energyMilliKcal).toBe(284_000);
     // The colon-joined meal plan identifier, stored as the trace of provenance it is.
-    expect(rows[0]?.fromPlan).toBe("2026-09-01:dinner");
+    expect(rows[0]?.fromPlan).toBe("2026-08-18:dinner");
   });
 
   /**
@@ -451,7 +436,7 @@ describe("a journal line", () => {
 
 describe("a meal proposal", () => {
   const payload = fixture("meal-plan-entry-v1-valid.json");
-  const id = "2026-09-01:dinner";
+  const id = "2026-08-18:dinner";
 
   test("reaches PostgreSQL under its business key and comes back from the journal", async () => {
     await expectRoundTrip("mealPlanEntry", id, payload);
@@ -459,7 +444,7 @@ describe("a meal proposal", () => {
       .select()
       .from(mealPlanEntries)
       .where(eq(mealPlanEntries.userId, USER));
-    expect(rows[0]?.plannedOn).toBe("2026-09-01");
+    expect(rows[0]?.plannedOn).toBe("2026-08-18");
     expect(rows[0]?.slot).toBe("dinner");
     expect(rows[0]?.plannedServingsThousandths).toBe(1_500);
   });
@@ -488,7 +473,7 @@ describe("a meal proposal", () => {
   });
 
   test("refuses an identifier that names a different evening from its payload", async () => {
-    const result = await pushOne(upsert("mealPlanEntry", "2026-09-02:dinner", payload));
+    const result = await pushOne(upsert("mealPlanEntry", "2026-08-19:dinner", payload));
     expect(result.status).toBe("rejected");
     expect(result.status === "rejected" && result.error.code).toBe("sync.invalid_payload");
   });
@@ -501,7 +486,7 @@ describe("a meal proposal", () => {
    * on the day the aggregate joined the contract, and the reason `MealPlanIdRepair` exists.
    */
   test("refuses the slash Android used to write, which is why the rows were repaired", async () => {
-    const result = await pushOne(upsert("mealPlanEntry", "2026-09-01/dinner", payload));
+    const result = await pushOne(upsert("mealPlanEntry", "2026-08-18/dinner", payload));
     expect(result.status).toBe("rejected");
     expect(result.status === "rejected" && result.error.code).toBe("sync.invalid_payload");
     const rows = await handle.db
@@ -538,16 +523,17 @@ describe("all six together", () => {
     const recipe = fixture("recipe-v1-valid.json");
     const line = fixture("food-log-entry-v1-valid.json");
     const plan = fixture("meal-plan-entry-v1-valid.json");
+    const measurement = fixture("measurement-v1-valid.json");
 
     const response = await submitMutations(handle, context, [
-      upsert("measurement", RECORDED_DAY, { date: RECORDED_DAY, weightCg: 7_845 }),
+      upsert("measurement", measurement["date"] as string, measurement),
       upsert("healthProfile", "me", { heightCm: 171, birthDate: "1998-11-18" }),
       upsert("activitySession", activity["id"] as string, activity),
       upsert("customExerciseDefinition", definition["id"] as string, definition),
       upsert("food", food["id"] as string, food),
       upsert("recipe", recipe["id"] as string, recipe),
       upsert("foodLogEntry", line["id"] as string, line),
-      upsert("mealPlanEntry", "2026-09-01:dinner", plan),
+      upsert("mealPlanEntry", "2026-08-18:dinner", plan),
     ]);
 
     expect(response.results.map((result) => result.status)).toEqual([
@@ -594,10 +580,10 @@ describe("the moments the six-moment split adds", () => {
   test("a proposal on the morning snack reaches its own row and comes back", async () => {
     const payload = {
       ...fixture("meal-plan-entry-v1-valid.json"),
-      plannedOn: "2026-09-01",
+      plannedOn: "2026-08-18",
       slot: "morning_snack",
     };
-    await expectRoundTrip("mealPlanEntry", "2026-09-01:morning_snack", payload);
+    await expectRoundTrip("mealPlanEntry", "2026-08-18:morning_snack", payload);
 
     const rows = await handle.db
       .select()
@@ -614,9 +600,9 @@ describe("the moments the six-moment split adds", () => {
     const base = fixture("meal-plan-entry-v1-valid.json");
     for (const slot of ["morning_snack", "snack", "evening_snack"]) {
       const result = await pushOne(
-        upsert("mealPlanEntry", `2026-09-01:${slot}`, {
+        upsert("mealPlanEntry", `2026-08-18:${slot}`, {
           ...base,
-          plannedOn: "2026-09-01",
+          plannedOn: "2026-08-18",
           slot,
         }),
       );
@@ -635,7 +621,6 @@ describe("the moments the six-moment split adds", () => {
     const id = base["id"] as string;
     const payload = {
       ...base,
-      consumedOn: RECORDED_DAY,
       // The hour that used to have no moment of its own: one in the morning is the far end of
       // the only window that crosses midnight.
       consumedAt: "01:00",
@@ -653,9 +638,9 @@ describe("the moments the six-moment split adds", () => {
 
   test("a moment the contract has never heard of is still refused at the envelope", async () => {
     const result = await pushOne(
-      upsert("mealPlanEntry", "2026-09-01:brunch", {
+      upsert("mealPlanEntry", "2026-08-18:brunch", {
         ...fixture("meal-plan-entry-v1-valid.json"),
-        plannedOn: "2026-09-01",
+        plannedOn: "2026-08-18",
         slot: "brunch",
       }),
     );

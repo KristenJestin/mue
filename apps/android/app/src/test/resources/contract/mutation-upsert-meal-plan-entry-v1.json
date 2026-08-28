@@ -1,8 +1,8 @@
 {
-  "aggregateId": "2026-09-01:dinner",
+  "aggregateId": "2026-08-18:dinner",
   "aggregateType": "mealPlanEntry",
   "baseRevision": "2",
-  "clientOccurredAt": "2026-08-31T21:04:58.220Z",
+  "clientOccurredAt": "2026-08-17T21:04:58.220Z",
   "mutationId": "0198f0a4-6f70-7192-9c3d-4e5f60718293",
   "op": "upsert",
   "origin": {
@@ -10,7 +10,7 @@
     "type": "android"
   },
   "payload": {
-    "plannedOn": "2026-09-01",
+    "plannedOn": "2026-08-18",
     "plannedServingsThousandths": 1500,
     "recipeId": "b5e8f271-0c3a-4d69-8e12-9f4a7b0c5d38",
     "slot": "dinner"

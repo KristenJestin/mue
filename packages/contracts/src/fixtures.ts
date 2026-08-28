@@ -78,9 +78,17 @@ const validMeasurement = {
   weightCg: 7_845,
 } satisfies MeasurementPayloadV1;
 
-/** Two boundaries at once: the minimum legal weight, recorded on a leap day. */
+/**
+ * Two boundaries at once: the minimum legal weight, recorded on a leap day.
+ *
+ * The leap day is the edge; the year is only what carries it. It used to be `2028-02-29`, and
+ * `date-policy.ts` refuses that outright: `pastEventDay` says a weighing is a record of
+ * something that happened, so it cannot fall four years after the server's own day, and BR-009
+ * has always said as much in words. `2024-02-29` is the same 29th of February, exercising the
+ * same calendar arithmetic, on a day that has already passed and always will have.
+ */
 const edgeMeasurement = {
-  date: "2028-02-29",
+  date: "2024-02-29",
   weightCg: 3_000,
 } satisfies MeasurementPayloadV1;
 
@@ -217,7 +225,10 @@ const edgeActivitySession = {
   movement: "other",
   customMovementName: "Bouldering warm-up",
   environment: "unknown",
-  startedOn: "2028-02-29",
+  // The same past leap day as `edgeMeasurement`, for the same reason: `pastEventDay` and
+  // FR-ACTIVITY-005 both refuse a session dated ahead of the server's day, so the 29th of
+  // February is carried by a year that has already happened.
+  startedOn: "2024-02-29",
   startedAtTime: null,
   durationSeconds: 40,
   perceivedEffort: null,
@@ -339,7 +350,32 @@ const edgeRecipe = {
   ],
 } satisfies RecipePayloadV1;
 
-const MEAL_PLAN_ID = "2026-09-01:dinner";
+/**
+ * The one proposal these fixtures describe, and the day the whole meal story happens on.
+ *
+ * The day used to be `2026-09-01`, chosen when nothing judged a date and meaning no more than
+ * "next month". Two of the instances below are journal lines, and `pastEventDay` — PRD_FOOD 15,
+ * *"Aujourd'hui ou dans le passé, jamais dans le futur"* — refuses a meal eaten on a day the
+ * server has not reached. So it is two weeks earlier, which is the same weekday and a day that
+ * has already passed.
+ *
+ * The proposal moves with them and not merely alongside them: `mutationEnvelopeSchema` requires
+ * a meal-plan identifier to spell out its own payload's `plannedOn` and `slot`, so the id, the
+ * proposal and the line logged from it are one date in three places. A proposal in the past is
+ * also the case `date-policy.ts` is most careful about — `planningWindow` is deliberately not
+ * applied at push, precisely so a plan written for tomorrow and synchronised four days later is
+ * still accepted — and a proposal that has been eaten can be nothing else.
+ */
+const MEAL_PLAN_DAY = "2026-08-18";
+
+/**
+ * Spelled out rather than joined onto [MEAL_PLAN_DAY], because the colon is the specimen: a
+ * fixture that built its own identifier could not catch the separator changing under it. The two
+ * still cannot drift apart unnoticed — `buildFixtureFiles` parses this envelope before writing
+ * it, and `mutationEnvelopeSchema` refuses an identifier that does not spell its own payload's
+ * day and slot.
+ */
+const MEAL_PLAN_ID = "2026-08-18:dinner";
 const PLANNED_LOG_ENTRY_ID = "2c5fa948-7d01-4e30-9589-6a1b4c7d2e05";
 
 /**
@@ -353,7 +389,7 @@ const PLANNED_LOG_ENTRY_ID = "2c5fa948-7d01-4e30-9589-6a1b4c7d2e05";
  */
 const validFoodLogEntry = {
   id: PLANNED_LOG_ENTRY_ID,
-  consumedOn: "2026-09-01",
+  consumedOn: MEAL_PLAN_DAY,
   consumedAt: "20:15",
   slot: "dinner",
   kind: "recipe",
@@ -381,7 +417,7 @@ const validFoodLogEntry = {
  */
 const edgeFoodLogEntry = {
   id: "3d60ba59-8e12-4f41-8690-7b2c5d8e3f16",
-  consumedOn: "2026-09-01",
+  consumedOn: MEAL_PLAN_DAY,
   consumedAt: "00:00",
   slot: "snack",
   kind: "quick",
@@ -392,15 +428,22 @@ const edgeFoodLogEntry = {
 } satisfies FoodLogEntryPayloadV1;
 
 const validMealPlanEntry = {
-  plannedOn: "2026-09-01",
+  plannedOn: MEAL_PLAN_DAY,
   slot: "dinner",
   recipeId: RECIPE_ID,
   plannedServingsThousandths: 1_500,
 } satisfies MealPlanEntryPayloadV1;
 
-/** The quarter serving at the floor of the scale, on a proposal that has already been eaten. */
+/**
+ * The quarter serving at the floor of the scale, on a proposal that has already been eaten.
+ *
+ * Its day is the same past leap day the two other edge instances carry. It used to be
+ * `2028-02-29`, which `planningWindow` puts far outside the sixty days PRD_FOOD 15 allows a
+ * proposal to reach, and which `consumedLogEntryId` contradicts outright: a meal cannot already
+ * have been eaten on a day eighteen months away.
+ */
 const edgeMealPlanEntry = {
-  plannedOn: "2028-02-29",
+  plannedOn: "2024-02-29",
   slot: "breakfast",
   recipeId: "f92cd615-4a7e-4b0d-8256-3d8e1f4a9b72",
   plannedServingsThousandths: 250,
@@ -424,9 +467,9 @@ const activitySessionMutation = {
 } satisfies MutationEnvelope;
 
 /**
- * The envelope whose identifier is the whole point: `2026-09-01:dinner`.
+ * The envelope whose identifier is the whole point: `2026-08-18:dinner`.
  *
- * `aggregateIdSchema` accepts `[A-Za-z0-9._:-]`, so this parses and `2026-09-01/dinner` does not.
+ * `aggregateIdSchema` accepts `[A-Za-z0-9._:-]`, so this parses and `2026-08-18/dinner` does not.
  * Every meal-plan row a phone journalled before this change carries the second spelling, which is
  * why `MealPlanIdRepair` exists on the Android side rather than the contract simply changing.
  */
@@ -439,7 +482,7 @@ const mealPlanEntryMutation = {
   payloadSchemaVersion: 1,
   payload: validMealPlanEntry,
   origin: DEVICE_ORIGIN,
-  clientOccurredAt: "2026-08-31T21:04:58.220Z",
+  clientOccurredAt: "2026-08-17T21:04:58.220Z",
 } satisfies MutationEnvelope;
 
 const upsertMutation = {
@@ -516,8 +559,8 @@ const activityMeta = {
 const mealPlanMeta = {
   id: MEAL_PLAN_ID,
   revision: "3",
-  createdAt: "2026-08-31T21:04:59.010Z",
-  updatedAt: "2026-08-31T21:04:59.010Z",
+  createdAt: "2026-08-17T21:04:59.010Z",
+  updatedAt: "2026-08-17T21:04:59.010Z",
   deletedAt: null,
   originType: "agent",
   originId: "agent-kitchen-01",
@@ -829,7 +872,7 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
     file: "mutation-upsert-meal-plan-entry-v1.json",
     schema: "MutationEnvelope",
     kind: "edge",
-    description: "The identifier that used to carry a `/`: `2026-09-01:dinner`.",
+    description: "The identifier that used to carry a `/`: `2026-08-18:dinner`.",
     value: mealPlanEntryMutation,
     validator: mutationEnvelopeSchema,
   },

@@ -175,21 +175,21 @@
       "sequence": "9007199254740996"
     },
     {
-      "aggregateId": "2026-09-01:dinner",
+      "aggregateId": "2026-08-18:dinner",
       "aggregateType": "mealPlanEntry",
       "meta": {
-        "createdAt": "2026-08-31T21:04:59.010Z",
+        "createdAt": "2026-08-17T21:04:59.010Z",
         "deletedAt": null,
-        "id": "2026-09-01:dinner",
+        "id": "2026-08-18:dinner",
         "lastMutationId": "0198f0a4-6f70-7192-9c3d-4e5f60718293",
         "originId": "agent-kitchen-01",
         "originType": "agent",
         "revision": "3",
-        "updatedAt": "2026-08-31T21:04:59.010Z"
+        "updatedAt": "2026-08-17T21:04:59.010Z"
       },
       "op": "upsert",
       "payload": {
-        "plannedOn": "2026-09-01",
+        "plannedOn": "2026-08-18",
         "plannedServingsThousandths": 1500,
         "recipeId": "b5e8f271-0c3a-4d69-8e12-9f4a7b0c5d38",
         "slot": "dinner"
