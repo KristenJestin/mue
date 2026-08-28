@@ -59,7 +59,10 @@ export interface AgentRouteOptions {
 export interface AgentResource {
   readonly clientId: string;
   readonly name: string | null;
+  /** What it may ask for. Better Auth registers the whole allowed set. */
   readonly scopes: readonly string[];
+  /** What the owner approved, and therefore what it holds. */
+  readonly grantedScopes: readonly string[];
   /**
    * `disabled` in the database, `revoked` here. The column records the mechanism; the
    * owner performed a revocation, and section 15.3 is the word the page has to use.
@@ -76,6 +79,7 @@ export function toAgentResource(agent: AgentSummary): AgentResource {
     clientId: agent.clientId,
     name: agent.name,
     scopes: agent.scopes,
+    grantedScopes: agent.grantedScopes,
     revoked: agent.disabled,
     discovered: agent.discovered,
     registeredAt: agent.registeredAt?.toISOString() ?? null,

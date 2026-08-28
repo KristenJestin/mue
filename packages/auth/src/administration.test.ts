@@ -95,6 +95,8 @@ test("an agent is listed with its scopes and last use", async () => {
   expect(mine?.disabled).toBe(false);
   expect(mine?.discovered).toBe(true);
   expect(mine?.scopes).toContain("weight:read");
+  // What it may ask for is the whole registered set; what it holds is its consent.
+  expect(mine?.grantedScopes).toEqual(["weight:read"]);
   expect(mine?.lastUsedAt).not.toBeNull();
   // Section 15.3 asks the Web administration to show when an identity appeared, not
   // only when it was last used.

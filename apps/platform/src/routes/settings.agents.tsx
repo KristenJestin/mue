@@ -131,7 +131,10 @@ export function clampMinutes(value: number): number {
 export interface AgentRow {
   readonly clientId: string;
   readonly name: string | null;
+  /** What it may ask for. Better Auth registers the whole allowed set. */
   readonly scopes: readonly string[];
+  /** What the owner approved on the consent page, and therefore what it holds. */
+  readonly grantedScopes: readonly string[];
   readonly revoked: boolean;
   readonly discovered: boolean;
   readonly registeredAt: string | null;
@@ -552,18 +555,42 @@ function AgentCard(props: AgentCardProps): ReactElement {
         </dd>
         <dt>Last seen</dt>
         <dd>{formatInstant(agent.lastUsedAt)}</dd>
-        <dt>Permissions</dt>
+        {/*
+          Two lists, because they are two different facts and only one of them is a
+          permission. Better Auth writes the server's whole allowed scope set onto a
+          dynamic registration whatever the client asked for, so showing that alone
+          puts `data:delete` next to an agent nobody has granted anything -- which is
+          precisely the misreading an administration page must not cause.
+
+          The scope tokens are shown as they are, not as the sentences the consent
+          page writes for them: `weight:read` is what the token carries, what
+          `scripts/admin.ts agents list` prints and what an audit row names, and
+          consent.tsx already notes that its own wording is a second copy of the
+          vocabulary. A third would be the one that drifts.
+        */}
+        <dt>Granted</dt>
+        <dd>
+          {agent.grantedScopes.length === 0 ? (
+            // Both roads end at an empty consent, and they are not the same story:
+            // one agent was never let in, the other was and has been shown out.
+            agent.revoked ? (
+              "nothing — its consent was removed"
+            ) : (
+              "nothing — it has never been authorised"
+            )
+          ) : (
+            <span className="chips">
+              {agent.grantedScopes.map((scope) => (
+                <code key={scope}>{scope}</code>
+              ))}
+            </span>
+          )}
+        </dd>
+        <dt>May ask for</dt>
         <dd>
           {agent.scopes.length === 0 ? (
-            "none"
+            "nothing"
           ) : (
-            /*
-              The scope tokens themselves, not the sentences the consent page writes
-              for them. This is an administration listing: `weight:read` is what the
-              token carries, what `scripts/admin.ts agents list` prints and what an
-              audit row names. A third copy of the scope vocabulary -- consent.tsx
-              already notes that its own is a second -- would be the thing that drifts.
-            */
             <span className="chips">
               {agent.scopes.map((scope) => (
                 <code key={scope}>{scope}</code>

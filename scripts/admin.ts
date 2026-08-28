@@ -39,7 +39,7 @@ const USAGE = `mue admin
 
   sessions list                  every session, newest use first
   sessions revoke <sessionId>    drop one session: that device stops syncing
-  agents list                    every OAuth client, its scopes and last use
+  agents list                    every OAuth client, what it was granted and its last use
   agents revoke <clientId>       disable an agent and revoke its live tokens
 `;
 
@@ -106,7 +106,12 @@ async function main(argv: readonly string[]): Promise<void> {
             agent.discovered ? "cimd" : "registered",
             `since ${when(agent.registeredAt)}`,
             `last used ${when(agent.lastUsedAt)}`,
-            agent.scopes.length === 0 ? "no scopes" : agent.scopes.join(","),
+            // What it holds, not what it may ask for: a dynamic registration is
+            // stamped with the server's whole allowed set, so `agent.scopes` says
+            // almost nothing about any one agent.
+            agent.grantedScopes.length === 0
+              ? "granted nothing"
+              : `granted ${agent.grantedScopes.join(",")}`,
           ].join("  "),
         );
       }

@@ -57,6 +57,7 @@ interface ListedAgent {
   readonly clientId: string;
   readonly name: string | null;
   readonly scopes: readonly string[];
+  readonly grantedScopes: readonly string[];
   readonly revoked: boolean;
   readonly discovered: boolean;
   readonly registeredAt: string | null;
@@ -179,9 +180,17 @@ describe("GET /api/v1/agents", () => {
     expect(mine?.name).toBe("Example agent");
     expect(mine?.revoked).toBe(false);
     expect(mine?.discovered).toBe(false);
-    expect(mine?.scopes).toEqual(["weight:read", "activity:write"]);
     expect(mine?.registeredAt).toBe("2026-08-01T09:30:00.000Z");
     expect(mine?.lastUsedAt).toBe("2026-08-20T18:05:00.000Z");
+  });
+
+  test("separates what the agent may ask for from what it was actually granted", async () => {
+    // Better Auth stores the whole allowed scope set on a dynamic registration, so
+    // `scopes` alone would show `data:delete` next to an agent the owner has granted
+    // nothing at all. What it holds is its consent.
+    const mine = (await listed()).find((agent) => agent.clientId === CLIENT);
+    expect(mine?.scopes).toEqual(["weight:read", "activity:write"]);
+    expect(mine?.grantedScopes).toEqual(["weight:read"]);
   });
 });
 
@@ -236,6 +245,9 @@ describe("DELETE /api/v1/agents/:clientId", () => {
     // page has to be able to show that it was revoked.
     const mine = (await listed()).find((agent) => agent.clientId === CLIENT);
     expect(mine?.revoked).toBe(true);
+    // The consent is gone, so the agent holds nothing -- which is the sentence the
+    // page has to be able to write next to a revoked identity.
+    expect(mine?.grantedScopes).toEqual([]);
   });
 
   test("revoking a second time is harmless", async () => {

@@ -18,6 +18,7 @@ function agent(overrides: Partial<AgentRow> & Pick<AgentRow, "clientId">): Agent
   return {
     name: null,
     scopes: [],
+    grantedScopes: [],
     revoked: false,
     discovered: false,
     registeredAt: null,
