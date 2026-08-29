@@ -1,0 +1,47 @@
+# Ce qui ne doit pas entrer dans le contexte de construction.
+#
+# `node_modules` est le premier et le plus important : l'étape `deps` en installe un dans
+# l'image, et un `COPY packages/` qui traînerait celui de l'hôte l'écraserait par un arbre
+# construit pour une autre plateforme. Sous Windows, ce sont des liens et des binaires .exe.
+
+node_modules
+**/node_modules
+
+# Sorties de construction. `apps/platform/dist` est produit dans l'image, pas copié.
+dist
+**/dist
+build
+**/build
+.output
+**/.output
+
+# Android : plusieurs gigaoctets qui n'ont rien à faire dans une image de serveur.
+#
+# Sauf son manifeste. `apps/*` est un espace de travail, et un arbre auquel il manque un
+# membre fait installer à Bun les seules dépendances de la racine — sans poser un seul lien
+# `node_modules/@mue`, sans erreur, sans avertissement. Le symptôme est un conteneur qui
+# construit parfaitement puis meurt au démarrage sur `Cannot find module '@mue/api'`.
+apps/android
+!apps/android/package.json
+
+# Historique git et worktrees d'agents (eux-mêmes des copies complètes du dépôt).
+.git
+.claude
+
+# Secrets et configuration locale, jamais dans une image. L'environnement vient de
+# `env_file` au démarrage, pas d'une couche.
+.env
+.env.*
+!.env.example
+certs
+*.pem
+*.jks
+*.keystore
+
+# Bruit d'outillage.
+.vscode
+.idea
+*.log
+coverage
+.DS_Store
+Thumbs.db
