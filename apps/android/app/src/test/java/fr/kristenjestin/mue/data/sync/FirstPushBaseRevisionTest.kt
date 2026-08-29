@@ -29,7 +29,7 @@ import kotlin.test.assertNull
  *
  * ## The defect this file is the client half of
  *
- * `mue_app.sync_journal` for the owner's account holds three entries of
+ * `sync_journal` for the owner's account holds three entries of
  * `{"heightCm":null,"birthDate":null}` from three different `origin.id`s, each written a few
  * minutes after a *clear app data → pair → open Profile → Save*. Each replaced a row that held
  * `171 / 1998-11-18`.

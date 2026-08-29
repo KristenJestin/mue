@@ -78,7 +78,7 @@ export interface StoredAggregate<Payload> {
  *
  * There is no field for *which* scale. PRD_SCALE 16.2 and 22 are explicit that the local
  * identifier, the Bluetooth address and the advertised name never leave the phone -- and
- * `mue_app.measurements` has no column for any of them, so this is not a field withheld here
+ * `measurements` has no column for any of them, so this is not a field withheld here
  * but a fact the server was never told. `sourceType` is the business provenance and is
  * synchronised; it says a weighing came from a scale and says nothing about the device.
  */

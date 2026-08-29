@@ -15,7 +15,7 @@ const { bodyComposition, measurements } = schema;
 /**
  * The rules of PRD section 13.2, and the only implementation of them.
  *
- * The business key is the local date, in Room and in `mue_app.measurements`
+ * The business key is the local date, in Room and in `measurements`
  * alike, so convergence is structural: two devices recording a weight for the
  * same day address the same row and cannot produce a second measurement for it.
  *

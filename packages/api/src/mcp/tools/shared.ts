@@ -315,7 +315,7 @@ export type WriteOutcome =
  *  - the mutation goes to `@mue/domain` through `../domain-bridge.ts`, so an agent's write
  *    takes a revision from the same counter as a phone's, is appended to the same journal
  *    at the same sequence, and reaches every device by the same pull (FR-SYNC-004);
- *  - the outcome is written to `mue_app.agent_audit` -- section 14.7's eight fields --
+ *  - the outcome is written to `agent_audit` -- section 14.7's eight fields --
  *    whether it succeeded or was refused, because a write that was asked for and refused
  *    is exactly the event an audit exists to hold;
  *  - a business rejection from the domain becomes the tool's own structured error, with the

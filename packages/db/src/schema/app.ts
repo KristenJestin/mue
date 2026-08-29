@@ -8,7 +8,7 @@ import {
   index,
   integer,
   jsonb,
-  pgSchema,
+  pgTable,
   primaryKey,
   text,
   timestamp,
@@ -17,16 +17,23 @@ import {
 import { user } from "./auth";
 
 /**
- * Everything Mue owns lives in `mue_app`. The schema itself is created once by
- * the DBA (infra/README.md); PRD section 20.3 forbids the application from
- * creating a database, a role or a schema, and the `mue` role could not anyway.
+ * Tout ce que Mue possède vit dans `public`, et il n'y a plus qu'un schéma.
  *
- * Known coupling, also recorded in infra/README.md: the two schema names are
- * literals here and environment variables there. Changing one means changing
- * the other. `assertSchemaNamesMatchEnvironment()` in ../config.ts turns that
- * into a startup failure instead of a silent mismatch.
+ * Le PostgreSQL de production est celui du propriétaire, partagé entre toutes
+ * ses applications, et il ne créera ni schéma ni rôle pour Mue : les tables
+ * ci-dessous atterrissent donc à côté de celles de ses autres applications,
+ * avec les identifiants qu'il a déjà. `pgSchema("public")` n'existe pas côté
+ * Drizzle — le schéma par défaut se déclare avec `pgTable`, ce qui émet du SQL
+ * non qualifié. C'est `search_path` posé sur la connexion (../client.ts) qui
+ * décide alors où la table atterrit, et il vaut `public`.
+ *
+ * Ce qui protège les autres applications du propriétaire n'est donc plus
+ * l'isolation par schéma, c'est que ces noms ne portent aucun préfixe et que
+ * `CREATE TABLE` est émis **sans** `IF NOT EXISTS` : une collision sur `user`,
+ * `session` ou `measurements` fait échouer la migration bruyamment au lieu de
+ * greffer Mue sur la table de quelqu'un d'autre. `tools/verify-migrations.ts`
+ * fait de cette propriété un contrôle et non un espoir.
  */
-export const mueApp = pgSchema("mue_app");
 
 /**
  * The section 12.1 metadata every synchronised aggregate carries. A function,
@@ -65,7 +72,7 @@ function aggregateMetadata() {
  * puts multi-user out of scope, so there is a single writer stream and the
  * contention this costs is nil.
  */
-export const syncCounter = mueApp.table("sync_counter", {
+export const syncCounter = pgTable("sync_counter", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -83,7 +90,7 @@ export const syncCounter = mueApp.table("sync_counter", {
  * that carries it, and what keeps the replaced version auditable as sections
  * 13.2 and 13.3 require.
  */
-export const syncJournal = mueApp.table(
+export const syncJournal = pgTable(
   "sync_journal",
   {
     userId: text("user_id")
@@ -124,7 +131,7 @@ export const syncJournal = mueApp.table(
  * existant" means. A rejection is stored too, so a replayed bad mutation gets
  * the same structured error rather than a second attempt.
  */
-export const mutationLog = mueApp.table(
+export const mutationLog = pgTable(
   "mutation_log",
   {
     mutationId: text("mutation_id").primaryKey(),
@@ -171,7 +178,7 @@ export const mutationLog = mueApp.table(
  * second phone could not resolve it. This is an absent column and not a nullable
  * one left empty, because a nullable column is one that eventually gets filled.
  */
-export const measurements = mueApp.table(
+export const measurements = pgTable(
   "measurements",
   {
     userId: text("user_id")
@@ -253,7 +260,7 @@ export const measurements = mueApp.table(
  * rounds exactly once, on the way in. No float enters this table, so nothing can
  * be rounded a second time.
  */
-export const bodyComposition = mueApp.table(
+export const bodyComposition = pgTable(
   "body_composition",
   {
     userId: text("user_id").notNull(),
@@ -295,7 +302,7 @@ export const bodyComposition = mueApp.table(
  * because the profile exists before it is filled in, and each may be merged
  * separately when they were not modified concurrently.
  */
-export const healthProfile = mueApp.table("health_profile", {
+export const healthProfile = pgTable("health_profile", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -331,7 +338,7 @@ export const healthProfile = mueApp.table("health_profile", {
  * `StrengthDraftEditor.persistableExercises` mints fresh ids on every save and
  * `ActivityDao.saveDetail` deletes and reinserts all children.
  */
-export const activitySessions = mueApp.table(
+export const activitySessions = pgTable(
   "activity_sessions",
   {
     userId: text("user_id")
@@ -376,7 +383,7 @@ export const activitySessions = mueApp.table(
  * definition keeps its row so a deletion cannot be resurrected (FR-SYNC-005),
  * but it must not block re-creating the same name afterwards.
  */
-export const customExercises = mueApp.table(
+export const customExercises = pgTable(
   "custom_exercises",
   {
     userId: text("user_id")
@@ -422,7 +429,7 @@ export const customExercises = mueApp.table(
  * inventing a value, and a zero here would be handed back to the phone on the
  * next pull as a fact it never stated.
  */
-export const foods = mueApp.table(
+export const foods = pgTable(
   "foods",
   {
     userId: text("user_id")
@@ -462,7 +469,7 @@ export const foods = mueApp.table(
 );
 
 /** A recipe with its ingredients and its steps, replaced whole (PRD_FOOD 21.2). */
-export const recipes = mueApp.table(
+export const recipes = pgTable(
   "recipes",
   {
     userId: text("user_id")
@@ -500,7 +507,7 @@ export const recipes = mueApp.table(
  * has never been synchronised is still a complete row, and it renders from its
  * own snapshot. The same is true of `from_plan`.
  */
-export const foodLogEntries = mueApp.table(
+export const foodLogEntries = pgTable(
   "food_log_entries",
   {
     userId: text("user_id")
@@ -552,7 +559,7 @@ export const foodLogEntries = mueApp.table(
  * columns and stored nowhere. There is no second place for it to be wrong, and
  * no column to migrate the day its spelling changes again.
  */
-export const mealPlanEntries = mueApp.table(
+export const mealPlanEntries = pgTable(
   "meal_plan_entries",
   {
     userId: text("user_id")
@@ -578,7 +585,7 @@ export const mealPlanEntries = mueApp.table(
  * surrogate key a row needs. This is an audit trail, so it is never purged by
  * the sync retention sweep.
  */
-export const agentAudit = mueApp.table(
+export const agentAudit = pgTable(
   "agent_audit",
   {
     id: text("id").primaryKey(),

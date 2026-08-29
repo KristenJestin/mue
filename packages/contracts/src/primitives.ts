@@ -54,7 +54,7 @@ export const mutationIdSchema = z.uuidv7().meta({
  * key itself where it has one.
  *
  * PRD section 12.1 calls this a UUID, but a `Measurement` has no UUID anywhere in Mue —
- * its primary key is its local date, both in Room and in `mue_app.measurements`. Minting
+ * its primary key is its local date, both in Room and in the server `measurements` table. Minting
  * a UUID per device would let two devices create two aggregates for one date and break
  * the one-measurement-per-date rule that section 13.2 keeps. So the identifier is the
  * business key, which makes convergence structural instead of a merge heuristic.

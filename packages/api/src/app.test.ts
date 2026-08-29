@@ -16,7 +16,7 @@ const PASSWORD = "correct-horse-battery-staple";
 
 const config: AuthConfig = {
   // The same secret `packages/auth`'s own tests use, and it has to be: the JWT
-  // plugin's signing key is encrypted with it and stored in `mue_auth.jwks`,
+  // plugin's signing key is encrypted with it and stored in `jwks`,
   // which both suites share on the one development cluster. A second secret
   // makes whichever suite runs later fail to decrypt a key it did not mint.
   secret: "test-secret-that-is-long-enough-32+",
@@ -70,16 +70,16 @@ function measurement(date: string, weightCg: number): unknown {
 beforeAll(async () => {
   database = createTestDatabase();
   await migrate(database);
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
 
   // The line `mcp/mcp.integration.test.ts` already carries, for the same reason
   // the comment on `config.secret` above gives: the signing key in
-  // `mue_auth.jwks` is encrypted with whichever secret minted it, and the
+  // `jwks` is encrypted with whichever secret minted it, and the
   // development cluster is shared with every other process that boots Better
   // Auth -- including a platform server running from `.env`. A key this suite
   // cannot decrypt makes `getSession` throw, which arrives here as a 401 on
   // every authenticated route rather than as anything that names the cause.
-  await database.sql`delete from mue_auth.jwks`;
+  await database.sql`delete from jwks`;
 
   authHandle = createAuth({ config, database });
   app = createApiApp({ auth: authHandle.auth, database }) as unknown as Hono;
@@ -106,7 +106,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
   await authHandle.close();
   await database.close();
 });
@@ -194,7 +194,7 @@ describe("POST /api/v1/sync/push", () => {
 
     // Nothing reached the aggregate.
     const rows = await database.sql`
-      select 1 from mue_app.measurements where "date" = '2099-12-01'
+      select 1 from measurements where "date" = '2099-12-01'
     `;
     expect(rows).toHaveLength(0);
   });

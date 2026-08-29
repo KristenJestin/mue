@@ -19,10 +19,14 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
     baseURL: config.baseUrl,
     trustedOrigins: [...config.trustedOrigins],
 
-    // The Better Auth tables live in `mue_auth` because `betterAuthSchema` is
-    // built from `pgSchema("mue_auth")`. The adapter looks each model up by
-    // name in this object and lets Drizzle qualify it, so there is no second
-    // connection and no `search_path` trick.
+    // `betterAuthSchema` porte les tables Drizzle elles-mêmes, pas un nom de
+    // schéma : l'adaptateur cherche chaque modèle par son nom dans cet objet et
+    // laisse Drizzle émettre le SQL. Rien ici ne nomme de schéma — les tables
+    // sont déclarées avec `pgTable` et atterrissent là où pointe le
+    // `search_path` de la connexion (packages/db/src/client.ts) — donc pas de
+    // seconde connexion, et surtout aucun endroit où Better Auth pourrait
+    // désigner un schéma différent de celui où les migrations ont créé les
+    // tables.
     database: drizzleAdapter(database.db, {
       provider: "pg",
       schema: betterAuthSchema,

@@ -24,7 +24,7 @@ const PASSWORD = "correct-horse-battery-staple";
 
 const config: AuthConfig = {
   // The shared development secret. See `app.test.ts`: the JWT plugin's signing
-  // key lives in `mue_auth.jwks` and a second secret cannot decrypt it.
+  // key lives in `jwks` and a second secret cannot decrypt it.
   secret: "test-secret-that-is-long-enough-32+",
   baseUrl: BASE_URL,
   trustedOrigins: [BASE_URL],
@@ -133,10 +133,10 @@ function openFastStream(): { response: Promise<Response>; controller: AbortContr
 beforeAll(async () => {
   database = createTestDatabase();
   await migrate(database);
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
   // See `app.test.ts`: a signing key minted under another secret cannot be
   // decrypted, and every authenticated route answers 401 without saying so.
-  await database.sql`delete from mue_auth.jwks`;
+  await database.sql`delete from jwks`;
 
   authHandle = createAuth({ config, database });
   app = createApiApp({ auth: authHandle.auth, database }) as unknown as Hono;
@@ -163,11 +163,11 @@ beforeAll(async () => {
   bearer = token;
 
   // Read rather than asked for through `/api/auth/get-session`: that endpoint
-  // signs a JWT, and the development cluster's `mue_auth.jwks` row is encrypted
+  // signs a JWT, and the development cluster's `jwks` row is encrypted
   // with the deployment secret rather than this suite's. The identifier is only
   // needed to stand in for the guard below.
   const rows = await database.sql<{ id: string }[]>`
-    select "id" from mue_auth."user" where "email" = ${EMAIL}
+    select "id" from "user" where "email" = ${EMAIL}
   `;
   const row = rows[0];
   if (row === undefined) throw new Error(`sign-up left no user row for ${EMAIL}`);
@@ -191,7 +191,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
   await authHandle.close();
   await database.close();
 });

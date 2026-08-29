@@ -31,12 +31,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await handle.close();
 });
 
 beforeEach(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await seedUser(handle, USER);
 });
 
@@ -285,7 +285,7 @@ describe("section 13.4 — a conflict on one field follows the last accepted mut
 /**
  * The defect, and the distinction that closes it.
  *
- * `mue_app.sync_journal` held three entries of `{heightCm: null, birthDate: null}` from three
+ * `sync_journal` held three entries of `{heightCm: null, birthDate: null}` from three
  * different android origins, each minutes after a *clear app data → pair → open Profile →
  * Save*, each replacing a row that held `171 / 1998-11-18`.
  *
@@ -321,7 +321,7 @@ describe("section 12.2 — a complete payload from a client that has seen nothin
    *
    * The path this closes is the whole one: `ProfileScreen` → `DataStoreUserProfileRepository`
    * → `HealthProfileDao.upsertWithMutation` → `sync_mutations` → `SyncWire.toEnvelope` → these
-   * bytes → `submitMutations` → `mue_app.health_profile`. Half of it is Kotlin and half is
+   * bytes → `submitMutations` → `health_profile`. Half of it is Kotlin and half is
    * TypeScript, so the join has to be a file: neither suite can be edited into agreement with
    * itself, and a value that changes anywhere along the path turns one of the two red.
    */

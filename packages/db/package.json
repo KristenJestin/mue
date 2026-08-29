@@ -15,7 +15,7 @@
     "format": "vp fmt src tools",
     "format:check": "vp fmt --check src tools",
     "test": "bun --env-file=../../.env test",
-    "generate": "drizzle-kit generate && bun run tools/strip-create-schema.ts && bun run tools/verify-migrations.ts",
+    "generate": "drizzle-kit generate && bun run tools/strip-default-schema.ts && bun run tools/verify-migrations.ts",
     "verify:sql": "bun run tools/verify-migrations.ts",
     "migrate": "bun --env-file=../../.env run src/migrate.ts",
     "purge": "bun --env-file=../../.env run tools/purge.ts"

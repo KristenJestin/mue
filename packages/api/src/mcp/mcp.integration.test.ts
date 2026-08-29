@@ -327,7 +327,7 @@ beforeAll(async () => {
 
   // A signing key encrypted under a different secret cannot be decrypted, and the
   // test database is shared with every other suite that boots Better Auth.
-  await handle.database.sql`delete from mue_auth.jwks`;
+  await handle.database.sql`delete from jwks`;
 
   app = new Hono();
   app.route("/", createOAuthDiscoveryApp(handle));
@@ -4356,7 +4356,7 @@ describe("PRD_SCALE 22 — the scale module through the MCP catalogue", () => {
     // to leak from. Both halves are asserted: the columns, and the answers.
     const columns = await handle.database.sql`
       select table_name, column_name from information_schema.columns
-      where table_schema = 'mue_app' and table_name in ('measurements', 'body_composition')
+      where table_schema = current_schema() and table_name in ('measurements', 'body_composition')
     `;
     const names = (columns as unknown as { table_name: string; column_name: string }[]).map(
       (column) => `${column.table_name}.${column.column_name}`,

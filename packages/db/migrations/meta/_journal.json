@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1787698784373,
-      "tag": "0000_yellow_dexter_bennett",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1787839904040,
-      "tag": "0001_futuristic_mister_fear",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1787952406999,
-      "tag": "0002_worried_revanche",
+      "when": 1788020883370,
+      "tag": "0000_unknown_blob",
       "breakpoints": true
     }
   ]
