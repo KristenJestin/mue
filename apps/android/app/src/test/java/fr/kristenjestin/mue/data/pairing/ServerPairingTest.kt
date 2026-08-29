@@ -127,6 +127,11 @@ class ServerPairingTest {
 
     // --- every failure has a name ----------------------------------------------------------------
 
+    /**
+     * The default here is [CleartextPolicy.Refused], which is `release`'s: a build that can be
+     * published refuses `http://` before a socket exists, and `api.probed` being empty is what
+     * says the refusal happened at the keyboard rather than on the wire.
+     */
     @Test
     fun anInvalidAddressStopsBeforeTheNetwork() = runTest {
         val api = FakePairingApi()
@@ -135,6 +140,43 @@ class ServerPairingTest {
 
         assertIs<PairingFailure.InsecureScheme>(assertIs<PairingResult.Failed>(result).failure)
         assertTrue(api.probed.isEmpty())
+    }
+
+    /**
+     * The owner's own build, end to end: the address he types is the address that is stored and
+     * the address every later request is made against.
+     *
+     * `server_url` is asserted rather than just the outcome, because a pairing that succeeded
+     * while quietly writing `https://` into the row would look identical from the screen and fail
+     * at the first synchronisation — with `UntrustedCertificate`, about a server that has no
+     * certificate because it was never asked for one.
+     */
+    @Test
+    fun aBuildThatPermitsCleartextPairsWithTheAddressAsTyped() = runTest {
+        val store = FakePairingStore()
+        val api = FakePairingApi()
+
+        val result = pairing(store = store, api = api, cleartext = CleartextPolicy.Permitted)
+            .pair("http://192.168.1.100:3000", "kris@example.org", "correct horse")
+
+        val paired = assertIs<PairingResult.Paired>(result)
+        assertEquals("192.168.1.100:3000", paired.serverName)
+        assertEquals("http://192.168.1.100:3000", requireNotNull(store.current).serverUrl)
+        assertEquals(listOf("http://192.168.1.100:3000"), api.probed)
+    }
+
+    /** PRD 9.3's "the server has moved" path answers to the same policy, and not to another one. */
+    @Test
+    fun signingInAgainAtACleartextAddressFollowsTheSameRule() = runTest {
+        val store = FakePairingStore(paired())
+
+        val refused = pairing(store = store).reauthenticate("http://192.168.1.100:3000", "pw")
+        assertIs<PairingFailure.InsecureScheme>(assertIs<PairingResult.Failed>(refused).failure)
+
+        val permitted = pairing(store = store, cleartext = CleartextPolicy.Permitted)
+            .reauthenticate("http://192.168.1.100:3000", "pw")
+        assertIs<PairingResult.Paired>(permitted)
+        assertEquals("http://192.168.1.100:3000", requireNotNull(store.current).serverUrl)
     }
 
     @Test
@@ -597,15 +639,22 @@ class ServerPairingTest {
         profileSeeded = true,
     )
 
+    /**
+     * `Refused` by default, because that is `release`'s configuration and therefore the one every
+     * case written before cleartext existed was asserting. A permissive case says so at its call
+     * site (see the two above), so no test is about a build type by accident.
+     */
     private fun pairing(
         store: PairingStore = FakePairingStore(),
         tokens: TokenStore = FakeTokenStore(),
         api: PairingApi = FakePairingApi(),
         firstSync: suspend () -> SyncOutcome = { completed },
+        cleartext: CleartextPolicy = CleartextPolicy.Refused,
     ) = ServerPairing(
         store = store,
         tokenStore = tokens,
         api = api,
+        cleartext = cleartext,
         firstSync = firstSync,
         newDeviceId = { "device-1" },
     )

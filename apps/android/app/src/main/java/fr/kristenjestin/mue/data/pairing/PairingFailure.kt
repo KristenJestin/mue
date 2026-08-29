@@ -26,9 +26,16 @@ sealed interface PairingFailure {
 
     // --- the address ------------------------------------------------------------------------
 
-    /** Nothing was typed. */
+    /**
+     * Nothing was typed.
+     *
+     * It used to say "the HTTPS address", which was one build's rule stated in a message every
+     * build shows — and this one is about an empty box, so the scheme is not what it is telling
+     * anyone. The form's own placeholder still reads `https://mue.home.arpa`, so the recommended
+     * shape is not lost; it is simply no longer asserted by the one sentence that cannot know.
+     */
     data object AddressMissing : PairingFailure {
-        override val message: String = "Enter the HTTPS address of your Mue server."
+        override val message: String = "Enter the address of your Mue server."
     }
 
     /** Typed, but not an address at all. */
@@ -38,10 +45,16 @@ sealed interface PairingFailure {
     }
 
     /**
-     * `http://`, explicitly. Sync PRD 16 encrypts Android-server traffic without exception, and
-     * a private network is not a substitute for it — the PRD says so in as many words. Silently
-     * upgrading the scheme would be worse than refusing: it would claim a guarantee the user did
-     * not ask for and could not check.
+     * `http://`, explicitly, in a build that will not keep one — which is `release` and nothing
+     * else (see [CleartextPolicy]). Sync PRD 16 encrypts Android-server traffic without exception
+     * and says in as many words that a private network is not a substitute for it, so a build that
+     * can be published refuses the scheme rather than upgrading it: a silent upgrade would claim a
+     * guarantee the user did not ask for and could not check.
+     *
+     * It is still the wording a person who typed `http://` is owed, so the message names the one
+     * edit that fixes it and nothing else. `local`, `beta` and `debug` never produce this failure —
+     * on those the address is kept as typed — which is why the sentence can stay unqualified
+     * instead of hedging about builds the reader does not have.
      */
     data class InsecureScheme(val input: String) : PairingFailure {
         override val message: String =

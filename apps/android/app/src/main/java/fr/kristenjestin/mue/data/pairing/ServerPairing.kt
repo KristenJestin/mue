@@ -34,6 +34,18 @@ class ServerPairing(
     private val tokenStore: TokenStore,
     private val api: PairingApi,
     /**
+     * Whether this build may keep a `http://` address ([CleartextPolicy]).
+     *
+     * A constructor parameter with no default, and both halves of that are deliberate.
+     * [ServerAddresses.parse] is pure so it can be proved on the JVM, so the answer has to travel
+     * from the one object that holds a `Context` — `SyncContainer`, which reads the per-build-type
+     * `bool` resource — down to here, and this class is the only thing on that path. No default,
+     * because a default is how the `release` answer would one day be inherited by a caller nobody
+     * looked at; there is exactly one production call site and the compiler makes it state its
+     * case.
+     */
+    private val cleartext: CleartextPolicy,
+    /**
      * PRD 9.2's "une association réussie déclenche la synchronisation initiale", as a call rather
      * than as an engine.
      *
@@ -55,7 +67,7 @@ class ServerPairing(
      * user has to be told at the moment they made it.
      */
     suspend fun pair(address: String, email: String, password: String): PairingResult {
-        val parsed = when (val result = ServerAddresses.parse(address)) {
+        val parsed = when (val result = ServerAddresses.parse(address, cleartext)) {
             is ServerAddressResult.Invalid -> return PairingResult.Failed(result.failure)
             is ServerAddressResult.Valid -> result.address
         }
@@ -112,7 +124,7 @@ class ServerPairing(
             ?: return PairingResult.Failed(PairingFailure.AccountUnknown)
         // The address before the password, which is [pair]'s order and so the order of the two
         // fields on the card. An empty form then names the box the eye reaches first.
-        val parsed = ServerAddresses.parse(address)
+        val parsed = ServerAddresses.parse(address, cleartext)
         if (parsed is ServerAddressResult.Invalid) return PairingResult.Failed(parsed.failure)
         // Checked here rather than left to [pair], whose `CredentialsMissing` names an email
         // address. This card has no email field — that is the point of it — so being told to
