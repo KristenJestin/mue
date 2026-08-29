@@ -31,17 +31,51 @@ plugins {
  * happens to rebuild it. `java.util.Properties` and not a hand-rolled split, because that is what
  * reads `sdk.dir` out of the same file, escapes and all.
  */
-val betaDefaultServerAddress: String = providers
+val localProperties: Provider<Properties> = providers
     .fileContents(rootProject.layout.projectDirectory.file("local.properties"))
     .asText
-    .map { text ->
-        Properties()
-            .apply { load(StringReader(text)) }
-            .getProperty("mue.beta.server")
-            .orEmpty()
-            .trim()
-    }
-    .getOrElse("")
+    .map { text -> Properties().apply { load(StringReader(text)) } }
+
+/**
+ * One key of that file, trimmed, and the empty string when either the file or the key is absent.
+ *
+ * Factored out when the second key arrived rather than copied: the two have to agree on what
+ * "absent" means down to the trimming, because both resolve to the same empty string that
+ * `defaultConfig` already declares and that `SyncViewModel` reads as *no default at all*. Two
+ * copies of that could drift by one `.trim()` and the difference would show up as a beta whose
+ * email box holds a space.
+ */
+fun localProperty(name: String): String =
+    localProperties.map { it.getProperty(name).orEmpty().trim() }.getOrElse("")
+
+val betaDefaultServerAddress: String = localProperty("mue.beta.server")
+
+/*
+ * The account that same `beta` build arrives with in its email box — and the line where the list
+ * of what may be baked into an artefact stops.
+ *
+ * Same file, same variant, same reasoning as the address: the owner recreates `mue_dev` with
+ * `docker compose down -v` and reinstalls the beta often, and this client has no sign-up screen
+ * (AGENTS.md §4.6), so every round trip costs him an address, an email and a password retyped on
+ * a phone keyboard. Two of those three name things — *which machine*, *which account* — and one
+ * is a secret.
+ *
+ * **The password is not here, and it is not to be added.** Not as a third key, not behind a flag,
+ * not "only for beta". `resValue` compiles its argument into `res/values/values.xml` inside the
+ * APK, and an APK is a file that gets copied onto a phone, kept in `../` beside the PRDs, and
+ * sent over a chat to be installed — anyone holding one reads that table back with `apktool`, or
+ * with an unzip and `strings`. An address and an email survive that disclosure: they name a
+ * machine on a home LAN and a mailbox their owner hands out anyway. A password does not, because
+ * being unknown to everyone else is the whole of what it is worth. PRD_SERVER_SYNC_MCP 9.2 has it
+ * typed at every pairing on purpose, and `SyncViewModel.onLeaveSettings` drops it when the screen
+ * closes — which would be theatre if the same string sat in the resource table of every copy of
+ * the build.
+ *
+ * The seeding command on the server side is the other half of this chore and refuses the same
+ * thing for the same kind of reason: `scripts/admin.ts accounts create` will not take the
+ * password as an argument, because a command line lands in the shell history.
+ */
+val betaDefaultAccountEmail: String = localProperty("mue.beta.email")
 
 android {
     namespace = "fr.kristenjestin.mue"
@@ -142,10 +176,26 @@ android {
          * above — the view model itself takes the answer as a parameter and stays provable by a
          * JVM test.
          *
-         * Only the address. Not the email, not the password: those are credentials, and a
-         * credential compiled into an artefact is a credential in every copy of it.
+         * The email box gets the same treatment from `default_account_email` below, and the
+         * password gets none: the note on `betaDefaultAccountEmail` at the top of this file draws
+         * that line and says what it costs to move it.
          */
         resValue("string", "default_server_address", "")
+
+        /*
+         * The email `Server settings` starts with, which for every build but one is none.
+         *
+         * A second declaration rather than a second field on the first: they are two resources
+         * because `resValue` produces one string each, and they are two `local.properties` keys
+         * because the owner may want either without the other — an address with no account is the
+         * state a fresh server is in before `scripts/admin.ts accounts create` has run.
+         *
+         * Empty here, so `release`, `local` and `debug` are untouched by it for the reasons the
+         * address's own note gives, and `beta` overrides it only when `local.properties` names a
+         * value. That is what makes an unconfigured clone build the beta it built before: the
+         * resource is the empty string, and `SyncViewModel` reads empty as *no default*.
+         */
+        resValue("string", "default_account_email", "")
     }
 
     /*
@@ -253,6 +303,14 @@ android {
             // proposed to a build that would refuse it at the keyboard would be a worse offer
             // than none.
             resValue("string", "default_server_address", betaDefaultServerAddress)
+            // The account that goes with it, under the same terms and from the same file: absent
+            // key, empty string, a beta that behaves exactly as it did before. The two keys are
+            // read independently, so configuring one and not the other is a supported state and
+            // not a half-configured build — `SyncViewModel` decides each field on its own.
+            //
+            // There is no third line here, and `betaDefaultAccountEmail`'s note at the top of the
+            // file says why: the password is a secret and this is an artefact.
+            resValue("string", "default_account_email", betaDefaultAccountEmail)
         }
 
         /*

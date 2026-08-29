@@ -224,20 +224,36 @@ Prérequis, tous deux non versionnés :
   Java 17 contre laquelle le code est compilé, mais il lui faut une JVM pour
   démarrer.
 
-Le même `local.properties` accepte une clé **facultative** :
+Le même `local.properties` accepte deux clés **facultatives** :
 
 ```properties
 mue.beta.server=http://192.168.1.100:3000
+mue.beta.email=kris@example.org
 ```
 
-`mue.beta.server` est l'adresse dont la variante `beta` pré-remplit le champ
-serveur de `Server settings`, pour que le propriétaire n'ait pas à retaper l'IP
-de sa machine de développement à chaque réinstallation de la bêta. Elle voyage
-par `resValue("string", "default_server_address", …)` comme `app_name` (§7),
-n'est lue par aucune autre variante, et n'écrase jamais l'adresse d'un téléphone
-déjà appairé ni une saisie en cours. **Absente, rien ne change** : la bêta se
-construit et se comporte exactement comme avant, champ vide et aucun message —
+`mue.beta.server` est l'adresse et `mue.beta.email` le compte dont la variante
+`beta` pré-remplit les champs de `Server settings`, pour que le propriétaire
+n'ait à retaper ni l'IP de sa machine de développement ni son courriel à chaque
+réinstallation de la bêta — le client Android n'ayant pas de parcours
+d'inscription, le compte lui-même se sème avec `admin.ts accounts create`
+(§4.9). Les deux voyagent par `resValue("string", …)` comme `app_name` (§7),
+dans `default_server_address` et `default_account_email`, ne sont lues par
+aucune autre variante, et n'écrasent jamais ce qu'un téléphone déjà appairé
+porte ni une saisie en cours. Elles sont lues indépendamment : configurer l'une
+sans l'autre est un état ordinaire. **Absentes, rien ne change** : la bêta se
+construit et se comporte exactement comme avant, champs vides et aucun message —
 il n'y a donc rien à configurer pour qu'un dépôt fraîchement cloné compile.
+
+**Il n'y aura pas de troisième clé pour le mot de passe.** Une `resValue` finit
+dans `res/values/values.xml` à l'intérieur de l'APK, et un APK se copie sur un
+téléphone, se garde à côté des PRD et s'envoie pour être installé : n'importe
+qui le tenant relit cette table. Une adresse et un courriel survivent à cette
+divulgation, un mot de passe non — c'est la seule des trois valeurs dont tout le
+prix est que personne d'autre ne l'ait. PRD_SERVER_SYNC_MCP 9.2 le fait saisir à
+chaque appairage exprès, et `SyncViewModel.onLeaveSettings` le jette à la
+fermeture de l'écran, ce qui ne voudrait rien dire si la même chaîne était
+compilée dans la construction. La commande de semis côté serveur tranche pareil
+et pour la même raison (§4.9).
 
 Le cache de tâches Vite+ est **désactivé**. Gradle seul décide de ce qu'une
 construction Android doit refaire, et une empreinte Vite+ sur cette arborescence
@@ -269,6 +285,8 @@ délibérément :
 ```
 
 Le compte doit préexister : le client Android n'a pas de parcours d'inscription.
+`admin.ts accounts create` (§4.9) est ce qui le crée sur une base de
+développement.
 
 ### 4.7 Régénérations
 
@@ -349,9 +367,35 @@ posé avant le démarrage de Bun, passer par `scripts/mue-server.ps1` (§4.9).
 ```sh
 bun --env-file=.env run scripts/admin.ts sessions list
 bun --env-file=.env run scripts/admin.ts agents revoke <clientId>
+bun --env-file=.env run scripts/admin.ts accounts create <email> [nom]
 bun run scripts/dev-tls-cert.ts            # autorité + certificat de dev
 ./scripts/mue-server.ps1 start|stop|restart|status|logs
 ```
+
+`accounts create` sème un compte de développement, parce que le client Android
+n'a pas de parcours d'inscription (§4.6) et que le propriétaire recrée `mue_dev`
+avec `down -v`. Quatre choses à en savoir :
+
+- **Elle passe par Better Auth**, jamais par un `INSERT`. Un compte utilisable
+  est deux lignes : `user` et `account`, cette dernière portant le mot de passe
+  haché par la fonction de Better Auth, dans le format que sa propre
+  vérification relit. Une ligne écrite à la main donne un compte qu'Adminer
+  montre et qui répond `INVALID_EMAIL_OR_PASSWORD` à l'appairage, exactement
+  comme un mot de passe faux.
+- **Le mot de passe n'est jamais un argument.** Il vient de
+  `MUE_ACCOUNT_PASSWORD`, ou d'une invite sans écho quand l'entrée standard est
+  un terminal. Un argument, lui, part dans l'historique du shell, dans `argv` —
+  donc dans `ps` et le gestionnaire des tâches — et à l'écran. Minimum 12
+  caractères (`minPasswordLength`, `packages/auth/src/auth.ts`), refusés ici
+  plutôt que par une `APIError` de Better Auth.
+- **Elle refuse toute base qui n'est pas une base de développement**, sur deux
+  couches conjointes : boucle locale *et* nom dans `{mue_dev, mue_test}`. La
+  production se joint par un nom et s'appelle `mue`, donc elle échoue aux deux.
+  Il n'y a pas d'échappatoire par variable, à la différence de
+  `MUE_ALLOW_DESTRUCTIVE_TESTS` (§5) : une base jetable peut légitimement
+  s'appeler autrement, « semer un compte de test sur la production » non.
+- **Elle est rejouable.** Un compte déjà présent n'est pas une erreur : elle le
+  dit, n'écrit rien, ne remplace pas le mot de passe et sort en 0.
 
 `mue-server.ps1` existe pour deux raisons constatées : `NODE_EXTRA_CA_CERTS`
 doit être dans l'environnement **avant** que Bun démarre (Bun initialise son
@@ -859,7 +903,7 @@ main dans le nouveau répertoire :
 | Fichier | Pourquoi il manque | Conséquence |
 |---|---|---|
 | `.env` | `.gitignore` | tout script `--env-file` échoue sur `DATABASE_URL is not set` |
-| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android ; et sans `mue.beta.server` (§4.5), la bêta s'assemble avec un champ serveur vide |
+| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android ; et sans `mue.beta.server` ni `mue.beta.email` (§4.5), la bêta s'assemble avec des champs serveur et compte vides |
 | `node_modules/` | `.gitignore` | `vp`, `tsc` et les tests n'existent pas — relancer `bun install` |
 | `certs/` | `.gitignore` | le serveur TLS local ne démarre pas |
 
