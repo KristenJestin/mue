@@ -183,6 +183,48 @@ class BodyCompositionCalculatorTest {
         assertEquals(Sex.MALE, composition.inputSex)
     }
 
+    /**
+     * PRD_SCALE 23 : « les valeurs dérivées sont reproductibles depuis l'impédance, l'instantané
+     * des entrées et la version de formule stockés. »
+     *
+     * Le test précédent vérifie que l'instantané est *écrit* ; celui-ci vérifie qu'il **suffit**,
+     * ce qui n'est pas la même affirmation et est la seule des deux que la case demande. Une
+     * entrée oubliée de l'instantané — le sexe, l'impédance rangée sur la composition plutôt que
+     * sur la mesure (FR-BODY-004) — laisserait le premier vert et rendrait le recalcul de
+     * FR-BODY-004 impossible le jour où une version 2 de la formule doit rejouer l'historique.
+     *
+     * L'impédance vient de la mesure et non de la composition, exactement comme elle viendrait de
+     * la base : c'est là qu'elle est stockée, et c'est ce qui rend ce test représentatif.
+     */
+    @Test
+    fun `l'instantané stocké suffit à retrouver les quatre entiers`() {
+        val measurement = Measurement(
+            date = LocalDate.of(2025, 1, 20),
+            weight = Weight.ofHundredthsOrNull(8575)!!,
+            source = MeasurementSource.SCALE,
+            impedanceOhm = 545,
+        )
+        val profile = UserProfile(heightCm = 178, birthDate = LocalDate.of(1992, 6, 15), sex = Sex.MALE)
+        val stored = BodyCompositionCalculator.calculate(measurement, profile).composition()
+
+        // Aucun profil n'entre ici : les seules entrées sont celles que la base porte. Une
+        // grandeur que l'équation lirait ailleurs — un champ de profil ajouté sans être copié
+        // dans l'instantané — ferait diverger les deux résultats, et c'est le seul défaut que ce
+        // test existe pour attraper.
+        val replayed = BodyCompositionCalculator.calculate(
+            date = stored.date,
+            weightCg = stored.inputWeightCg,
+            heightCm = stored.inputHeightCm,
+            ageYears = stored.inputAgeYears,
+            sex = stored.inputSex,
+            impedanceOhm = measurement.impedanceOhm,
+        ).composition()
+
+        assertEquals(stored, replayed)
+        assertEquals(BodyCompositionFormula.ID, stored.formulaId)
+        assertEquals(BodyCompositionFormula.VERSION, stored.formulaVersion)
+    }
+
     // ------------------------------------------------------------------ âge à la date de la mesure
 
     @Test
