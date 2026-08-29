@@ -204,6 +204,43 @@ class ProgressBodyCompositionTest {
         assertNotNull(saved.bodyComposition)
     }
 
+    /**
+     * PRD_SCALE 21.1 et BR-SCALE-013 : « modifier le poids ou la date depuis l'historique
+     * transforme la mesure en `manual` et retire **à la fois** sa composition et son impédance. »
+     *
+     * `RoomMeasurementRepositoryTest` prouve que le dépôt honore un payload sans composition ;
+     * cela ne dit rien de ce que **cet écran envoie**. Sans ce test, [ProgressViewModel.saveEdit]
+     * pouvait recopier l'impédance et la provenance de la mesure d'origine sur le poids retapé, et
+     * l'unique symptôme aurait été une impédance mesurée sur 74,5 kg rattachée à 71,2 kg — une
+     * donnée fausse plutôt qu'une donnée absente, que rien à l'écran ne distingue.
+     *
+     * L'assertion sur `sourceScaleId` compte autant que les deux autres : c'est l'identifiant qui
+     * ferait croire, dans un export ou côté serveur, que la balance a produit cette valeur.
+     */
+    @Test
+    fun `retoucher un poids reçu depuis l'historique lui retire impédance et composition`() =
+        progressTest(
+            measurements = listOf(
+                composed(daysAgo(3), 74.5, 500).copy(sourceScaleId = "scale-1"),
+            ),
+            period = Period.ALL,
+        ) { viewModel, repository ->
+            val received = repository.measurements.single()
+            assertNotNull(received.bodyComposition, "le fixture doit partir d'une pesée complète")
+
+            viewModel.openEditor(received)
+            viewModel.updateWeightInput("71.2")
+            viewModel.saveEdit()
+            advanceUntilIdle()
+
+            val edited = repository.measurements.single()
+            assertEquals(71.2, edited.weight.kilograms, 1e-9)
+            assertEquals(MeasurementSource.MANUAL, edited.source)
+            assertNull(edited.sourceScaleId)
+            assertNull(edited.impedanceOhm)
+            assertNull(edited.bodyComposition)
+        }
+
     /** PRD_SCALE 18.4 : sans aucune pesée à compléter, rien n'est proposé et rien n'est écrit. */
     @Test
     fun `sans pesée à compléter accepter la proposition n'écrit rien`() = progressTest(
