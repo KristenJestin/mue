@@ -71,7 +71,7 @@ import java.time.LocalDate
  * It does not read PostgreSQL. An instrumented test has no business holding a database
  * credential, and a phone reporting `Synced` while the server stored nothing is precisely the
  * lie this exercise exists to catch — so the row is read out of band, against
- * `mue_app.health_profile`. The height and the birth date below are the owner's own, which is
+ * `health_profile`. The height and the birth date below are the owner's own, which is
  * what makes that row identifiable with certainty.
  */
 @RunWith(AndroidJUnit4::class)
@@ -87,7 +87,7 @@ class LiveHealthProfileSyncTest {
      * The row that could not be sent, sent.
      *
      * It leaves the server holding exactly the owner's profile — 171 cm, 1998-11-18 — which is
-     * what makes `mue_app.health_profile` readable out of band as evidence rather than as a
+     * what makes `health_profile` readable out of band as evidence rather than as a
      * shape. This test does nothing afterwards, on purpose: a second phase would overwrite the
      * very row it exists to produce.
      */
@@ -328,7 +328,7 @@ class LiveHealthProfileSyncTest {
     }
 
     private companion object {
-        /** The owner's own, so the row in `mue_app.health_profile` is identifiable. */
+        /** The owner's own, so the row in `health_profile` is identifiable. */
         const val HEIGHT_CM = 171
         val BIRTH_DATE: LocalDate = LocalDate.of(1998, 11, 18)
 

@@ -34,7 +34,7 @@ import type { ApplyOutcome } from "./types";
  * *"les ingrédients ne sont pas fusionnés ligne à ligne"*.
  *
  * So these aggregates are opaque. The payload replaces the row whole, which is exactly what
- * `mue_app.activity_sessions` and `mue_app.recipes` are shaped for.
+ * `activity_sessions` and `recipes` are shaped for.
  *
  * ## 4. Two concurrent modifications of the same field or child: the last accepted mutation
  *    becomes active, and the replaced version stays audited

@@ -39,12 +39,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await handle.close();
 });
 
 beforeEach(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await seedUser(handle, USER);
 });
 

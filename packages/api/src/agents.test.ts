@@ -26,7 +26,7 @@ const CLIENT_ROW = "client-row-agents-route-test";
 
 const config: AuthConfig = {
   // The same secret every other suite uses. The JWT plugin's signing key is
-  // encrypted with it and stored in the shared `mue_auth.jwks`; a second secret
+  // encrypted with it and stored in the shared `jwks`; a second secret
   // makes whichever suite runs later fail to decrypt a key it did not mint.
   secret: "test-secret-that-is-long-enough-32+",
   baseUrl: BASE_URL,
@@ -88,11 +88,11 @@ beforeAll(async () => {
   // with -- and delete the signing key it authenticates against.
   database = createTestDatabase();
   await migrate(database);
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
   await removeRows();
   // A key encrypted under another suite's secret cannot be decrypted, and the symptom
   // is a bare 401 on every authenticated route.
-  await database.sql`delete from mue_auth.jwks`;
+  await database.sql`delete from jwks`;
 
   authHandle = createAuth({ config, database });
   app = createApiApp({ auth: authHandle.auth, database }) as unknown as Hono;
@@ -161,7 +161,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await removeRows();
-  await database.sql`delete from mue_auth."user" where "email" = ${EMAIL}`;
+  await database.sql`delete from "user" where "email" = ${EMAIL}`;
   await authHandle.close();
   await database.close();
 });

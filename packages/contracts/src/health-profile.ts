@@ -12,7 +12,7 @@ import { z } from "zod";
  * create two aggregates, both valid, both synchronised, and no merge rule in section 13.4
  * could ever say which one is *the* profile. A constant makes a rival row unrepresentable
  * rather than merely unlikely, and it is the same `'me'` Android's `health_profile` table and
- * `mue_app.health_profile`'s single-column primary key are already keyed by.
+ * `health_profile`'s single-column primary key are already keyed by.
  */
 export const HEALTH_PROFILE_AGGREGATE_ID = "me";
 

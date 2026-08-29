@@ -49,7 +49,7 @@ import java.util.Random
  * ## Why the write goes through `/api/v1/sync/push`
  *
  * Because that is what the Web interface does, and what an agent on `/mcp` ends up doing. A row
- * inserted straight into `mue_app.measurements` would move no sequence, so no client would ever
+ * inserted straight into `measurements` would move no sequence, so no client would ever
  * see it — which is the trap `scripts`-level tooling falls into and the reason the journal
  * exists (PRD 12.3). The mutation carries a **UUIDv7** and an `origin.type` of `agent`: the
  * contract refuses a v4 and refuses `web` before it reads the payload, and both have already

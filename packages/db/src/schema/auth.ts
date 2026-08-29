@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgSchema, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 /**
  * Better Auth owns every table below. The shapes are transcribed from
@@ -8,14 +8,20 @@ import { boolean, integer, jsonb, pgSchema, text, timestamp } from "drizzle-orm/
  *
  * Columns stay camelCase because Better Auth addresses them by its own field
  * names; renaming them would need a `fields` mapping per model, which is one
- * more place for the two to drift. `mue_app` is snake_case, as SQL usually is.
+ * more place for the two to drift. The application tables of `app.ts` are
+ * snake_case, as SQL usually is.
  *
- * PRD section 20.3: the application creates no schema. `mue_auth` is
- * provisioned by the DBA (infra/README.md); the migrations only fill it.
+ * Ces tables vivent dans `public`, comme les autres (voir `app.ts`), et ce sont
+ * elles qui portent le vrai risque du schéma partagé : `user`, `session`,
+ * `account`, `verification` et `jwks` sont des noms qu'une autre application du
+ * propriétaire peut déjà porter. Aucun préfixe n'est ajouté — un préfixe serait
+ * un renommage que Better Auth ne suivrait pas sans une table de correspondance
+ * par modèle — et c'est l'absence d'`IF NOT EXISTS` dans le `CREATE TABLE`
+ * généré qui transforme une collision en échec de migration plutôt qu'en greffe
+ * silencieuse sur la table d'un autre.
  */
-export const mueAuth = pgSchema("mue_auth");
 
-export const user = mueAuth.table("user", {
+export const user = pgTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
@@ -29,7 +35,7 @@ export const user = mueAuth.table("user", {
  * One row per client session. The Android bearer token is a session token, so
  * one row here is one revocable device (sections 9.3 and 15.3).
  */
-export const session = mueAuth.table("session", {
+export const session = pgTable("session", {
   id: text("id").primaryKey(),
   expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
   token: text("token").notNull().unique(),
@@ -42,7 +48,7 @@ export const session = mueAuth.table("session", {
     .references(() => user.id, { onDelete: "cascade" }),
 });
 
-export const account = mueAuth.table("account", {
+export const account = pgTable("account", {
   id: text("id").primaryKey(),
   issuer: text("issuer").notNull(),
   accountId: text("accountId").notNull(),
@@ -61,7 +67,7 @@ export const account = mueAuth.table("account", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull(),
 });
 
-export const verification = mueAuth.table("verification", {
+export const verification = pgTable("verification", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
@@ -71,7 +77,7 @@ export const verification = mueAuth.table("verification", {
 });
 
 /** Signing keys for the OAuth access tokens agents present on `/mcp`. */
-export const jwks = mueAuth.table("jwks", {
+export const jwks = pgTable("jwks", {
   id: text("id").primaryKey(),
   publicKey: text("publicKey").notNull(),
   privateKey: text("privateKey").notNull(),
@@ -86,7 +92,7 @@ export const jwks = mueAuth.table("jwks", {
  * is set by the CIMD plugin for a client that registered itself through a
  * Client ID Metadata Document.
  */
-export const oauthClient = mueAuth.table("oauthClient", {
+export const oauthClient = pgTable("oauthClient", {
   id: text("id").primaryKey(),
   clientId: text("clientId").notNull().unique(),
   clientSecret: text("clientSecret"),
@@ -125,7 +131,7 @@ export const oauthClient = mueAuth.table("oauthClient", {
   metadata: jsonb("metadata"),
 });
 
-export const oauthResource = mueAuth.table("oauthResource", {
+export const oauthResource = pgTable("oauthResource", {
   id: text("id").primaryKey(),
   identifier: text("identifier").notNull().unique(),
   name: text("name").notNull(),
@@ -143,7 +149,7 @@ export const oauthResource = mueAuth.table("oauthResource", {
   metadata: jsonb("metadata"),
 });
 
-export const oauthClientResource = mueAuth.table("oauthClientResource", {
+export const oauthClientResource = pgTable("oauthClientResource", {
   id: text("id").primaryKey(),
   clientId: text("clientId")
     .notNull()
@@ -155,7 +161,7 @@ export const oauthClientResource = mueAuth.table("oauthClientResource", {
   createdAt: timestamp("createdAt", { withTimezone: true }),
 });
 
-export const oauthRefreshToken = mueAuth.table("oauthRefreshToken", {
+export const oauthRefreshToken = pgTable("oauthRefreshToken", {
   id: text("id").primaryKey(),
   token: text("token").notNull().unique(),
   clientId: text("clientId")
@@ -180,7 +186,7 @@ export const oauthRefreshToken = mueAuth.table("oauthRefreshToken", {
   scopes: text("scopes").array().notNull(),
 });
 
-export const oauthAccessToken = mueAuth.table("oauthAccessToken", {
+export const oauthAccessToken = pgTable("oauthAccessToken", {
   id: text("id").primaryKey(),
   token: text("token").notNull().unique(),
   clientId: text("clientId")
@@ -200,7 +206,7 @@ export const oauthAccessToken = mueAuth.table("oauthAccessToken", {
   scopes: text("scopes").array().notNull(),
 });
 
-export const oauthConsent = mueAuth.table("oauthConsent", {
+export const oauthConsent = pgTable("oauthConsent", {
   id: text("id").primaryKey(),
   clientId: text("clientId")
     .notNull()
@@ -215,7 +221,7 @@ export const oauthConsent = mueAuth.table("oauthConsent", {
 });
 
 /** Replay store for private_key_jwt client assertions: an id and its expiry. */
-export const oauthClientAssertion = mueAuth.table("oauthClientAssertion", {
+export const oauthClientAssertion = pgTable("oauthClientAssertion", {
   id: text("id").primaryKey(),
   expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
 });

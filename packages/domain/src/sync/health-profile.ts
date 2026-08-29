@@ -18,7 +18,7 @@ const { healthProfile, syncJournal } = schema;
  * Section 13.4 says three things, and each one is a decision below:
  *
  * 1. **"Le profil constitue un agrégat unique."** One aggregate per account, so
- *    `mue_app.health_profile`'s primary key is `user_id` *alone* — not `(user_id, id)`.
+ *    `health_profile`'s primary key is `user_id` *alone* — not `(user_id, id)`.
  *    A second device cannot insert a rival row because there is no column for one to
  *    differ in, and the wire pins `aggregateId` to the literal `me` so it cannot even
  *    ask. Uniqueness is a shape here rather than a constraint someone remembers.

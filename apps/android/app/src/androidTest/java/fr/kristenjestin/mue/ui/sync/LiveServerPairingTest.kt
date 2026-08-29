@@ -60,7 +60,7 @@ import java.time.LocalDate
  * It does not read PostgreSQL — an instrumented test has no business holding a database
  * credential, and a phone that reports `Synced` while the server stored nothing is exactly the
  * lie this whole exercise exists to catch. So this half proves the phone got a `2xx` for its
- * push, and the row itself is read out of band, by hand, against `mue_app.measurements`. The
+ * push, and the row itself is read out of band, by hand, against `measurements`. The
  * weight below is deliberately odd so it can be found there with certainty.
  */
 @RunWith(AndroidJUnit4::class)
@@ -70,7 +70,7 @@ class LiveServerPairingTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     /**
-     * A date and a weight nothing else would produce, so the row in `mue_app.measurements` can
+     * A date and a weight nothing else would produce, so the row in `measurements` can
      * only have come from this test. 73.45 kg lands on the 0.05 kg step of BR-003.
      */
     private val date = LocalDate.of(2019, 3, 14)

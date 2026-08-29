@@ -2,9 +2,11 @@
 #
 # Development only. Production connects to the shared PostgreSQL already
 # administered on the personal server through DATABASE_URL; the Mue deployment
-# ships no PostgreSQL container and creates no database and no role. What the
-# init scripts below do here is exactly what a DBA prepares by hand there --
-# see infra/README.md.
+# ships no PostgreSQL container and creates no database, no role and no schema.
+#
+# Le conteneur garde un rôle dédié parce qu'il est jetable, mais il ne crée
+# aucun schéma : la production n'en aura pas non plus, et les deux
+# environnements doivent avoir la même forme -- voir infra/README.md.
 #
 #   docker compose -f infra/compose.dev.yml up -d
 #   docker compose -f infra/compose.dev.yml down      # keeps the data
@@ -30,8 +32,6 @@ services:
       # Read by the init scripts through psql's \getenv.
       MUE_DB_ROLE: ${MUE_DB_ROLE:?set MUE_DB_ROLE in the repository-root .env}
       MUE_DB_PASSWORD: ${MUE_DB_PASSWORD:?set MUE_DB_PASSWORD in the repository-root .env}
-      MUE_APP_SCHEMA: ${MUE_APP_SCHEMA:-mue_app}
-      MUE_AUTH_SCHEMA: ${MUE_AUTH_SCHEMA:-mue_auth}
     volumes:
       # postgres:18 puts PGDATA in /var/lib/postgresql/18/docker and declares
       # /var/lib/postgresql as its volume; mounting the parent is what makes
@@ -42,7 +42,7 @@ services:
     healthcheck:
       # -h forces TCP. During initdb the entrypoint serves a temporary cluster
       # on the unix socket only, so a socket probe would report healthy before
-      # the init scripts had created the role and the schemas.
+      # the init scripts had created the role and the test database.
       test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s

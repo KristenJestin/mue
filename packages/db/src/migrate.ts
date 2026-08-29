@@ -3,7 +3,6 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDatabase, type DatabaseHandle } from "./client";
-import { APP_SCHEMA } from "./config";
 
 /**
  * The migration runner.
@@ -11,21 +10,37 @@ import { APP_SCHEMA } from "./config";
  * Drizzle ships one, and it cannot be used: `PgDialect.migrate` issues
  * `create schema if not exists <migrationsSchema>` unconditionally, and
  * PostgreSQL checks CREATE on the database before it checks whether the schema
- * exists. So the limited `mue` role is refused even for a schema it already
- * owns:
+ * exists. So a role that is not the cluster owner is refused even for a schema
+ * it already owns:
  *
  *   ERROR:  permission denied for database mue_dev
  *
  * That is not a misconfiguration to work around, it is section 20.3 working as
- * intended. This runner therefore keeps its own bookkeeping table inside
- * `mue_app`, a schema the DBA already granted, and issues no DDL outside it.
+ * intended. Ce lanceur n'émet donc aucun DDL de schéma, et ne nomme aucun
+ * schéma du tout : sa table de suivi n'est pas plus qualifiée que les tables
+ * des migrations qu'elle enregistre, et les unes comme l'autre atterrissent là
+ * où pointe le `search_path` de la connexion (client.ts). Le suivi ne peut donc
+ * pas se retrouver ailleurs que les tables qu'il décrit.
  *
  * Migrations run explicitly, as a deployment step. Nothing here is called at
  * process start: several starting processes would race, which section 20.3
  * forbids in as many words.
  */
 
-const MIGRATIONS_TABLE = "__mue_migrations";
+/**
+ * La table de suivi, et la seule de Mue qui porte un préfixe.
+ *
+ * Le schéma où elle atterrit est partagé avec les autres applications du
+ * propriétaire, donc un nom nu comme `migrations` y serait une collision qui
+ * n'attend que son heure. `__mue_` la rend unique, et c'est précisément ce qui
+ * autorise le `create table if not exists` plus bas alors que les fichiers de
+ * migration, eux, ne doivent jamais en porter : la seule table qui puisse
+ * répondre à ce nom est celle de Mue, tandis qu'un `user` ou un `session`
+ * préexistant est peut-être celui d'une autre application, et s'y greffer en
+ * silence est exactement ce que l'absence d'`IF NOT EXISTS` empêche
+ * (tools/verify-migrations.ts).
+ */
+export const MIGRATIONS_TABLE = "__mue_migrations";
 const STATEMENT_SEPARATOR = "--> statement-breakpoint";
 const ADVISORY_LOCK_KEY = 4_073_411_207;
 
@@ -105,9 +120,9 @@ export async function migrate(
   const files = await readMigrationFiles(folder);
   const { sql } = handle;
 
-  // CREATE TABLE inside a schema the role owns, which is all the role can do.
+  // La seule table que ce fichier crée lui-même, et la seule à porter un préfixe.
   await sql`
-    create table if not exists ${sql(APP_SCHEMA)}.${sql(MIGRATIONS_TABLE)} (
+    create table if not exists ${sql(MIGRATIONS_TABLE)} (
       tag text primary key,
       hash text not null,
       applied_at timestamptz not null default now()
@@ -119,7 +134,7 @@ export async function migrate(
   await sql`select pg_advisory_lock(${ADVISORY_LOCK_KEY})`;
   try {
     const recorded = await sql<{ tag: string; hash: string }[]>`
-      select tag, hash from ${sql(APP_SCHEMA)}.${sql(MIGRATIONS_TABLE)}
+      select tag, hash from ${sql(MIGRATIONS_TABLE)}
     `;
     const known = new Map(recorded.map((row) => [row.tag, row.hash]));
     const applied: string[] = [];
@@ -145,7 +160,7 @@ export async function migrate(
           await tx.unsafe(statement);
         }
         await tx`
-          insert into ${sql(APP_SCHEMA)}.${sql(MIGRATIONS_TABLE)} (tag, hash)
+          insert into ${sql(MIGRATIONS_TABLE)} (tag, hash)
           values (${file.tag}, ${file.hash})
         `;
       });

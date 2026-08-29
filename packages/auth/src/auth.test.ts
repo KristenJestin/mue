@@ -7,9 +7,9 @@ import { MUE_SCOPES } from "./scopes";
 
 /**
  * Better Auth against the real development PostgreSQL, through the real
- * Drizzle adapter, with the tables in `mue_auth`. Nothing is mocked: if the
- * adapter could not address a `pgSchema`-scoped table set, sign-up would fail
- * here with `relation "user" does not exist`.
+ * Drizzle adapter, on the tables where the connection's `search_path` puts
+ * them. Nothing is mocked: if the adapter could not address that table set,
+ * sign-up would fail here with `relation "user" does not exist`.
  */
 
 const BASE_URL = "http://localhost:3000";
@@ -34,6 +34,14 @@ const call = (path: string, init?: RequestInit) =>
 beforeAll(async () => {
   database = createTestDatabase();
   await migrate(database);
+  // AGENTS.md §9.2. La clé de signature JWKS est chiffrée avec le secret qui
+  // l'a émise, et `mue_test` est la seule base que toutes les suites partagent.
+  // `packages/api/src/mcp/mcp.integration.test.ts` en laisse une derrière lui,
+  // chiffrée sous « integration-test-secret-… » ; sans ce nettoyage, la suite
+  // suivante dans l'ordre du §10 échoue sur « Failed to decrypt private key »,
+  // ce qui ne dit rien de ce qu'elle teste. Les suites de `@mue/api` vident
+  // déjà cette table en `beforeAll` pour exactement cette raison.
+  await database.sql`delete from jwks`;
   handle = createAuth({ config: CONFIG, database });
 });
 
@@ -41,7 +49,7 @@ afterAll(async () => {
   await database.close();
 });
 
-describe("the Drizzle adapter against mue_auth", () => {
+describe("the Drizzle adapter against the Better Auth tables", () => {
   test("creates an account", async () => {
     const response = await call("/api/auth/sign-up/email", {
       method: "POST",
@@ -51,7 +59,7 @@ describe("the Drizzle adapter against mue_auth", () => {
     expect(response.status).toBe(200);
 
     const rows = await database.sql<{ id: string }[]>`
-      select id from mue_auth."user" where email = ${email}
+      select id from "user" where email = ${email}
     `;
     expect(rows).toHaveLength(1);
   });
