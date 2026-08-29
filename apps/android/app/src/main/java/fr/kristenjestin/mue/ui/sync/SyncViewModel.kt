@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import fr.kristenjestin.mue.MueApplication
+import fr.kristenjestin.mue.R
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.pairing.DisconnectResult
 import fr.kristenjestin.mue.data.pairing.PairingResult
@@ -52,6 +53,21 @@ class SyncViewModel(
      * rather than looping — which is WorkManager's job, not this screen's.
      */
     private val requestFollowUpSync: () -> Unit,
+    /**
+     * The address the pairing form starts with on a phone that has never been paired.
+     *
+     * Empty in every build but `beta`, where `build.gradle.kts` fills the `default_server_address`
+     * resource from `local.properties` — the note there says why the value is not in the
+     * repository. A parameter and not a resource read, because this class is proved on the JVM:
+     * the one object on the path that may hold a `Context` is the [Factory] below, which is the
+     * same arrangement `cleartext_server_permitted` uses to reach `ServerAddresses.parse` through
+     * `SyncContainer`.
+     *
+     * Defaulted to the empty string, and that is not a placeholder — [seedAddress] reads blank as
+     * *no default at all*, so every caller and every test that does not name it keeps exactly the
+     * behaviour it had.
+     */
+    private val defaultServerAddress: String = "",
 ) : ViewModel() {
 
     private val transient = MutableStateFlow(TransientState())
@@ -272,9 +288,37 @@ class SyncViewModel(
         viewModelScope.launch { seedAddress() }
     }
 
+    /**
+     * Two sources for one field, and the order between them is the rule rather than a preference.
+     *
+     * `sync_state.server_url` is where this phone actually synchronises, so it wins outright: a
+     * paired phone never sees [defaultServerAddress], whatever the build put there. That is the
+     * property worth stating, because the failure it forbids is silent — an address swapped under
+     * a working pairing would send the next `Sign in` to a machine that is not the one holding
+     * this phone's history.
+     *
+     * Unpaired, the default only reaches a field that is still blank. So an address the owner has
+     * begun typing is not replaced, and neither is one left from an earlier visit to the screen —
+     * [onLeaveSettings] clears the password and deliberately not the address, so re-entering runs
+     * this again over a field that already holds something.
+     *
+     * Both conditions are read inside the `update` and after the suspending DAO call rather than
+     * before it, because [onEnterSettings] runs in `viewModelScope`: the keyboard is live while
+     * the read is in flight.
+     */
     private suspend fun seedAddress() {
-        val stored = syncDao.syncState()?.serverUrl?.takeUnless(String::isBlank) ?: return
-        formState.update { it.copy(address = stored) }
+        val stored = syncDao.syncState()?.serverUrl?.takeUnless(String::isBlank)
+        if (stored != null) {
+            formState.update { it.copy(address = stored) }
+            return
+        }
+        // Blank is "this build proposes nothing", which is every build but `beta` and `beta`
+        // itself on a machine whose `local.properties` says nothing. The early return keeps the
+        // no-default path byte for byte what it was before the parameter existed.
+        if (defaultServerAddress.isBlank()) return
+        formState.update { form ->
+            if (form.address.isBlank()) form.copy(address = defaultServerAddress) else form
+        }
     }
 
     /** The password never outlives the screen that collected it. */
@@ -303,6 +347,12 @@ class SyncViewModel(
                     engine = sync.engine,
                     pairing = sync.pairing,
                     requestFollowUpSync = { SyncScheduler.syncNow(app) },
+                    // The single resource read on this path, and it is here rather than in the
+                    // view model for the reason the parameter's own note gives: a `Context` in
+                    // `SyncViewModel` would put the seeding rule out of reach of a JVM test.
+                    // Empty for `release`, `local` and `debug`, which is what makes this line
+                    // change nothing for them.
+                    defaultServerAddress = app.getString(R.string.default_server_address),
                 )
             }
         }

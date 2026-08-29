@@ -1,3 +1,6 @@
+import java.io.StringReader
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -5,6 +8,40 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.androidx.baselineprofile)
 }
+
+/*
+ * The address a `beta` build arrives with in its pairing form, read from `local.properties`.
+ *
+ * From that file and never from this one, because the value is a machine's IP address. The owner
+ * runs the development server on his PC and reinstalls the beta often, so retyping
+ * `http://192.168.1.100:3000` into `Server settings` at every install is a chore that teaches
+ * nobody anything — but the address belongs to a DHCP lease, not to a repository whose `develop`
+ * is merged into `main`. `local.properties` is already the machine-local file that carries
+ * `sdk.dir`, already git-ignored, and already listed in AGENTS.md §9.4 among the things a fresh
+ * worktree has to be given by hand.
+ *
+ * **Absent, it is the empty string, and that is the whole of the fallback.** `SyncViewModel`
+ * treats an empty default as no default, so somebody who clones this repository and writes only
+ * `sdk.dir` builds a beta that behaves exactly as it did before this existed: an empty field, no
+ * message, nothing to configure before the project compiles.
+ *
+ * `providers.fileContents` and not `File.readText`, because the configuration cache is on
+ * (`gradle.properties`): read this way the file is a declared build input, so editing the address
+ * invalidates the cached configuration instead of being ignored until some unrelated change
+ * happens to rebuild it. `java.util.Properties` and not a hand-rolled split, because that is what
+ * reads `sdk.dir` out of the same file, escapes and all.
+ */
+val betaDefaultServerAddress: String = providers
+    .fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+    .asText
+    .map { text ->
+        Properties()
+            .apply { load(StringReader(text)) }
+            .getProperty("mue.beta.server")
+            .orEmpty()
+            .trim()
+    }
+    .getOrElse("")
 
 android {
     namespace = "fr.kristenjestin.mue"
@@ -85,6 +122,30 @@ android {
          * build types on purpose.
          */
         resValue("bool", "cleartext_server_permitted", "false")
+
+        /*
+         * The address `Server settings` starts with, which for every build but one is none.
+         *
+         * PRD_SERVER_SYNC_MCP 9.2 has that address typed, and this does not change it: the value
+         * only fills a field that would otherwise have been empty, and only where a wrong guess
+         * costs nothing. Empty here, and left empty by three of the four variants, each for its
+         * own reason — `release` and `local` are the application the owner carries, and a build
+         * that proposed a machine on somebody's LAN would be proposing an address it cannot
+         * reach; `debug` is the sandbox an instrumentation drives, where a pre-filled field is a
+         * value no test asked for and every existing assertion about an empty form would have to
+         * be re-read. Only `beta` overrides it, and from `local.properties`.
+         *
+         * A `string` resource for the reason `cleartext_server_permitted` above is a `bool` one:
+         * `buildConfig` is off in this module and `resValues` is already on, so a build type
+         * states such a thing as a generated resource. `SyncViewModel.Factory` is the single
+         * `Context` on the path from here to the form, exactly as `SyncContainer` is for the flag
+         * above — the view model itself takes the answer as a parameter and stays provable by a
+         * JVM test.
+         *
+         * Only the address. Not the email, not the password: those are credentials, and a
+         * credential compiled into an artefact is a credential in every copy of it.
+         */
+        resValue("string", "default_server_address", "")
     }
 
     /*
@@ -184,6 +245,14 @@ android {
             // half of the app that was never in doubt — the same argument that gave it `debug`'s
             // trust store in the first place.
             resValue("bool", "cleartext_server_permitted", "true")
+            // The one variant that may arrive with an address already in the box. The value comes
+            // from `local.properties` and the reasoning is on `betaDefaultServerAddress` at the
+            // top of this file; when the key is absent this is the empty string `defaultConfig`
+            // already declares, so a clone that configures nothing builds the beta it built
+            // before. It pairs with the two lines above rather than standing alone: an address
+            // proposed to a build that would refuse it at the keyboard would be a worse offer
+            // than none.
+            resValue("string", "default_server_address", betaDefaultServerAddress)
         }
 
         /*
