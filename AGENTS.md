@@ -62,7 +62,7 @@ packages/
   design-tokens/     socle Web/Android (embryonnaire)
   domain/            services métier serveur, implémentation unique des règles
   ui/                primitives shadcn (embryonnaire)
-infra/               compose.dev.yml, scripts initdb, procédure DBA
+infra/               compose.dev.yml, scripts initdb, procédure de déploiement
 scripts/             gen-openapi.ts, admin.ts, dev-tls-cert.ts, mue-server.ps1
 ```
 
@@ -270,7 +270,7 @@ bun run --filter @mue/contracts fixtures
 bun run --filter @mue/contracts openapi
 bun run --filter @mue/contracts openapi:check    # échoue si le fichier est périmé
 
-# Migrations Drizzle : génère, retire les CREATE SCHEMA, puis vérifie.
+# Migrations Drizzle : génère, retire la qualification de schéma, puis vérifie.
 bun run --filter @mue/db generate
 bun run --filter @mue/db verify:sql              # le contrôle seul
 bun run --filter @mue/db migrate                 # applique (jamais au démarrage)
@@ -282,17 +282,39 @@ bun run --filter @mue/ciqual catalogue:build
 bun run --filter @mue/ciqual fixtures:rebuild
 ```
 
-`generate` enchaîne `drizzle-kit generate`, `tools/strip-create-schema.ts` et
-`tools/verify-migrations.ts`. Le retrait des `CREATE SCHEMA` **est la seule
-retouche faite à un fichier généré**, et `verify-migrations.ts` fait échouer la
-construction si l'un survit : le rôle `mue` de production ne peut pas créer de
-schéma, PostgreSQL vérifiant le droit `CREATE` sur la base avant de regarder si
-le schéma existe déjà. Un `create schema if not exists` est refusé même pour un
-schéma que le rôle possède.
+`generate` enchaîne `drizzle-kit generate`, `tools/strip-default-schema.ts` et
+`tools/verify-migrations.ts`. **Mue ne nomme aucun schéma** : les tables sont
+déclarées avec `pgTable`, la migration émet `CREATE TABLE "measurements"` non
+qualifié, et l'endroit où cela atterrit est celui vers lequel pointe le
+`search_path` du rôle que porte `DATABASE_URL` — une décision de
+l'administrateur du cluster, pas du code. Le PostgreSQL de production est celui
+du propriétaire, partagé entre toutes ses applications ; il n'y crée pour Mue ni
+schéma ni rôle.
 
-Le même outil refuse tout `CREATE TABLE` non qualifié : sans schéma explicite,
-la table atterrit là où `search_path` pointe, ce qui, sur un cluster partagé, est
-chez quelqu'un d'autre.
+`strip-default-schema.ts` **est la seule retouche faite à un fichier généré**.
+Drizzle Kit émet bien les `CREATE TABLE` sans schéma, mais il matérialise
+`public` dans les clés étrangères (`REFERENCES "public"."user"`) alors que son
+propre instantané écrit `"schema": ""`. La laisser serait garder le seul endroit
+où Mue nomme un schéma, et le pire : la table créée là où pointe `search_path`,
+la contrainte cherchée dans `public`. Le tout est retiré, donc les deux moitiés
+suivent le même `search_path`.
+
+`verify-migrations.ts` porte les deux règles qui remplacent l'ancienne
+« tout `CREATE TABLE` doit être qualifié » :
+
+1. **aucune instruction ne nomme de schéma** — l'inverse exact, pour la même
+   raison ;
+2. **aucun `IF NOT EXISTS`** — c'est la règle qui compte. Les tables de Mue ne
+   portent pas de préfixe (`user`, `session`, `account`, `verification`, `jwks`,
+   `measurements`) et vivent dans un schéma partagé avec les autres applications
+   du propriétaire. Sans `IF NOT EXISTS`, une collision de nom fait échouer la
+   migration bruyamment ; avec, Mue se grefferait en silence sur la table de
+   quelqu'un d'autre. Si Drizzle Kit se met un jour à en émettre, ce n'est pas
+   une migration à réparer, c'est une décision à reprendre.
+
+La seule table de Mue qui porte un préfixe est `__mue_migrations`, la
+comptabilité du lanceur, et c'est ce préfixe qui autorise son
+`create table if not exists`.
 
 ### 4.8 Faire tourner le serveur
 
@@ -349,7 +371,7 @@ Trois bases entrent en jeu :
 
 - **`mue_dev`** — la base de développement, celle que le téléphone appaire et
   qu'Adminer montre. Elle contient de vraies données. `DATABASE_URL` y pointe.
-- **`mue_test`** — jetable, créée par `infra/initdb/03-mue-test-database.sql`.
+- **`mue_test`** — jetable, créée par `infra/initdb/02-mue-test-database.sql`.
   C'est là que toutes les suites de test travaillent.
 - La production, sur le serveur personnel, jamais atteinte depuis ici.
 
@@ -359,13 +381,39 @@ de passe. Il réécrit plutôt qu'il ne refuse, et la raison est écrite dans le
 code : un refus n'aurait transformé un effacement silencieux qu'en test rouge, et
 la personne suivante aurait cherché l'échappatoire.
 
-`resetSchemas()` supprime toutes les tables des deux schémas. Son garde-fou
-n'est **pas** « est-ce du loopback » — le cluster de développement l'est par
-construction, et c'est exactement ainsi qu'un `bun test` nu à la racine a vidé
-`mue_dev`, comptes et sessions compris, le 27 août. Le garde-fou porte
-désormais sur le *nom* : `mue_test` et `postgres` seulement.
-`MUE_ALLOW_DESTRUCTIVE_TESTS=yes-destroy-it` est l'échappatoire, écrite en toutes
-lettres pour ne pas être posée par accident.
+### `resetSchemas()`, et pourquoi son garde-fou a été refait
+
+Il ne reste **plus de schéma à Mue**. Les tables sont créées là où pointe le
+`search_path` du rôle — `public` sur le cluster partagé du propriétaire, à côté
+de celles de ses autres applications (§4.7). « Toutes les tables du schéma
+courant » n'est donc plus une description de Mue, et la même fonction qui
+nettoyait deux schémas dont elle était seule occupante détruirait aujourd'hui
+les données d'applications qui n'ont jamais entendu parler d'elle.
+
+Le garde-fou est en quatre couches, et la dernière est celle qui compte :
+
+1. **l'hôte** doit être la boucle locale ;
+2. **le nom de la base** doit être `mue_test` (ou `MUE_TEST_DATABASE`).
+   `postgres` était sur cette liste et en a été retiré : elle y était sans
+   danger quand seules les tables de `mue_app` et `mue_auth` étaient
+   supprimées — ces schémas n'existent pas dans la base d'administration d'un
+   cluster ordinaire — et elle y serait dangereuse maintenant ;
+3. **le schéma visé est `current_schema()`**, demandé à la connexion, jamais un
+   littéral ;
+4. **seules les tables que le schéma Drizzle déclare** peuvent être supprimées,
+   la liste étant dérivée de `schema/` et non recopiée. Une table absente de ce
+   fichier n'est atteignable par aucun chemin.
+
+`MUE_ALLOW_DESTRUCTIVE_TESTS=yes-destroy-it` reste l'échappatoire, écrite en
+toutes lettres pour ne pas être posée par accident, mais **elle ne relâche que
+la couche 2**. Ni la boucle locale ni la liste des tables ne s'ouvrent, quoi
+qu'on pose dans l'environnement : la conséquence la plus grave de ce changement
+ne doit pas dépendre d'une variable.
+
+Le garde-fou d'origine était « est-ce du loopback », et c'était la mauvaise
+question : le cluster de développement l'est par construction, et c'est
+exactement ainsi qu'un `bun test` nu à la racine a vidé `mue_dev`, comptes et
+sessions compris, le 27 août.
 
 **Toute nouvelle suite qui construit son propre `createAuth` doit lui passer
 `database: createTestDatabase()`.** Sans cet argument, `createAuth` retombe sur
@@ -760,10 +808,10 @@ Gradle.
 toutes sur **la même base `mue_test`**. Plusieurs d'entre elles, en `beforeAll` :
 
 - suppriment et resèment les mêmes utilisateurs (`seedUser`, `delete from
-  mue_auth."user" where "email" = …`) ;
-- vident `mue_auth.jwks`, parce qu'une clé de signature chiffrée sous le secret
-  d'une autre suite ne peut pas être déchiffrée ;
-- appellent `resetSchemas()`, qui supprime toutes les tables des deux schémas.
+  "user" where "email" = …`) ;
+- vident `jwks`, parce qu'une clé de signature chiffrée sous le secret d'une
+  autre suite ne peut pas être déchiffrée ;
+- appellent `resetSchemas()`, qui supprime toutes les tables de Mue (§5).
 
 Lancées en parallèle, elles se marchent dessus et échouent de manière non
 reproductible — typiquement un `401` nu au milieu d'une suite qui n'a rien
@@ -777,6 +825,16 @@ passe par lui. Une suite qui construit `createAuth` sans lui passer
 `database: createTestDatabase()` écrit dans `mue_dev` sans jamais toucher
 `resetSchemas`. Le symptôme est un téléphone qui ne s'authentifie plus, sans
 message clair nulle part. Voir §5.
+
+Depuis que Mue vit dans le schéma partagé, la même remarque vaut pour les
+**autres applications du propriétaire**, et elle est pire : `mue_dev` est au
+moins une base qu'il sait pouvoir recréer. Le garde-fou de `resetSchemas` a été
+refait pour ça (§5), mais aucun garde-fou ne surveille ce qu'une suite écrit
+elle-même. Une requête écrite à la main dans un test — un `delete from "user"`
+sans schéma sur la mauvaise connexion — atteint maintenant la table `user` de
+n'importe quelle application du cluster. **Aucune suite ne doit ouvrir de
+connexion autrement que par `createTestDatabase()`**, qui réécrit le nom de la
+base vers `mue_test` quoi que porte `DATABASE_URL`.
 
 ### 9.4 Un worktree git n'emporte pas les fichiers non versionnés
 

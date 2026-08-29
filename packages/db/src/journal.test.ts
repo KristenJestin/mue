@@ -10,7 +10,7 @@ import {
   readJournalSince,
   recordMutation,
 } from "./journal";
-import { migrate } from "./migrate";
+import { defaultMigrationsFolder, migrate, readMigrationFiles, splitStatements } from "./migrate";
 import { purgeExpired } from "./retention";
 import { measurements, mutationLog, syncJournal } from "./schema/app";
 import { createTestDatabase, resetSchemas, seedUser } from "./testing";
@@ -45,6 +45,41 @@ describe("migrations", () => {
     expect(tag).toBeDefined();
     await writeFile(join(folder, `${tag}.sql`), "select 1;\n");
     await expect(migrate(handle, folder)).rejects.toThrow(/already applied with a different/);
+  });
+
+  /**
+   * La propriété qui protège les autres applications du propriétaire, éprouvée
+   * contre un vrai PostgreSQL et pas contre une lecture de fichier.
+   *
+   * Les deux tests ci-dessus disent que la *comptabilité* de `migrate` ne rejoue
+   * rien. Celui-ci dit ce qui se passe quand cette comptabilité est contournée —
+   * une base préparée par quelqu'un d'autre, un `__mue_migrations` perdu, ou,
+   * le cas réel, une table `user` ou `session` qui appartient déjà à une autre
+   * application du schéma partagé. Les instructions sont donc réappliquées à la
+   * main, sans passer par le suivi.
+   *
+   * Le résultat attendu est un échec : `CREATE TABLE` est émis **sans**
+   * `IF NOT EXISTS` (migrate.test.ts le vérifie sur le fichier), donc PostgreSQL
+   * refuse. C'est exactement ce qu'on veut d'un schéma partagé : Mue s'arrête
+   * plutôt que de se greffer sur une table qu'elle n'a pas créée. Le tout dans
+   * une transaction, donc la base ressort intacte et les tests suivants
+   * travaillent sur la même.
+   */
+  test("réappliquer le SQL d'une migration déjà appliquée échoue au lieu de se greffer", async () => {
+    const [file] = await readMigrationFiles(defaultMigrationsFolder());
+    expect(file).toBeDefined();
+    if (file === undefined) return;
+
+    await expect(
+      handle.sql.begin(async (tx) => {
+        for (const statement of splitStatements(file.sql)) await tx.unsafe(statement);
+      }),
+    ).rejects.toThrow(/already exists/i);
+
+    // La transaction a été annulée : la base est celle d'avant, et les suites
+    // qui suivent ne travaillent pas sur des ruines.
+    const again = await migrate(handle);
+    expect(again.applied).toEqual([]);
   });
 });
 
@@ -298,7 +333,7 @@ describe("a populated database", () => {
     const tag = "9999_additive_probe";
     await writeFile(
       join(folder, `${tag}.sql`),
-      'ALTER TABLE "mue_app"."measurements" ADD COLUMN "probe" text;\n',
+      'ALTER TABLE "measurements" ADD COLUMN "probe" text;\n',
     );
 
     const result = await migrate(handle, folder);
@@ -309,12 +344,12 @@ describe("a populated database", () => {
     expect(await handle.db.$count(mutationLog)).toBe(before.mutations);
 
     const probed = await handle.sql<{ probe: string | null }[]>`
-      select probe from mue_app.measurements limit 1
+      select probe from measurements limit 1
     `;
     expect(probed[0]?.probe ?? null).toBeNull();
 
     // Leave the schema as the committed migrations describe it.
-    await handle.sql`alter table mue_app.measurements drop column probe`;
-    await handle.sql`delete from mue_app.__mue_migrations where tag = ${tag}`;
+    await handle.sql`alter table measurements drop column probe`;
+    await handle.sql`delete from __mue_migrations where tag = ${tag}`;
   });
 });

@@ -49,7 +49,7 @@ import java.time.LocalDate
  *
  * written **into the app's own database**, not a fresh in-memory one, and pushed at a Mue
  * Platform that is genuinely running. The height and the birth date are the owner's own, which
- * is what makes `mue_app.health_profile` readable out of band as evidence rather than as a shape.
+ * is what makes `health_profile` readable out of band as evidence rather than as a shape.
  *
  * ## It skips unless it is told where to go
  *
@@ -206,7 +206,7 @@ class LiveOutboxRepairTest {
         assertTrue("the accepted identifier is not a UUIDv7: $accepted", MutationIds.isMutationId(accepted))
         assertNotNull("the server issued no revision — ${diagnosis()}", state.revision)
 
-        // Printed so `mue_app.mutation_log` can be read out of band for the same identifier. The
+        // Printed so `mutation_log` can be read out of band for the same identifier. The
         // application is uninstalled when `connectedAndroidTest` finishes, so this is the only
         // moment the value exists anywhere a human can see it.
         Log.i(TAG, "repaired $LEGACY_MUTATION_ID -> $accepted revision=${state.revision}")
@@ -282,7 +282,7 @@ class LiveOutboxRepairTest {
         /** The identifier on the owner's phone. A `UUID.randomUUID()`, version nibble `4`. */
         const val LEGACY_MUTATION_ID = "4317e938-539e-4c48-abd5-27311fb39b74"
 
-        /** His own, so the row in `mue_app.health_profile` is identifiable with certainty. */
+        /** His own, so the row in `health_profile` is identifiable with certainty. */
         const val HEIGHT_CM = 171
         val BIRTH_DATE: LocalDate = LocalDate.of(1998, 11, 18)
     }

@@ -48,7 +48,7 @@ class ProfileViewModelTest {
      * user's, which froze it: the height and the birth date the pull then applied could never
      * reach it, and the next save wrote the empty snapshot back over the row *and* journalled it
      * as a mutation. The server took that as "the user cleared their profile" and merged nulls
-     * into `mue_app.health_profile`.
+     * into `health_profile`.
      *
      * It asserts the *values* and not the shape on purpose. Every type along that path was
      * right — the change decoded as `HealthProfileUpsertChangeDto`, its revision was recorded,

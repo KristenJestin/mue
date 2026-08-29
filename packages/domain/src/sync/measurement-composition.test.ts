@@ -37,7 +37,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await handle.close();
 });
 
@@ -45,7 +45,7 @@ beforeEach(async () => {
   // Deleting the account cascades through `measurements` and, from there, through
   // `body_composition` — which is itself the first assertion this file makes about the
   // foreign key, made on every single test.
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await seedUser(handle, USER);
 });
 
@@ -401,7 +401,7 @@ describe("PRD_SCALE 22 — the server recalculates and does not take derived val
     accepted((await submit(upsert(lying, PHONE)))[0]);
     expect(await storedComposition()).toEqual(FROM_A_SCALE.bodyComposition);
 
-    await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+    await handle.sql`delete from "user" where "id" = ${USER}`;
     await seedUser(handle, USER);
 
     accepted((await submit(upsert(lying, AGENT)))[0]);

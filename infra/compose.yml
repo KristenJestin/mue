@@ -1,10 +1,12 @@
 # Déploiement de la plateforme Mue sur le serveur personnel.
 #
 # Ce fichier ne démarre **pas** PostgreSQL : la base est administrée à part, et le PRD 20.3
-# interdit au conteneur applicatif de créer une base, un rôle ou un schéma. La provision se
-# fait une fois à la main, par la procédure « Production — what the DBA must run » en bas de
-# `infra/README.md`. `compose.dev.yml`, à côté, est l'autre fichier — celui du poste de
-# développement, qui lui ne démarre que la base.
+# interdit au conteneur applicatif de créer une base, un rôle ou un schéma. Il n'y a rien à
+# provisionner de l'autre côté non plus — le cluster est celui du propriétaire, partagé entre
+# ses applications, et `DATABASE_URL` y porte des identifiants qui existent déjà ; voir
+# « Production — what has to be run, and why it is nothing » dans `infra/README.md`.
+# `compose.dev.yml`, à côté, est l'autre fichier — celui du poste de développement, qui lui ne
+# démarre que la base.
 #
 # Depuis la racine du dépôt cloné :
 #

@@ -1,12 +1,12 @@
 {
-  "id": "c9103449-75a2-42e9-83aa-922025d6d20e",
+  "id": "f6f6326c-804e-46de-aa55-565c6083a527",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "mue_app.activity_sessions": {
+    "public.activity_sessions": {
       "name": "activity_sessions",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -200,7 +200,6 @@
           "name": "activity_sessions_user_id_user_id_fk",
           "tableFrom": "activity_sessions",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -225,9 +224,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_app.agent_audit": {
+    "public.agent_audit": {
       "name": "agent_audit",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -316,14 +315,123 @@
       "checkConstraints": {
         "agent_audit_result_check": {
           "name": "agent_audit_result_check",
-          "value": "\"mue_app\".\"agent_audit\".\"result\" in ('ok', 'error')"
+          "value": "\"agent_audit\".\"result\" in ('ok', 'error')"
         }
       },
       "isRLSEnabled": false
     },
-    "mue_app.custom_exercises": {
+    "public.body_composition": {
+      "name": "body_composition",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "formula_id": {
+          "name": "formula_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "formula_version": {
+          "name": "formula_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_weight_cg": {
+          "name": "input_weight_cg",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_height_cm": {
+          "name": "input_height_cm",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_age_years": {
+          "name": "input_age_years",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "input_sex": {
+          "name": "input_sex",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body_fat_deci_percent": {
+          "name": "body_fat_deci_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fat_free_mass_cg": {
+          "name": "fat_free_mass_cg",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body_water_deci_percent": {
+          "name": "body_water_deci_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resting_energy_kcal": {
+          "name": "resting_energy_kcal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "body_composition_measurement_fk": {
+          "name": "body_composition_measurement_fk",
+          "tableFrom": "body_composition",
+          "tableTo": "measurements",
+          "columnsFrom": [
+            "user_id",
+            "date"
+          ],
+          "columnsTo": [
+            "user_id",
+            "date"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {
+        "body_composition_user_id_date_pk": {
+          "name": "body_composition_user_id_date_pk",
+          "columns": [
+            "user_id",
+            "date"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.custom_exercises": {
       "name": "custom_exercises",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -461,7 +569,6 @@
           "name": "custom_exercises_user_id_user_id_fk",
           "tableFrom": "custom_exercises",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -486,9 +593,516 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_app.health_profile": {
+    "public.food_log_entries": {
+      "name": "food_log_entries",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_on": {
+          "name": "consumed_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slot": {
+          "name": "slot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estimation": {
+          "name": "estimation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "weighed_cooked": {
+          "name": "weighed_cooked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "energy_milli_kcal": {
+          "name": "energy_milli_kcal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "protein_milligrams": {
+          "name": "protein_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "carbs_milligrams": {
+          "name": "carbs_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fat_milligrams": {
+          "name": "fat_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fibre_milligrams": {
+          "name": "fibre_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_ref": {
+          "name": "source_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_label": {
+          "name": "amount_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity_thousandths": {
+          "name": "quantity_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity_unit": {
+          "name": "quantity_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "portions_thousandths": {
+          "name": "portions_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "from_plan": {
+          "name": "from_plan",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin_type": {
+          "name": "origin_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin_id": {
+          "name": "origin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_mutation_id": {
+          "name": "last_mutation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "food_log_entries_day_idx": {
+          "name": "food_log_entries_day_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "consumed_on",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "consumed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "food_log_entries_tombstone_idx": {
+          "name": "food_log_entries_tombstone_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "food_log_entries_user_id_user_id_fk": {
+          "name": "food_log_entries_user_id_user_id_fk",
+          "tableFrom": "food_log_entries",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "food_log_entries_user_id_id_pk": {
+          "name": "food_log_entries_user_id_id_pk",
+          "columns": [
+            "user_id",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.foods": {
+      "name": "foods",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_unit": {
+          "name": "reference_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_label": {
+          "name": "raw_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cooked_label": {
+          "name": "cooked_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "energy_milli_kcal": {
+          "name": "energy_milli_kcal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "protein_milligrams": {
+          "name": "protein_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "carbs_milligrams": {
+          "name": "carbs_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fat_milligrams": {
+          "name": "fat_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fibre_milligrams": {
+          "name": "fibre_milligrams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "brand": {
+          "name": "brand",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "barcode": {
+          "name": "barcode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_version": {
+          "name": "source_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "serving_label": {
+          "name": "serving_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "serving_thousandths": {
+          "name": "serving_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cooked_ratio_thousandths": {
+          "name": "cooked_ratio_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image_ref": {
+          "name": "image_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin_type": {
+          "name": "origin_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin_id": {
+          "name": "origin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_mutation_id": {
+          "name": "last_mutation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "foods_barcode_idx": {
+          "name": "foods_barcode_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "barcode",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "barcode is not null and deleted_at is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "foods_tombstone_idx": {
+          "name": "foods_tombstone_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "foods_user_id_user_id_fk": {
+          "name": "foods_user_id_user_id_fk",
+          "tableFrom": "foods",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "foods_user_id_id_pk": {
+          "name": "foods_user_id_id_pk",
+          "columns": [
+            "user_id",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.health_profile": {
       "name": "health_profile",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -505,6 +1119,12 @@
         "birth_date": {
           "name": "birth_date",
           "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sex": {
+          "name": "sex",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -563,7 +1183,6 @@
           "name": "health_profile_user_id_user_id_fk",
           "tableFrom": "health_profile",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -580,9 +1199,152 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_app.measurements": {
+    "public.meal_plan_entries": {
+      "name": "meal_plan_entries",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "planned_on": {
+          "name": "planned_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slot": {
+          "name": "slot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipe_id": {
+          "name": "recipe_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "planned_servings_thousandths": {
+          "name": "planned_servings_thousandths",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_log_entry_id": {
+          "name": "consumed_log_entry_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin_type": {
+          "name": "origin_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin_id": {
+          "name": "origin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_mutation_id": {
+          "name": "last_mutation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "meal_plan_entries_tombstone_idx": {
+          "name": "meal_plan_entries_tombstone_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "meal_plan_entries_user_id_user_id_fk": {
+          "name": "meal_plan_entries_user_id_user_id_fk",
+          "tableFrom": "meal_plan_entries",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "meal_plan_entries_user_id_planned_on_slot_pk": {
+          "name": "meal_plan_entries_user_id_planned_on_slot_pk",
+          "columns": [
+            "user_id",
+            "planned_on",
+            "slot"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.measurements": {
       "name": "measurements",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -601,6 +1363,19 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "source_type": {
+          "name": "source_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "impedance_ohm": {
+          "name": "impedance_ohm",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "revision": {
           "name": "revision",
@@ -680,7 +1455,6 @@
           "name": "measurements_user_id_user_id_fk",
           "tableFrom": "measurements",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -705,9 +1479,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_app.mutation_log": {
+    "public.mutation_log": {
       "name": "mutation_log",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "mutation_id": {
           "name": "mutation_id",
@@ -799,7 +1573,6 @@
           "name": "mutation_log_user_id_user_id_fk",
           "tableFrom": "mutation_log",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -816,18 +1589,192 @@
       "checkConstraints": {
         "mutation_log_operation_check": {
           "name": "mutation_log_operation_check",
-          "value": "\"mue_app\".\"mutation_log\".\"operation\" in ('upsert', 'delete')"
+          "value": "\"mutation_log\".\"operation\" in ('upsert', 'delete')"
         },
         "mutation_log_status_check": {
           "name": "mutation_log_status_check",
-          "value": "\"mue_app\".\"mutation_log\".\"status\" in ('applied', 'rejected')"
+          "value": "\"mutation_log\".\"status\" in ('applied', 'rejected')"
         }
       },
       "isRLSEnabled": false
     },
-    "mue_app.sync_counter": {
+    "public.recipes": {
+      "name": "recipes",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_servings": {
+          "name": "base_servings",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_favourite": {
+          "name": "is_favourite",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prep_time_minutes": {
+          "name": "prep_time_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image_ref": {
+          "name": "image_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ingredients": {
+          "name": "ingredients",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "steps": {
+          "name": "steps",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "origin_type": {
+          "name": "origin_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin_id": {
+          "name": "origin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_mutation_id": {
+          "name": "last_mutation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload_schema_version": {
+          "name": "payload_schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "recipes_tombstone_idx": {
+          "name": "recipes_tombstone_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "deleted_at is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "recipes_user_id_user_id_fk": {
+          "name": "recipes_user_id_user_id_fk",
+          "tableFrom": "recipes",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "recipes_user_id_id_pk": {
+          "name": "recipes_user_id_id_pk",
+          "columns": [
+            "user_id",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sync_counter": {
       "name": "sync_counter",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -849,7 +1796,6 @@
           "name": "sync_counter_user_id_user_id_fk",
           "tableFrom": "sync_counter",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -866,9 +1812,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_app.sync_journal": {
+    "public.sync_journal": {
       "name": "sync_journal",
-      "schema": "mue_app",
+      "schema": "",
       "columns": {
         "user_id": {
           "name": "user_id",
@@ -999,7 +1945,6 @@
           "name": "sync_journal_user_id_user_id_fk",
           "tableFrom": "sync_journal",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "user_id"
           ],
@@ -1024,18 +1969,18 @@
       "checkConstraints": {
         "sync_journal_operation_check": {
           "name": "sync_journal_operation_check",
-          "value": "\"mue_app\".\"sync_journal\".\"operation\" in ('upsert', 'delete')"
+          "value": "\"sync_journal\".\"operation\" in ('upsert', 'delete')"
         },
         "sync_journal_sequence_check": {
           "name": "sync_journal_sequence_check",
-          "value": "\"mue_app\".\"sync_journal\".\"sequence\" > 0"
+          "value": "\"sync_journal\".\"sequence\" > 0"
         }
       },
       "isRLSEnabled": false
     },
-    "mue_auth.account": {
+    "public.account": {
       "name": "account",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1129,7 +2074,6 @@
           "name": "account_userId_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -1146,9 +2090,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.jwks": {
+    "public.jwks": {
       "name": "jwks",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1202,9 +2146,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthAccessToken": {
+    "public.oauthAccessToken": {
       "name": "oauthAccessToken",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1303,7 +2247,6 @@
           "name": "oauthAccessToken_clientId_oauthClient_clientId_fk",
           "tableFrom": "oauthAccessToken",
           "tableTo": "oauthClient",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "clientId"
           ],
@@ -1317,7 +2260,6 @@
           "name": "oauthAccessToken_sessionId_session_id_fk",
           "tableFrom": "oauthAccessToken",
           "tableTo": "session",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "sessionId"
           ],
@@ -1331,7 +2273,6 @@
           "name": "oauthAccessToken_userId_user_id_fk",
           "tableFrom": "oauthAccessToken",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -1345,7 +2286,6 @@
           "name": "oauthAccessToken_refreshId_oauthRefreshToken_id_fk",
           "tableFrom": "oauthAccessToken",
           "tableTo": "oauthRefreshToken",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "refreshId"
           ],
@@ -1370,9 +2310,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthClient": {
+    "public.oauthClient": {
       "name": "oauthClient",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1599,7 +2539,6 @@
           "name": "oauthClient_userId_user_id_fk",
           "tableFrom": "oauthClient",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -1624,9 +2563,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthClientAssertion": {
+    "public.oauthClientAssertion": {
       "name": "oauthClientAssertion",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1649,9 +2588,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthClientResource": {
+    "public.oauthClientResource": {
       "name": "oauthClientResource",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1690,7 +2629,6 @@
           "name": "oauthClientResource_clientId_oauthClient_clientId_fk",
           "tableFrom": "oauthClientResource",
           "tableTo": "oauthClient",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "clientId"
           ],
@@ -1704,7 +2642,6 @@
           "name": "oauthClientResource_resourceId_oauthResource_identifier_fk",
           "tableFrom": "oauthClientResource",
           "tableTo": "oauthResource",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "resourceId"
           ],
@@ -1721,9 +2658,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthConsent": {
+    "public.oauthConsent": {
       "name": "oauthConsent",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1786,7 +2723,6 @@
           "name": "oauthConsent_clientId_oauthClient_clientId_fk",
           "tableFrom": "oauthConsent",
           "tableTo": "oauthClient",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "clientId"
           ],
@@ -1800,7 +2736,6 @@
           "name": "oauthConsent_userId_user_id_fk",
           "tableFrom": "oauthConsent",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -1817,9 +2752,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthRefreshToken": {
+    "public.oauthRefreshToken": {
       "name": "oauthRefreshToken",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -1936,7 +2871,6 @@
           "name": "oauthRefreshToken_clientId_oauthClient_clientId_fk",
           "tableFrom": "oauthRefreshToken",
           "tableTo": "oauthClient",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "clientId"
           ],
@@ -1950,7 +2884,6 @@
           "name": "oauthRefreshToken_sessionId_session_id_fk",
           "tableFrom": "oauthRefreshToken",
           "tableTo": "session",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "sessionId"
           ],
@@ -1964,7 +2897,6 @@
           "name": "oauthRefreshToken_userId_user_id_fk",
           "tableFrom": "oauthRefreshToken",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -1989,9 +2921,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.oauthResource": {
+    "public.oauthResource": {
       "name": "oauthResource",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -2103,9 +3035,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.session": {
+    "public.session": {
       "name": "session",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -2163,7 +3095,6 @@
           "name": "session_userId_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "schemaTo": "mue_auth",
           "columnsFrom": [
             "userId"
           ],
@@ -2188,9 +3119,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.user": {
+    "public.user": {
       "name": "user",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -2254,9 +3185,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "mue_auth.verification": {
+    "public.verification": {
       "name": "verification",
-      "schema": "mue_auth",
+      "schema": "",
       "columns": {
         "id": {
           "name": "id",
@@ -2307,10 +3238,7 @@
     }
   },
   "enums": {},
-  "schemas": {
-    "mue_app": "mue_app",
-    "mue_auth": "mue_auth"
-  },
+  "schemas": {},
   "sequences": {},
   "roles": {},
   "policies": {},

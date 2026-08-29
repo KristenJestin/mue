@@ -19,7 +19,7 @@ const { customExercises } = schema;
  *
  * ## The folded name, and why the server computes it
  *
- * `mue_app.custom_exercises` carries a partial unique index on `(user_id, name_folded)` where
+ * `custom_exercises` carries a partial unique index on `(user_id, name_folded)` where
  * `deleted_at is null`, mirroring Room's unique index on `name_folded`. The payload does **not**
  * carry the folded name, and that is the decision worth recording: a fold is a function of the
  * name, so carrying it would create a second place for it to be wrong and would let an author

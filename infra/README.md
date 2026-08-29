@@ -3,15 +3,24 @@
 | File | Purpose |
 | --- | --- |
 | `compose.dev.yml` | Development PostgreSQL 18: persistent, healthchecked, loopback-only. |
-| `initdb/01-mue-role.sql` | Creates the limited `mue` role. Development only. |
-| `initdb/02-mue-schemas.sql` | Creates `mue_app` and `mue_auth`, owned by that role. Development only. |
+| `initdb/01-mue-role.sql` | Creates the disposable `mue` role and grants it `CREATE` on `public`. Development only. |
+| `initdb/02-mue-test-database.sql` | Creates the throwaway `mue_test` database the suites work on. Development only. |
 
-The `initdb/` scripts are the development mirror of what a DBA prepares by hand
-on the shared production cluster. They exist so that the two environments have
-the same shape, not so that anything creates a database or a role at runtime:
-PRD §20.3 forbids the application container from creating either, in
-development and in production alike. The production procedure is at the bottom
-of this file; it is the only supported way to provision Mue on a real cluster.
+The `initdb/` scripts exist so that the two environments have the same shape.
+That principle has not changed; what it now asks for is the opposite of what it
+used to.
+
+**Mue creates no schema, and nobody creates one for it.** The production
+PostgreSQL belongs to the owner and is shared with his other applications. He
+creates no schema and no role for Mue: the deployment gets credentials that
+already exist, and the migrations create their tables in the schema the
+connection's `search_path` points at — `public`, by PostgreSQL's own default.
+There is therefore no production provisioning procedure any more; the section
+that held one is gone, and what replaced it is below.
+
+Development keeps a dedicated role because a container is disposable and
+`down -v` takes it back to nothing. It keeps no schema, because production has
+none.
 
 ## Development
 
@@ -45,12 +54,12 @@ docker compose --env-file .env -f infra/compose.dev.yml exec postgres \
 docker compose --env-file .env -f infra/compose.dev.yml down
 
 # reset: drop the volume, then start again on an empty cluster. The initdb
-# scripts re-run and the two schemas come back empty.
+# scripts re-run and the role, the test database and an empty `public` come back.
 docker compose --env-file .env -f infra/compose.dev.yml down -v
 docker compose --env-file .env -f infra/compose.dev.yml up -d
 ```
 
-Only the volume carries state, so the reset is total: role, schemas, migration
+Only the volume carries state, so the reset is total: role, tables, migration
 history and data all go. Nothing in development reads or writes the production
 cluster.
 
@@ -62,84 +71,88 @@ A Compose profile starting the whole platform for integration tests, also
 described in §20.3, needs the multi-stage Bun image of §20.5. It lands with
 that Dockerfile; this file only ships the database.
 
-## Production — what the DBA must run
+## Production — what has to be run, and why it is nothing
 
-Mue connects to the PostgreSQL already administered on the personal server
-through `DATABASE_URL`. The Mue deployment ships no PostgreSQL container and
-creates no database, no role and no schema. Run the following once, as a
-superuser, **before the first deploy**.
+This section used to be called "what the DBA must run" and carried seven SQL
+statements: a role, a database, two `CREATE SCHEMA … AUTHORIZATION mue`, and an
+`ALTER ROLE … SET search_path`. None of it will ever be run.
 
-Pick a password with `openssl rand -base64 24` and keep it out of the
-repository. Replace the password placeholder and nothing else, unless the
-database, role and schema names change in `DATABASE_URL` and in the Drizzle
-schema definitions too.
+The cluster is the owner's, shared between all his applications, and the
+decision is his: **no new schema, no new role.** Mue lives in the schema his
+credentials already reach. A procedure describing a provisioning nobody will
+perform is worse than no procedure — it reads as a prerequisite, and the first
+person to follow it discovers the role cannot create a schema anyway.
 
-```sql
--- 1. The limited Mue role. No superuser, no database creation, no role
---    creation: the cluster is shared with other applications.
-CREATE ROLE mue LOGIN PASSWORD 'REPLACE_WITH_A_GENERATED_PASSWORD'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+So the deployment receives one value, and that is the whole of it:
 
--- 2. A dedicated database. Skip this statement if Mue is to live in an
---    existing shared database; the dedicated schemas below are what actually
---    isolate it.
-CREATE DATABASE mue;
-
--- 3. Everything below runs inside that database.
-\connect mue
-
--- 4. Nothing is granted to PUBLIC on a database holding personal data.
-REVOKE ALL ON DATABASE mue FROM PUBLIC;
-GRANT CONNECT ON DATABASE mue TO mue;
-
--- 5. No application owns objects in `public`. Already the default since
---    PostgreSQL 15; harmless to repeat, required on an older cluster.
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-
--- 6. The two Mue schemas, owned by the Mue role. Ownership is what lets the
---    migrations create and alter tables inside them -- and only inside them.
-CREATE SCHEMA mue_app AUTHORIZATION mue;
-CREATE SCHEMA mue_auth AUTHORIZATION mue;
-
--- 7. An unqualified statement must not land in `public`.
-ALTER ROLE mue IN DATABASE mue SET search_path = mue_app, mue_auth;
+```sh
+DATABASE_URL=postgres://<role>:<password>@db.internal:5432/<database>
 ```
 
-Verify the result before handing the credentials over:
+The role needs exactly two things, and an existing application role already has
+them:
+
+- `CONNECT` on the database;
+- `USAGE` and `CREATE` on the schema its `search_path` resolves to.
+
+If the first migration fails with `permission denied for schema public`, that
+second grant is what is missing. It is one statement, run by whoever
+administers the cluster, and it is the only one this document asks for:
 
 ```sql
--- Expect exactly: mue_app | mue and mue_auth | mue.
-SELECT nspname, pg_get_userbyid(nspowner) AS owner
-FROM pg_namespace WHERE nspname IN ('mue_app', 'mue_auth') ORDER BY 1;
-
--- Expect f in every column.
-SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls
-FROM pg_roles WHERE rolname = 'mue';
+GRANT USAGE, CREATE ON SCHEMA public TO <role>;
 ```
 
-Then, connected as `mue`, all three of these must fail. If any succeeds, the
-role is too wide and step 1 was not applied as written:
+### What lives in that schema, and what protects the neighbours
+
+Mue creates 25 tables and none of them carries a prefix: `user`, `session`,
+`account`, `verification`, `jwks`, `measurements`, `foods`, `recipes` and the
+rest. In a shared `public` those names can collide with another application's.
+
+The protection is not a naming convention, it is a property of the emitted SQL:
+**`CREATE TABLE` is emitted without `IF NOT EXISTS`.** A collision therefore
+fails the migration, loudly, before anything is written — rather than grafting
+Mue onto a table that belongs to somebody else and leaving a migration history
+that believes it created what it merely borrowed.
+`packages/db/tools/verify-migrations.ts` fails the build if that ever stops
+being true, and `packages/db/src/journal.test.ts` proves it against a real
+PostgreSQL by applying a migration twice.
+
+The one table that does carry a prefix is `__mue_migrations`, the runner's own
+bookkeeping. It is created with `IF NOT EXISTS` precisely because the prefix
+makes it unmistakably Mue's.
+
+Before handing the credentials over, check that the role is not wider than it
+needs to be. All three of these must fail, connected as that role:
 
 ```sql
 CREATE DATABASE mue_must_not_exist;      -- permission denied to create database
 CREATE ROLE mue_must_not_exist LOGIN;    -- permission denied to create role
-CREATE TABLE public.mue_must_not_exist (id int);  -- permission denied for schema public
+CREATE SCHEMA mue_must_not_exist;        -- permission denied for database
 ```
 
-The deployment then receives one value:
+And this must succeed, since it is what a migration does:
 
-```sh
-DATABASE_URL=postgres://mue:PASSWORD@db.internal:5432/mue
+```sql
+CREATE TABLE mue_probe_delete_me (id int);
+DROP TABLE mue_probe_delete_me;
 ```
 
 ### What the application must never do
 
-- Create a database, a role or a schema. Drizzle Kit emits `CREATE SCHEMA` for
-  a multi-schema project: strip it from the generated migration, and keep
-  `mue_app` and `mue_auth` as pre-authorised schemas the migrations only fill.
+- Create a database, a role or a schema. `packages/db/src/migrate.ts` refuses
+  such a statement before executing any of a migration, and the migration files
+  contain none.
+- Name a schema. Not in a migration, not on the connection, not in a query. The
+  `search_path` of the role is the one place that decides, and it belongs to
+  whoever administers the cluster. Half a migration pinned to `public` and half
+  unqualified is how tables and their foreign keys end up in two different
+  places.
 - Run migrations at process start. They run explicitly during deployment, as
   one step, never concurrently by each starting process (§20.3).
-- Connect as the cluster owner. `DATABASE_URL` carries the limited role.
+- Connect as the cluster owner. `DATABASE_URL` carries an ordinary application
+  role.
+
 
 ### Backups
 
@@ -167,11 +180,12 @@ dans un fichier de composition est un mot de passe dans l'historique du shell.
 | Mot de passe | la valeur de `MUE_DB_PASSWORD` |
 | Base | la valeur de `POSTGRES_DB` |
 
-Les tables métier sont dans le schéma `mue_app`, l'authentification dans
-`mue_auth`. Pour vérifier qu'une pesée est bien arrivée :
+Les tables de Mue sont dans le schéma courant, celui vers lequel pointe le
+`search_path` du rôle — `public` par défaut, et le même pour les tables métier
+et pour celles de l'authentification. Pour vérifier qu'une pesée est bien arrivée :
 
 ```sql
-select date, weight_cg, revision, origin_type from mue_app.measurement order by date desc;
+select date, weight_cg, revision, origin_type from measurements order by date desc;
 ```
 
 Ce service n'existe qu'en développement : le fichier de déploiement n'en porte

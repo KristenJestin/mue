@@ -123,7 +123,7 @@ describe("answering a real authorization request", () => {
 
     // A signing key encrypted under another secret cannot be decrypted, and the test
     // database is shared with every other suite that boots Better Auth.
-    await handle.database.sql`delete from mue_auth.jwks`;
+    await handle.database.sql`delete from jwks`;
 
     const email = `consent-owner+${Date.now()}@mue.test`;
     const signUp = await fetch(`${base}/api/auth/sign-up/email`, {

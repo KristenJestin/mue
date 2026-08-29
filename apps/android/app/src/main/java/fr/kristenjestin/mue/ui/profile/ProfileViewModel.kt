@@ -145,7 +145,7 @@ class ProfileViewModel(
      * *before* the first synchronisation and returns an empty profile. The form was then frozen
      * against the height and birth date the pull applied moments later, and the next save wrote
      * that stale empty snapshot back through `UserProfileRepository.save` — which replaces the
-     * row *and* journals a mutation, so the nulls reached `mue_app.health_profile` too and the
+     * row *and* journals a mutation, so the nulls reached `health_profile` too and the
      * server merged them as "the user cleared their profile".
      *
      * Collecting instead of reading once is what makes a profile arriving from another device

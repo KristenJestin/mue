@@ -28,7 +28,7 @@ describe("the server bundle guard", () => {
   });
 
   test("names the migrator when its own statements come along", () => {
-    const inlined = `create table if not exists mue_app.__mue_migrations (tag text primary key)`;
+    const inlined = `create table if not exists __mue_migrations (tag text primary key)`;
     const found = findForbidden(inlined);
     expect(found.map((marker) => marker.name)).toEqual(["the @mue/db migration runner"]);
     expect(describeForbidden("dist/server/main.js", found)).toContain("PRD section 20.3");

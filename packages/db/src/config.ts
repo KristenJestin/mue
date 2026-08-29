@@ -2,11 +2,29 @@
  * Configuration read from the environment. Nothing here has a value that is
  * only correct in development: a missing `DATABASE_URL` is a startup failure,
  * not a silent fallback to localhost.
+ *
+ * ## Il n'y a plus de nom de schéma ici, et c'est délibéré
+ *
+ * Ce fichier portait `APP_SCHEMA = "mue_app"` et `AUTH_SCHEMA = "mue_auth"`,
+ * plus une fonction qui vérifiait que ces littéraux s'accordaient avec les
+ * variables `MUE_APP_SCHEMA` / `MUE_AUTH_SCHEMA` d'`infra/`. Les trois ont
+ * disparu ensemble.
+ *
+ * Le PostgreSQL de production appartient au propriétaire et il est partagé
+ * entre toutes ses applications ; il n'y crée pour Mue ni schéma ni rôle. Mue
+ * n'a donc plus de schéma à elle — mais remplacer `"mue_app"` par `"public"`
+ * n'aurait rien gagné : c'est le même littéral écrit ailleurs, avec la même
+ * façon de devenir faux. **Mue n'exprime aucun schéma.** Les définitions
+ * Drizzle utilisent `pgTable`, la migration émet `CREATE TABLE "measurements"`
+ * non qualifié, et l'endroit où cela atterrit est celui vers lequel pointe le
+ * `search_path` de la connexion — celui du rôle que porte `DATABASE_URL`,
+ * c'est-à-dire une décision de l'administrateur du cluster et pas du code.
+ *
+ * Ce qu'il reste à écrire quand un nom est vraiment nécessaire — le ménage des
+ * tests dans `testing.ts` en a besoin pour interroger `pg_tables` — se résout à
+ * l'exécution avec `current_schema()`, sur la connexion elle-même. Une
+ * constante aurait pu mentir ; `current_schema()` ne le peut pas.
  */
-
-/** The schema names the Drizzle definitions hardcode. */
-export const APP_SCHEMA = "mue_app";
-export const AUTH_SCHEMA = "mue_auth";
 
 /**
  * PLATFORM-CONTRACT decision 6. Tombstones and `mutation_log` rows must outlive
@@ -28,9 +46,7 @@ export type Env = Readonly<Record<string, string | undefined>>;
 function required(env: Env, name: string): string {
   const value = env[name];
   if (value === undefined || value.trim() === "") {
-    throw new Error(
-      `${name} is not set. DATABASE_URL carries the limited Mue role; see infra/README.md.`,
-    );
+    throw new Error(`${name} is not set. DATABASE_URL carries the Mue role; see infra/README.md.`);
   }
   return value;
 }
@@ -45,32 +61,7 @@ function positiveInteger(env: Env, name: string, fallback: number): number {
   return value;
 }
 
-/**
- * The Drizzle definitions carry the schema names as TypeScript literals while
- * infra/ drives the same names from `MUE_APP_SCHEMA` and `MUE_AUTH_SCHEMA`.
- * Whoever changes one must change the other, so a mismatch fails loudly here
- * rather than as a "relation does not exist" during the first migration.
- */
-export function assertSchemaNamesMatchEnvironment(env: Env = process.env): void {
-  const mismatches: string[] = [];
-  const app = env.MUE_APP_SCHEMA;
-  const auth = env.MUE_AUTH_SCHEMA;
-  if (app !== undefined && app !== APP_SCHEMA) {
-    mismatches.push(`MUE_APP_SCHEMA=${app} but the Drizzle schema declares ${APP_SCHEMA}`);
-  }
-  if (auth !== undefined && auth !== AUTH_SCHEMA) {
-    mismatches.push(`MUE_AUTH_SCHEMA=${auth} but the Drizzle schema declares ${AUTH_SCHEMA}`);
-  }
-  if (mismatches.length > 0) {
-    throw new Error(
-      `Schema name mismatch between infra/ and packages/db. ${mismatches.join("; ")}. ` +
-        "Change both, as infra/README.md says.",
-    );
-  }
-}
-
 export function readDatabaseConfig(env: Env = process.env): DatabaseConfig {
-  assertSchemaNamesMatchEnvironment(env);
   return {
     url: required(env, "DATABASE_URL"),
     retentionDays: positiveInteger(env, "MUE_RETENTION_DAYS", DEFAULT_RETENTION_DAYS),

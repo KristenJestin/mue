@@ -139,7 +139,7 @@ class LiveProfilePullTest {
          * it — so its form was seeded from a profile that was still empty. Saving now wrote that
          * stale snapshot back through `UserProfileRepository.save`, which replaces the row *and*
          * journals a mutation: both columns became null locally and the nulls were pushed, so
-         * `mue_app.health_profile` lost them too. The row below is read after a real tap on a
+         * `health_profile` lost them too. The row below is read after a real tap on a
          * real save button, and it has to still be the owner's profile.
          */
         // Back off `Server settings`, which is where pairing left the app, onto the Profile

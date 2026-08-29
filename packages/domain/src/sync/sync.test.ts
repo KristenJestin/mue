@@ -36,7 +36,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await handle.close();
 });
 
@@ -44,7 +44,7 @@ beforeEach(async () => {
   // Deleting the account cascades through every synchronised table, the
   // journal, the counter and the mutation log, so each test starts at sequence
   // zero without touching anyone else's rows.
-  await handle.sql`delete from mue_auth."user" where "id" = ${USER}`;
+  await handle.sql`delete from "user" where "id" = ${USER}`;
   await seedUser(handle, USER);
 });
 

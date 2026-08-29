@@ -112,5 +112,6 @@ services:
 # aurait l'air configuré. Côté Android, seules les variantes `debug`, `beta` et `local`
 # acceptent une adresse `http://` ; `release` la refuse toujours.
 #
-# La base n'est pas démarrée ici : elle est administrée à part, et la provision se fait une
-# fois à la main par la procédure « Production — what the DBA must run » de `app/infra/README.md`.
+# La base n'est pas démarrée ici : elle est administrée à part — et il n'y a rien à y
+# provisionner. Voir « Production — what has to be run, and why it is nothing » dans
+# `app/infra/README.md`.
