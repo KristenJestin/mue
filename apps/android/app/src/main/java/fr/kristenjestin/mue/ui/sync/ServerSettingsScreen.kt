@@ -96,6 +96,10 @@ fun ServerSettingsRoute(onNavigateBack: () -> Unit, modifier: Modifier = Modifie
     // Entering it fills the address in from `sync_state` when there is one, so a paired phone
     // shows where it is connected rather than an empty box that has to be retyped correctly
     // before a password will do anything.
+    //
+    // On an unpaired `beta` that leaves the password box non-empty rather than empty, because
+    // that build may carry one from `local.properties` — the value a person typed is still gone,
+    // and `SyncViewModel.seedForm` argues why putting the build's own constant back costs nothing.
     DisposableEffect(viewModel) {
         viewModel.onEnterSettings()
         onDispose { viewModel.onLeaveSettings() }
