@@ -3,26 +3,62 @@
   Debug builds only. This file lives in `app/src/debug/`, is referenced by a manifest that
   lives in `app/src/debug/` too, and neither is compiled into `release` — check the merged
   release manifest, not this comment: `app/build/intermediates/merged_manifests/release/`.
+  `local` and `beta` are pointed at this same file by hand in `app/build.gradle.kts`, so what
+  is written here is the rule for exactly three builds, all of them signed with the debug key.
 
   Since Android 7 (API 24) an application ignores every certificate authority the phone's
   owner installed himself unless it says otherwise here. That default is right for a
   shipped app and this file does not change it for one.
 
   What it buys: PRD_SERVER_SYNC_MCP 16 admits nothing but HTTPS, and `ServerAddresses.parse`
-  enforces it before a socket is opened — `http://` is refused by name, with no exception
-  for loopback and none for a private address range. So a Mue Platform running on a PC at
-  192.168.1.100 has to present a real certificate, and no public authority will ever issue
-  one for an address on somebody's home WiFi. The way out is a certificate authority that
-  exists only on that network (`scripts/dev-tls-cert.ts` at the repository root), installed
-  on the phone by hand, and an application build that agrees to look at it.
+  enforces it before a socket is opened whenever the build says so — `http://` is refused by
+  name, with no exception for loopback and none for a private address range. So a Mue Platform
+  running on a PC at 192.168.1.100 has to present a real certificate, and no public authority
+  will ever issue one for an address on somebody's home WiFi. One way out is a certificate
+  authority that exists only on that network (`scripts/dev-tls-cert.ts` at the repository
+  root), installed on the phone by hand, and an application build that agrees to look at it.
+  The trust anchors below are that way out, and it is still the one `release` has.
 
-  `cleartextTrafficPermitted="false"` is stated rather than left to the platform default.
-  It is already false from API 28 onward, but this app runs from API 26, and the point of
-  the file is to widen who may vouch for a certificate — not to stop requiring one. Written
-  here, a debug build over-the-air is held to section 16 on Android 8 as well.
+  ## `cleartextTrafficPermitted` is now `true`, and this is what changed
+
+  The other way out is not to run TLS at all, and the owner has chosen it for his own server:
+  it is on his machine, on his network, with no hosting and no public name to obtain a
+  certificate for. He was told what it costs — the bearer token in `sync_state` is readable by
+  anything else on that WiFi, which is write access to his health data and to his MCP tools —
+  and it is his decision. Nothing in the app argues with it and no screen warns about it.
+
+  It is written here rather than left to the platform default in the other direction, for the
+  same reason the `false` before it was stated: from API 28 the default is `false`, this app
+  runs from API 26, and a value left unwritten would mean two different things on two phones
+  the owner might install the same APK on.
+
+  **`release` is untouched, and that is the point of putting this here rather than in `main`.**
+  A publishable build has no `networkSecurityConfig` attribute at all and keeps Android's own
+  default, so it cannot leave in clear even by accident. The application-level half of the same
+  arrangement is `resValue("bool", "cleartext_server_permitted", …)` in `app/build.gradle.kts`,
+  declared `false` in `defaultConfig` and overridden to `true` by these same three build types;
+  `ServerAddresses.parse` reads it through `SyncContainer` and refuses `http://` in `release`
+  before a socket is opened. The two halves have to move together: permit it here and refuse it
+  there and the address is rejected at the keyboard; permit it there and refuse it here and
+  OkHttp raises `UnknownServiceException`, which `KtorPairingApi.classify` can only read as an
+  `IOException` and report as `Unreachable` — "it did not answer", about a server that did.
+
+  What is *not* widened: a bare `mue.home.arpa` is still completed to `https://`, on every
+  build. Only an `http://` somebody typed in full stays one.
 -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
-    <base-config cleartextTrafficPermitted="false">
+    <!--
+      `InsecureBaseConfiguration` is suppressed because on this file it restates the decision
+      above rather than reporting a finding: it says the traffic can be read in transit, which
+      is exactly what the owner was told and accepted for a server on his own WiFi. It is not
+      suppressed to keep a build green — checked, not assumed: with the attribute removed,
+      `lintDebug` still succeeds and `lint-results-debug.xml` gains one `InsecureBaseConfiguration`
+      entry at severity Warning. It is suppressed because lint analyses a variant and not a source
+      set, so the entry would sit permanently on every build a person reads while being false of
+      the only one that ships — which is how a real finding later gets scrolled past, the same
+      argument `AcceptsUserCertificates` below is suppressed on.
+    -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
         <trust-anchors>
             <!-- The platform store, unchanged: every public authority still applies. -->
             <certificates src="system" />

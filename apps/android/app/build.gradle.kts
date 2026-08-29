@@ -55,6 +55,36 @@ android {
          */
         resValue("string", "app_name", "Mue")
         resValue("color", "launcher_background", "#101012")
+
+        /*
+         * Whether the build may keep a server address the owner typed as `http://`.
+         *
+         * PRD_SERVER_SYNC_MCP 16 admits nothing but HTTPS and `ServerAddresses.parse` has always
+         * enforced it before a socket is opened. It still does here, in `defaultConfig`, which is
+         * the whole design of this flag: **the default answer is no, and `release` never overrides
+         * it.** A build type that says nothing about cleartext refuses cleartext, so the shipped
+         * application cannot leave in clear even by an omission — and the three overrides below
+         * are the exhaustive list of builds that can, each one a build signed with the debug key
+         * that could never reach a store.
+         *
+         * The owner's server runs on his own machine, on his own network, with no hosting and no
+         * public name; no authority will issue a certificate for it and he has chosen not to run
+         * one of his own. He was told the cost — the bearer in `sync_state` readable by anything
+         * else on that WiFi, so write access to his health data and his MCP tools — and decided.
+         *
+         * A `bool` resource and not `BuildConfig`, because `buildConfig` is off in this module
+         * (`buildFeatures` below) while `resValues` is already on for the two declarations above.
+         * `SyncContainer` reads it and hands the answer to `ServerAddresses.parse`, which takes it
+         * as a parameter and stays free of `Context` — that is what keeps every rule in this file
+         * provable by a JVM test rather than by an emulator.
+         *
+         * It is only half of the arrangement. The other half is
+         * `src/debug/res/xml/network_security_config.xml`, which the platform enforces and which
+         * `local` and `beta` point at; `release` has no such file and keeps Android's own default.
+         * Neither half alone lets a build talk in clear, and the two are set from the same list of
+         * build types on purpose.
+         */
+        resValue("bool", "cleartext_server_permitted", "false")
     }
 
     /*
@@ -94,6 +124,12 @@ android {
             resValue("string", "app_name", "Mue Debug")
             // Oxblood behind the amber. Unmistakable at 48 dp, and no asset was drawn for it.
             resValue("color", "launcher_background", "#14301C")
+            // Matches the trust store it already reads: this build type owns
+            // `src/debug/res/xml/network_security_config.xml`, and that file now permits
+            // cleartext too. The pair has to be set together or the parser accepts an address the
+            // platform then blocks, which surfaces as `Unreachable` — "it did not answer" about a
+            // server that answered fine.
+            resValue("bool", "cleartext_server_permitted", "true")
         }
 
         release {
@@ -143,6 +179,11 @@ android {
             resValue("string", "app_name", "Mue Beta")
             // Deep indigo behind the same amber: a different application at a glance, no new asset.
             resValue("color", "launcher_background", "#11223A")
+            // Stated here rather than inherited: `initWith(release)` copies `release`'s answer,
+            // which is "no", and a beta that could not reach the server would exercise only the
+            // half of the app that was never in doubt — the same argument that gave it `debug`'s
+            // trust store in the first place.
+            resValue("bool", "cleartext_server_permitted", "true")
         }
 
         /*
@@ -184,6 +225,15 @@ android {
              */
             versionNameSuffix = "-local"
             signingConfig = signingConfigs.getByName("debug")
+            /*
+             * The build the owner carries, and therefore the one this whole flag exists for. It
+             * already reads `src/debug`'s network security config; this is the application-level
+             * half of the same decision, and without it `local` would refuse at the keyboard an
+             * address the platform underneath it would have allowed on the wire.
+             *
+             * Like `beta`, stated and not inherited: `initWith(release)` brings "no" over.
+             */
+            resValue("bool", "cleartext_server_permitted", "true")
         }
 
     }
