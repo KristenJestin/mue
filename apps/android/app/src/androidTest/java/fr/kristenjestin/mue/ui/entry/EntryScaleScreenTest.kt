@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -149,12 +151,15 @@ class EntryScaleScreenTest {
     fun without_a_paired_scale_the_screen_adds_nothing_at_all() {
         start()
 
+        // Les cinq poignées que ce module peut poser sur `Entry`, et pas une de plus : un tag mort
+        // asserté ici passerait en n'observant rien, ce qui est la façon exacte dont ce test
+        // pourrait cesser de vouloir dire quelque chose.
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assertDoesNotExist()
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.OUT_OF_RANGE_NOTICE).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.BAREFOOT_HINT).assertDoesNotExist()
         composeRule.onNodeWithTag(ScaleTestTags.SAVE_BLOCKED_REASON).assertDoesNotExist()
+        assertTrue("rien n'est annoncé sans balance", announcedArrivals() == 0)
 
         // Et l'écran du PRD socle est intact, jusqu'à ses trois contrôles, qui restent actifs.
         composeRule.onNodeWithText("Where are you today?").assertIsDisplayed()
@@ -183,45 +188,86 @@ class EntryScaleScreenTest {
 
     // --- FR-SCALE-022, la mesure reçue ------------------------------------------------
 
+    /**
+     * FR-SCALE-022, **écart assumé** : la provenance est indiquée par la pastille, et par elle
+     * seule.
+     *
+     * La ligne `From your scale` sous la valeur a disparu. Elle répétait ce que l'ambre de l'en-tête
+     * dit déjà — cette pastille n'est allumée que pour cette raison — au seul endroit où
+     * PRD_SCALE 19 interdit qu'on concurrence le poids. Ce que ce test vérifie est donc l'ensemble
+     * du repli : la valeur atterrit, la pastille la porte et la dit, et la légende sous le chiffre
+     * revient à `SLIDE TO ADJUST` au lieu de laisser un trou — ce qui est aussi ce que
+     * FR-SCALE-022 veut faire comprendre d'une valeur reçue : elle est à vous, tout de suite.
+     */
     @Test
-    fun a_received_measurement_lands_on_the_ruler_with_its_provenance() {
+    fun a_received_measurement_lands_on_the_ruler_and_the_chip_carries_its_provenance() {
         state = state.copy(scale = EntryScaleUiState(paired = true))
         start()
 
         receive(8_120)
 
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertExists()
-        composeRule.onNodeWithText(ScaleMessages.FROM_YOUR_SCALE).assertIsDisplayed()
         composeRule
             .onNodeWithContentDescription(
                 EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_120))
             )
             .assertIsDisplayed()
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertExists()
+        composeRule.onNodeWithText("SLIDE TO ADJUST").assertIsDisplayed()
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_INDICATOR).assertDoesNotExist()
     }
 
-    /** PRD_SCALE 20 : l'arrivée d'une mesure stable est annoncée **avec sa valeur**. */
+    /**
+     * PRD_SCALE 20 : l'arrivée d'une mesure stable est annoncée **avec sa valeur**, une fois.
+     *
+     * Le test qui manquait, et qui rendait le retrait de la marque de provenance dangereux : la
+     * marque était la région vivante qui portait cette annonce, et les tests qui la vérifiaient
+     * interrogeaient son tag. La supprimer sans replanter l'annonce aurait fait perdre l'exigence
+     * en laissant la suite verte.
+     *
+     * Il ne nomme donc **aucun porteur**. Il cherche les nœuds qui annoncent une arrivée, où qu'ils
+     * soient, et exige qu'il y en ait exactement un, que sa description contienne la valeur
+     * affichée, et qu'il soit une région active polie. Un déménagement de l'annonce le laisse vert ;
+     * sa disparition, sa duplication ou sa répétition le font échouer.
+     */
     @Test
-    fun the_arrival_is_announced_with_its_value() {
+    fun the_arrival_is_announced_once_with_its_value_whoever_carries_it() {
         state = state.copy(scale = EntryScaleUiState(paired = true))
-        start()
+        start(reduceMotion = true)
+
+        // Une trame n'annonce rien : sinon le lecteur d'écran parlerait plusieurs fois par seconde
+        // pendant qu'on monte sur la balance (PRD_SCALE 20, « jamais une trame »).
+        stream(8_490)
+        assertTrue("une trame instable n'annonce rien", announcedArrivals() == 0)
+        stream(8_575)
+        assertTrue("une trame instable n'annonce rien", announcedArrivals() == 0)
 
         receive(8_120)
 
-        val announcement = ScaleMessages.measurementReceived(
-            EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_120))
+        val spoken = EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_120))
+        val announced = ScaleMessages.measurementReceivedThenTryAgain(spoken)
+
+        assertEquals("une arrivée, un seul porteur", 1, announcedArrivals())
+        composeRule.onNodeWithContentDescription(announced).assertExists()
+        composeRule.onNodeWithContentDescription(announced).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)
         )
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assert(
-            SemanticsMatcher.expectValue(
-                SemanticsProperties.LiveRegion,
-                androidx.compose.ui.semantics.LiveRegionMode.Polite,
-            )
-        )
-        composeRule.onNodeWithContentDescription(announcement).assertExists()
+
+        /*
+         * Et une recomposition ne reparle pas. Ce qui fait taire une région active est que sa
+         * sémantique ne bouge pas : le seul moyen de l'éprouver est donc de forcer une
+         * recomposition qui change autre chose — le salut, ici — et de retrouver la même annonce,
+         * une seule fois et au mot près.
+         */
+        state = state.copy(greeting = "Good evening,")
+        composeRule.waitForIdle()
+
+        assertEquals("une recomposition ne réannonce rien", 1, announcedArrivals())
+        composeRule.onNodeWithContentDescription(announced).assertExists()
     }
 
-    /** FR-SCALE-022 : la valeur reçue reste entièrement modifiable, et la marque part avec. */
+    /** FR-SCALE-022 : la valeur reçue reste modifiable, et la provenance part avec l'annonce. */
     @Test
-    fun taking_the_value_back_removes_the_mark() {
+    fun taking_the_value_back_ends_the_provenance_and_its_announcement() {
         state = state.copy(scale = EntryScaleUiState(paired = true))
         start(reduceMotion = true)
         receive(8_120)
@@ -230,7 +276,12 @@ class EntryScaleScreenTest {
         composeRule.waitForIdle()
 
         assertEquals(8_125, state.weight.hundredthsKg)
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
+        assertTrue("la valeur reprise n'annonce plus une arrivée", announcedArrivals() == 0)
+        // La pastille redevient ce qu'elle offre, et rien d'autre (FR-SCALE-023).
+        composeRule.onNodeWithContentDescription(ScaleMessages.LINK_SEARCH_AGAIN).assertExists()
+        composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assert(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion).not()
+        )
     }
 
     @Test
@@ -390,13 +441,18 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).assertExists()
         composeRule.onNodeWithText(ScaleMessages.MEASURING).assertDoesNotExist()
         composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
-        composeRule
-            .onNodeWithContentDescription(ScaleMessages.LINK_SEARCH_AGAIN)
-            .assertExists()
         assertTheChipIsATouchTarget()
 
-        // La provenance n'a pas quitté l'écran pour autant (FR-SCALE-022).
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertExists()
+        /*
+         * La provenance n'a pas quitté l'écran pour autant (FR-SCALE-022) : elle est sur la
+         * pastille, avec l'annonce de PRD_SCALE 20 — et l'offre est dite dans la même phrase, sans
+         * quoi le seul chemin vers une nouvelle pesée serait un bouton sans nom pour un lecteur
+         * d'écran, ce que FR-SCALE-023 interdit.
+         */
+        val spoken = EntryFormat.spokenWeight(Weight.ofHundredthsClamped(8_120))
+        composeRule
+            .onNodeWithContentDescription(ScaleMessages.measurementReceivedThenTryAgain(spoken))
+            .assertExists()
 
         composeRule.onNodeWithTag(ScaleTestTags.ENTRY_STATUS).performClick()
         composeRule.waitForIdle()
@@ -420,7 +476,7 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithContentDescription(INCREASE).performClick()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
+        assertTrue("la valeur reprise n'annonce plus une arrivée", announcedArrivals() == 0)
         composeRule.onNodeWithText(ScaleMessages.LINK_TRY_AGAIN).assertIsDisplayed()
         composeRule.onNodeWithContentDescription(ScaleMessages.LINK_SEARCH_AGAIN).assertExists()
         assertTheChipIsATouchTarget()
@@ -463,6 +519,24 @@ class EntryScaleScreenTest {
         composeRule.waitForIdle()
         assertTrue("une session en cours ne propose rien", actions.isEmpty())
     }
+
+    /**
+     * Ce que l'écran annonce comme une arrivée, **sans nommer le nœud qui le fait**.
+     *
+     * C'est la forme même de ces assertions qui compte. L'annonce de PRD_SCALE 20 vivait sur la
+     * marque de provenance, et tous les tests qui la vérifiaient passaient par le tag de cette
+     * marque : le jour où elle a été retirée, ils auraient pu être supprimés « avec elle » sans que
+     * personne ne voie partir l'exigence. En cherchant la phrase plutôt que son support, ce
+     * helper survit au prochain déménagement et fait échouer la prochaine disparition.
+     *
+     * Le fragment cherché est dérivé de [ScaleMessages.measurementReceived] au lieu d'être recopié,
+     * pour que ce fichier échoue si la phrase change et non s'il perd le fil d'une copie.
+     */
+    private fun announcedArrivals(): Int =
+        composeRule
+            .onAllNodesWithContentDescription(RECEIVED, substring = true)
+            .fetchSemanticsNodes()
+            .size
 
     /** La cible tactile de FR-SCALE-025, offerte à la relance comme aux quatre états système. */
     private fun assertTheChipIsATouchTarget() {
@@ -529,7 +603,8 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.SAVE_BLOCKED_REASON).assertDoesNotExist()
         composeRule.onNodeWithText("Save measurement").assertIsEnabled()
         composeRule.onNodeWithContentDescription(INCREASE).assertIsEnabled()
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
+        // Un flux repris n'a jamais rien posé : il n'y a pas eu d'arrivée, donc rien à annoncer.
+        assertTrue("un flux repris n'annonce aucune arrivée", announcedArrivals() == 0)
     }
 
     // --- FR-SCALE-024 et 18.3 ---------------------------------------------------------
@@ -546,7 +621,8 @@ class EntryScaleScreenTest {
         composeRule.onNodeWithTag(ScaleTestTags.OUT_OF_RANGE_NOTICE).assertIsDisplayed()
         composeRule.onNodeWithText(ScaleMessages.MEASUREMENT_OUT_OF_RANGE).assertIsDisplayed()
         assertEquals(before, state.weight)
-        composeRule.onNodeWithTag(ScaleTestTags.SOURCE_MARK).assertDoesNotExist()
+        // Une mesure refusée n'est pas une arrivée : rien n'est posé, donc rien n'est annoncé.
+        assertTrue("une mesure hors bornes n'annonce pas d'arrivée", announcedArrivals() == 0)
     }
 
     @Test
@@ -646,6 +722,9 @@ class EntryScaleScreenTest {
     private companion object {
         const val INCREASE = "Increase weight by 0.05 kilograms"
         const val DECREASE = "Decrease weight by 0.05 kilograms"
+
+        /** `received from your scale` : la phrase de l'arrivée, sans le poids qui la précède. */
+        val RECEIVED: String = ScaleMessages.measurementReceived("").trim()
     }
 }
 
@@ -657,5 +736,13 @@ class EntryScaleScreenTest {
  * cette fonction doit rendre fidèlement est la seule chose dont l'écran dépend — le flux s'arrête
  * et la provenance part, ensemble.
  */
-private fun EntryScaleUiState.taken(): EntryScaleUiState =
-    copy(indicator = null, liveHundredths = null, fromScale = false, outOfRange = false)
+private fun EntryScaleUiState.taken(): EntryScaleUiState = copy(
+    indicator = null,
+    liveHundredths = null,
+    fromScale = false,
+    outOfRange = false,
+    // L'annonce part avec la provenance, et pour la même raison : elle parle d'une arrivée dont la
+    // valeur n'est plus à l'écran. L'omettre ici aurait laissé le harnais dans un état que le
+    // `ViewModel` ne produit jamais.
+    announcement = null,
+)

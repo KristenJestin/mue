@@ -264,8 +264,16 @@ internal object ScaleMessages {
     /** PRD_SCALE 11: unstable frames. The value follows them and commits to nothing. */
     const val MEASURING: String = "Measuring"
 
-    /** FR-SCALE-022 and PRD_SCALE 19: the provenance mark, beside the value, never on it. */
-    const val FROM_YOUR_SCALE: String = "From your scale"
+    /*
+     * `FROM_YOUR_SCALE` — the `From your scale` mark under the value — is gone.
+     *
+     * It said, in words, the one thing the amber chip in the header is lit for. Two carriers for
+     * one fact is one too many, and the second one was the one competing with the weight
+     * (PRD_SCALE 19). What replaced it under the value is `SLIDE TO ADJUST`, which is the same
+     * sentence FR-SCALE-022 wants said about a received value: it is yours to change. The
+     * provenance itself, and the announcement it used to carry, are on the chip — see
+     * [measurementReceivedThenTryAgain] and `EntryScreen.ScaleNote`.
+     */
 
     /**
      * PRD_SCALE 11: the unstable stream drives the readout, and says so.
@@ -359,10 +367,12 @@ internal object ScaleMessages {
      * of a button is its gesture, not the state that preceded it. Reading out a state to someone
      * who cannot see that the element is tappable is exactly how an affordance goes missing.
      *
-     * Nothing is lost with them. Provenance is carried, visibly and spoken, by the
-     * `From your scale` mark under the value, with its own description and its own live region
-     * (FR-SCALE-022, PRD_SCALE 19) — and a scale that has to be looked for again is, by itself,
-     * the plain statement of PRD_SCALE 18.2 that none is in range. No fault, no apology, an offer.
+     * A scale that has to be looked for again is, by itself, the plain statement of PRD_SCALE 18.2
+     * that none is in range. No fault, no apology, an offer.
+     *
+     * This is what the chip says in every dead end where nothing has just arrived. Behind a weight
+     * the scale has landed it states that arrival instead — and keeps the offer, in the same
+     * breath: see [measurementReceivedThenTryAgain].
      */
     const val LINK_SEARCH_AGAIN: String = "Look for your scale again"
 
@@ -598,6 +608,21 @@ internal object ScaleMessages {
      */
     fun measurementReceived(formattedWeight: String): String =
         "$formattedWeight received from your scale"
+
+    /**
+     * PRD_SCALE 20 et FR-SCALE-023 : l'arrivée, puis ce qu'on peut en faire, dans la même phrase.
+     *
+     * La pastille est le seul porteur de la provenance depuis que la marque sous la valeur a
+     * disparu, et elle est aussi le bouton `Try again`. Annoncer l'arrivée en écrasant son nom
+     * accessible aurait rendu muette la seule affordance de l'écran vers une nouvelle pesée — le
+     * défaut exact que [LINK_SEARCH_AGAIN] documente. Les deux tiennent donc dans une seule
+     * description, sur le modèle de [SCALE_NOT_FOUND] : le constat, un point médian, l'offre.
+     *
+     * [formattedWeight] arrive formaté par l'écran, pour que l'annonce et la valeur visible ne
+     * puissent jamais diverger.
+     */
+    fun measurementReceivedThenTryAgain(formattedWeight: String): String =
+        "${measurementReceived(formattedWeight)} · $LINK_TRY_AGAIN"
 
     /** PRD_SCALE 20: the other change worth announcing — the scale became unusable. */
     const val UNAVAILABLE_ANNOUNCEMENT: String =

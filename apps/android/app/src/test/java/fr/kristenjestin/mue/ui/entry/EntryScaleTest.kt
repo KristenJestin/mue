@@ -764,6 +764,57 @@ class EntryScaleTest {
         )
     }
 
+    /**
+     * PRD_SCALE 20, la moitié qui manquait : **l'annonce a un porteur, et un seul**.
+     *
+     * L'arrivée était annoncée par la marque `From your scale` sous la valeur. Cette marque a
+     * disparu — la pastille ambre de l'en-tête est allumée pour cette seule raison et le disait
+     * déjà —, et l'exigence serait partie avec elle sans que rien ne le signale, parce que les
+     * tests qui la vérifiaient interrogeaient le nœud supprimé. Ce test la vérifie là où elle vit
+     * maintenant, et surtout aux trois moments où elle ne doit **pas** se produire : pendant le
+     * flux instable, sur une trame stable répétée, et une fois la valeur reprise.
+     *
+     * Il porte sur `linkChip.announcement` et non sur la phrase, parce que la phrase se termine
+     * dans l'écran, avec le poids formaté ; `EntryScaleScreenTest` la vérifie entière.
+     */
+    @Test
+    fun `l'arrivée est annoncée par la pastille, une fois, et par elle seule`() = runTest {
+        val scale = paired()
+        val model = viewModel(scale)
+        fun chip() = assertNotNull(model.uiState.value.scale.linkChip)
+
+        scale.emit(ScaleSessionState.Searching)
+        assertNull(chip().announcement)
+
+        // Le flux instable passe par la branche `indicator`, qui n'annonce rien : une région
+        // active branchée là parlerait plusieurs fois par seconde pendant qu'on monte dessus.
+        scale.emit(ScaleSessionState.Measuring(8_500))
+        assertNull(chip().announcement)
+        scale.emit(ScaleSessionState.Measuring(8_570))
+        assertNull(chip().announcement)
+
+        scale.emit(ScaleSessionState.Stable(scaleReadingOf(85.75)))
+        assertEquals(EntryScaleAnnouncement.MEASUREMENT_RECEIVED, chip().announcement)
+
+        /*
+         * « Une seule fois par arrivée ». L'impédance de la même session arrive derrière la mesure
+         * et repasse par `acceptReading` : l'état doit en ressortir identique au champ près, sans
+         * quoi la description de la pastille changerait pour la même valeur et le lecteur d'écran
+         * entendrait la pesée deux fois.
+         */
+        val announced = model.uiState.value
+        scale.emit(
+            ScaleSessionState.Complete(scaleReadingOf(85.75), impedanceRefused = false)
+        )
+        assertEquals(announced, model.uiState.value, "la même mesure ne se réannonce pas")
+
+        // Et la valeur reprise en main retire l'annonce avec la provenance (BR-SCALE-013) : une
+        // arrivée annoncée derrière un poids qui n'est plus celui de la balance serait un mensonge.
+        model.onStep(1)
+        assertNull(chip().announcement)
+        assertFalse(model.uiState.value.scale.fromScale)
+    }
+
     @Test
     fun `l'indisponibilité est annoncée une fois par affichage`() = runTest {
         val scale = paired()
@@ -848,8 +899,8 @@ class EntryScaleTest {
         scale.emit(ScaleSessionState.Unavailable(ScaleUnavailableReason.BLUETOOTH_OFF))
         assertEquals("Bluetooth off", chip().label)
         assertEquals(EntryScaleAction.ENABLE_BLUETOOTH, chip().action)
-        // PRD_SCALE 20 : le seul changement que la pastille annonce d'elle-même.
-        assertTrue(chip().announce)
+        // PRD_SCALE 20 : l'indisponibilité remplace la phrase de la pastille le temps d'être dite.
+        assertEquals(EntryScaleAnnouncement.UNAVAILABLE, chip().announcement)
         assertEquals(ScaleMessages.UNAVAILABLE_ANNOUNCEMENT, chip().description)
 
         scale.emit(ScaleSessionState.Searching)
@@ -891,7 +942,9 @@ class EntryScaleTest {
         assertTrue(chip.active, "la provenance ne se perd pas dans l'en-tête")
         assertFalse(chip.pulsing)
         assertEquals(EntryScaleAction.RESTART_SEARCH, chip.action)
-        assertFalse(chip.announce, "l'arrivée est annoncée par la marque de provenance, avec sa valeur")
+        // PRD_SCALE 20 : et c'est elle, désormais, qui annonce l'arrivée. La marque de provenance
+        // qui la portait a disparu de sous la valeur ; l'exigence, elle, n'a pas bougé.
+        assertEquals(EntryScaleAnnouncement.MEASUREMENT_RECEIVED, chip.announcement)
     }
 
     /**

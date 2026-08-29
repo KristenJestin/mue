@@ -1,6 +1,5 @@
 package fr.kristenjestin.mue.ui.entry
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,8 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -73,13 +70,11 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
-import fr.kristenjestin.mue.ui.activity.ActivityIcons
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumberSuffixGap
 import fr.kristenjestin.mue.ui.components.MueFieldContainer
 import fr.kristenjestin.mue.ui.components.MueHaptics
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
-import fr.kristenjestin.mue.ui.components.MueIcon
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
@@ -349,7 +344,6 @@ internal fun EntryContent(
 
         ScaleNote(
             scale = state.scale,
-            weight = state.weight,
             modifier = Modifier.padding(top = spacing.sm),
         )
 
@@ -768,22 +762,32 @@ private fun Modifier.fullBleed(gutter: Dp): Modifier = layout { measurable, cons
  * **It no longer reports the link.** Searching, connecting, the radio being off — all of that
  * moved to the header chip, which answers the question actually being asked ("is it talking to my
  * scale?") in the place the eye goes for it. What is left here belongs to the *value*: what to do
- * to produce one, and what the one on screen is worth. So the slot holds exactly three things,
- * never two at once — the invitation to step on, the mark that the number is not final, and the
- * provenance of a number that is.
+ * to produce one, and what the one on screen is worth — the invitation to step on, and the mark
+ * that the number is not final. Never both: only one of the two can be true at a time.
+ *
+ * **The provenance mark left with it, and this is a deliberate departure from FR-SCALE-022.**
+ * That rule asks for the provenance of a received value to be indicated near the value, and it
+ * used to be a `From your scale` line right here. The amber chip in the header is lit for exactly
+ * one reason — the value on screen came from the scale — so the line was the same fact said a
+ * second time, in the one place PRD_SCALE 19 forbids anything from competing with the weight. The
+ * chip is now the sole carrier of the provenance: colour, spoken description and announcement.
+ * The arbitration is recorded here so a later reading finds a decision and not an omission.
+ *
+ * Two things had to move with it, and neither is optional:
+ *  - **the announcement** (PRD_SCALE 20). The mark was the live region that said a stable
+ *    measurement had arrived, *with its value*. It is on the chip now, once per arrival — see
+ *    [ScaleLinkChip] and `EntryScaleUiState.linkChip`.
+ *  - **what fills the slot**. Nothing takes the mark's place here: the caption [HeroReadout] draws
+ *    just above falls back to `SLIDE TO ADJUST` the moment a value is on screen, rather than
+ *    leaving a hole. It is also what FR-SCALE-022 actually wants said about a received weight —
+ *    it is immediately yours to change.
  */
 @Composable
 private fun ScaleNote(
     scale: EntryScaleUiState,
-    weight: Weight,
     modifier: Modifier = Modifier,
 ) {
     if (!scale.paired) return
-
-    val colors = MueTheme.colors
-    val typography = MueTheme.typography
-    val spacing = MueTheme.spacing
-    val fade = MueMotion.spec<Float>(MueMotion.ManualEntryMillis)
 
     Box(
         modifier = modifier.fillMaxWidth().height(ScaleNoteHeight),
@@ -793,62 +797,24 @@ private fun ScaleNote(
          * PRD_SCALE 11 : la valeur suit le flux, *marquée comme non définitive*. Cette ligne est
          * la marque, et elle est constante pendant toute la mesure — c'est ce qui la rend lisible
          * pendant que le grand chiffre, lui, change à chaque trame.
+         *
+         * Plus rien ne la conditionne à `!fromScale` : cette garde n'existait que pour laisser la
+         * place à la marque de provenance dans la même boîte. Sans elle, une session relancée
+         * derrière une valeur déjà reçue dit de nouveau quoi faire, ce qui est le seul cas où les
+         * deux champs sont vrais ensemble (FR-SCALE-023).
          */
         val note = when {
             scale.streaming -> ScaleMessages.NOT_FINAL_YET
             scale.indicator == EntryScaleIndicator.STEP_ON -> ScaleMessages.STEP_ON_THE_SCALE
             else -> null
         }
-        if (note != null && !scale.fromScale) {
+        if (note != null) {
             MueText(
                 text = note,
-                style = typography.hint,
-                color = colors.textTertiary,
+                style = MueTheme.typography.hint,
+                color = MueTheme.colors.textTertiary,
                 modifier = Modifier.testTag(ScaleTestTags.ENTRY_INDICATOR),
             )
-        }
-
-        // PRD_SCALE 19: the mark fades in, and fades out the moment the user takes the value
-        // back. Under reduced motion `MueMotion.spec` already shortens it to the brief fade that
-        // section allows, so there is nothing to branch on here.
-        AnimatedVisibility(
-            visible = scale.fromScale,
-            enter = fadeIn(fade),
-            exit = fadeOut(fade),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(spacing.xs),
-                modifier = Modifier
-                    .testTag(ScaleTestTags.SOURCE_MARK)
-                    /*
-                     * PRD_SCALE 20: the arrival of a stable measurement is announced with its
-                     * value. The live region sits on the mark and nowhere else — the mark exists
-                     * exactly when a measurement has landed, so it speaks once per arrival and
-                     * never once per frame, which is the distinction that section draws.
-                     */
-                    .semantics(mergeDescendants = true) {
-                        liveRegion = LiveRegionMode.Polite
-                        contentDescription = if (
-                            scale.announcement == EntryScaleAnnouncement.MEASUREMENT_RECEIVED
-                        ) {
-                            ScaleMessages.measurementReceived(EntryFormat.spokenWeight(weight))
-                        } else {
-                            ScaleMessages.FROM_YOUR_SCALE
-                        }
-                    },
-            ) {
-                MueIcon(
-                    iconName = ActivityIcons.TAB_ENTRY,
-                    tint = colors.textTertiary,
-                    size = ScaleMarkIconSize,
-                )
-                MueText(
-                    text = ScaleMessages.FROM_YOUR_SCALE,
-                    style = typography.hint,
-                    color = colors.textTertiary,
-                )
-            }
         }
     }
 }
@@ -957,7 +923,9 @@ private fun EntryHeaderChips(
         horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        chip?.let { ScaleLinkChip(chip = it, onAction = onAction) }
+        // Le poids descend jusqu'ici parce que l'annonce d'arrivée le contient : elle se compose
+        // avec la valeur telle que l'écran l'affiche, jamais avec une seconde mise en forme.
+        chip?.let { ScaleLinkChip(chip = it, weight = state.weight, onAction = onAction) }
         if (dated) MueHeaderChip(EntryFormat.headerDate(state.date))
     }
 }
@@ -977,10 +945,23 @@ private fun EntryHeaderChips(
  *
  * **A screen reader loses none of it** (PRD_SCALE 20). The description is the full sentence in
  * every state, label or no label, and the pane title names the region so `Connecting` is heard as
- * a fact about the scale rather than about the screen. The live region is set for exactly one
- * change — the scale becoming unusable — because that is the one the reader has to be told about
- * without looking; the arrival of a measurement is announced by the provenance mark, with its
- * value, once.
+ * a fact about the scale rather than about the screen.
+ *
+ * **This chip is now the screen's only live region**, and it speaks for exactly two changes: the
+ * scale becoming unusable, and a stable measurement arriving *with its value*. The second one used
+ * to belong to the `From your scale` mark under the readout; that mark repeated what the amber of
+ * this chip already says, so it went, and the announcement came here rather than disappearing with
+ * it (see [ScaleNote] for the FR-SCALE-022 arbitration).
+ *
+ * **Once per arrival, and never once per frame.** Nothing here decides that: the announcement is a
+ * field of the state, `EntryScaleUiState.linkChip` only carries it in the branch reached *after* a
+ * measurement has landed, and the unstable stream reaches the `indicator` branch, which announces
+ * nothing. So the description changes once, when the reading is posted; a recomposition that
+ * changes nothing about the scale rebuilds the same semantics and Compose stays silent.
+ *
+ * The arrival's description is composed here and not in the state, because it needs the weight
+ * *as this screen formats it* — the announcement and the visible value can then never disagree.
+ * It states the arrival and keeps the offer, so the button never goes nameless while it speaks.
  *
  * The tap comes with every state that has something to offer and with nothing else — never during
  * a live session, where there is nothing to ask for. It opens no dialog and no system screen by
@@ -990,6 +971,7 @@ private fun EntryHeaderChips(
 @Composable
 private fun ScaleLinkChip(
     chip: EntryLinkChip,
+    weight: Weight,
     onAction: (EntryScaleAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -999,6 +981,19 @@ private fun ScaleLinkChip(
     val container = if (chip.active) colors.accentSoft else colors.surface
     val content = if (chip.active) colors.onAccentSoft else colors.textTertiary
     val action = chip.action
+
+    /*
+     * PRD_SCALE 20 : l'arrivée est dite **avec sa valeur**, et l'offre reste dite avec elle.
+     *
+     * `EntryScaleUiState` s'arrête à *quoi* annoncer parce qu'il ne formate aucun poids ; la phrase
+     * se termine ici, sur le `Weight` que le lecteur voit à l'instant même. L'indisponibilité, elle,
+     * n'a besoin de rien de l'écran : sa phrase est déjà dans `chip.description`.
+     */
+    val spoken = when (chip.announcement) {
+        EntryScaleAnnouncement.MEASUREMENT_RECEIVED ->
+            ScaleMessages.measurementReceivedThenTryAgain(EntryFormat.spokenWeight(weight))
+        else -> chip.description
+    }
 
     Box(
         /*
@@ -1034,8 +1029,8 @@ private fun ScaleLinkChip(
             .testTag(ScaleTestTags.ENTRY_STATUS)
             .semantics(mergeDescendants = true) {
                 paneTitle = ScaleMessages.SCALE_STATUS_LABEL
-                contentDescription = chip.description
-                if (chip.announce) liveRegion = LiveRegionMode.Polite
+                contentDescription = spoken
+                if (chip.announcement != null) liveRegion = LiveRegionMode.Polite
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -1104,9 +1099,6 @@ private fun ScaleLinkDot(tint: Color, pulsing: Boolean) {
  * without one is not a pixel taller (PRD_SCALE 18.1).
  */
 private val ScaleNoteHeight: Dp = 22.dp
-
-/** Small enough to read as punctuation beside the words, never as an indicator of its own. */
-private val ScaleMarkIconSize: Dp = 14.dp
 
 /**
  * The link chip's own gutter, narrower than [MueHeaderChip]'s fourteen: it carries a dot as well

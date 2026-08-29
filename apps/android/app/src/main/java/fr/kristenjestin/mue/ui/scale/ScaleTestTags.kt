@@ -148,20 +148,26 @@ internal object ScaleTestTags {
      */
     const val ENTRY_INDICATOR: String = "scale:entryIndicator"
 
-    /**
-     * The provenance mark beside the value (FR-SCALE-022). It disappears the moment the user
-     * takes the value back, so its absence is as tested as its presence.
+    /*
+     * `SOURCE_MARK` — la marque `From your scale` sous la valeur — n'existe plus.
+     *
+     * Elle répétait ce que la pastille ambre de l'en-tête dit déjà, celle-ci n'étant allumée que
+     * pour une raison : la valeur vient de la balance. Un tag ne se garde pas « au cas où » — un
+     * test qui interroge un tag mort passe en n'observant rien —, et la provenance comme son
+     * annonce se vérifient désormais sur [ENTRY_STATUS]. Voir `EntryScreen.ScaleNote` pour
+     * l'arbitrage de FR-SCALE-022.
      */
-    const val SOURCE_MARK: String = "scale:sourceMark"
 
     /**
      * The link-state chip in the header, top right — the whole state of the session in one place.
      *
-     * It carries the four states of a session in progress, the wordless mark of a weight that has
-     * landed, and the three actionable lines of PRD_SCALE 18.5 — `Scale not found · Try again`,
-     * `Bluetooth is off · Enable`, `Scale unavailable · Open settings`, spoken in full and shown
-     * short. One tag for all of them, because only one chip is ever on screen and its label, its
-     * description and its click action are what tell them apart.
+     * It carries the four states of a session in progress, the three actionable lines of
+     * PRD_SCALE 18.5 — `Scale not found · Try again`, `Bluetooth is off · Enable`,
+     * `Scale unavailable · Open settings`, spoken in full and shown short — and, since the
+     * provenance mark left the screen, the provenance of a weight that has landed **and its
+     * announcement, with its value** (FR-SCALE-022, PRD_SCALE 20). One tag for all of them,
+     * because only one chip is ever on screen and its label, its description and its click action
+     * are what tell them apart.
      *
      * It does not exist at all without a paired scale (FR-SCALE-020, PRD_SCALE 18.1).
      */

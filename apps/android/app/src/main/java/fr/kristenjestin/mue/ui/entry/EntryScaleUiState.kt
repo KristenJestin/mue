@@ -111,9 +111,9 @@ data class EntryScaleUiState(
         get() {
             if (!paired) return null
             status?.let { actionable ->
-                // PRD_SCALE 20 : l'indisponibilité est le seul changement que cette pastille
-                // annonce d'elle-même ; l'arrivée d'une mesure appartient à la marque de
-                // provenance, qui la dit avec sa valeur et une seule fois.
+                // PRD_SCALE 20 : l'indisponibilité rassure, donc elle remplace la phrase de la
+                // pastille le temps d'être dite — il n'y a pas de geste à préserver dans cet
+                // état-là, le geste *est* d'aller réparer ce qu'elle annonce.
                 val announced = announcement == EntryScaleAnnouncement.UNAVAILABLE
                 return EntryLinkChip(
                     label = actionable.chipLabel,
@@ -124,12 +124,14 @@ data class EntryScaleUiState(
                     },
                     active = false,
                     pulsing = false,
-                    announce = announced,
+                    announcement = EntryScaleAnnouncement.UNAVAILABLE.takeIf { announced },
                     action = actionable.action,
                 )
             }
             indicator?.let {
                 // Une session court : il n'y a rien à relancer, et le point respire pour le dire.
+                // Rien à annoncer non plus — c'est ici que passent les trames instables, et une
+                // région active branchée sur cette branche parlerait plusieurs fois par seconde.
                 return EntryLinkChip(
                     label = it.chipLabel,
                     description = it.message,
@@ -137,11 +139,27 @@ data class EntryScaleUiState(
                     pulsing = true,
                 )
             }
+            /*
+             * PRD_SCALE 20 : **l'arrivée d'une mesure s'annonce ici**, depuis que la marque de
+             * provenance sous la valeur a disparu. Elle en était la région vivante, et la retirer
+             * sans la replacer aurait fait perdre cette exigence sans qu'aucun test ne bouge.
+             *
+             * Le texte, lui, n'est pas écrit ici : il se compose avec le poids **formaté par
+             * l'écran** (`ScaleMessages.measurementReceivedThenTryAgain`), pour que l'annonce et la
+             * valeur visible ne puissent pas diverger. Cette branche ne dit donc que *ce qui* est
+             * annoncé, ce qu'un test JVM peut lire.
+             *
+             * [fromScale] conditionne l'annonce autant que la couleur : une annonce d'arrivée
+             * derrière une valeur qui n'est plus celle de la balance serait un mensonge, et les
+             * deux champs se retirent ensemble dans `takeValueBack`.
+             */
+            val arrived = fromScale && announcement == EntryScaleAnnouncement.MEASUREMENT_RECEIVED
             return EntryLinkChip(
                 label = ScaleMessages.LINK_TRY_AGAIN,
                 description = ScaleMessages.LINK_SEARCH_AGAIN,
                 active = fromScale,
                 pulsing = false,
+                announcement = EntryScaleAnnouncement.MEASUREMENT_RECEIVED.takeIf { arrived },
                 action = EntryScaleAction.RESTART_SEARCH,
             )
         }
@@ -175,13 +193,19 @@ data class EntryScaleUiState(
  * @property description Ce qu'un lecteur d'écran entend, **toujours complet**, y compris quand
  *   [label] est `null` : une couleur et un point ne s'énoncent pas (PRD_SCALE 20). Dès qu'il y a
  *   une [action], cette phrase dit le **geste** et non l'état : c'est le nom accessible d'un
- *   bouton.
+ *   bouton. Une [announcement] d'arrivée la complète sans l'effacer — l'écran y ajoute le poids
+ *   qu'il vient d'afficher —, parce que l'affordance et l'annonce doivent tenir ensemble.
  * @property active La liaison vit : ambre plutôt que gris. Vrai pendant la session et tant que la
  *   valeur à l'écran vient de la balance, faux quand rien ne s'est passé ou que quelque chose
  *   attend un geste système.
  * @property pulsing Le point respire, parce que quelque chose est en cours. Une mesure posée ne
  *   pulse pas : elle est arrivée.
- * @property announce Le seul cas où la pastille prend la parole d'elle-même (PRD_SCALE 20).
+ * @property announcement Ce que la pastille prend sur elle de dire à voix haute, ou `null`
+ *   (PRD_SCALE 20). Elle est **le seul** porteur d'annonce de cet écran depuis que la marque de
+ *   provenance a disparu, ce qui est aussi ce qui garantit qu'une arrivée n'est dite qu'une fois :
+ *   il n'existe plus qu'un nœud pour la dire. Non nul exactement quand la description change pour
+ *   la porter, si bien que la région active et son contenu ne peuvent pas se désynchroniser — un
+ *   changement, une phrase, une prise de parole.
  * @property action Le geste offert, ou `null` — ce dernier cas étant exactement celui d'une
  *   session en cours. Rien ne s'ouvre et rien ne se relance sans lui.
  */
@@ -191,7 +215,7 @@ data class EntryLinkChip(
     val description: String,
     val active: Boolean,
     val pulsing: Boolean,
-    val announce: Boolean = false,
+    val announcement: EntryScaleAnnouncement? = null,
     val action: EntryScaleAction? = null,
 )
 
