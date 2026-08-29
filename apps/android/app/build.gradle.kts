@@ -1,5 +1,10 @@
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.BuiltArtifactsLoader
+import org.gradle.process.ExecOperations
+import java.io.ByteArrayOutputStream
 import java.io.StringReader
 import java.util.Properties
+import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.android.application)
@@ -51,8 +56,7 @@ fun localProperty(name: String): String =
 val betaDefaultServerAddress: String = localProperty("mue.beta.server")
 
 /*
- * The account that same `beta` build arrives with in its email box — and the line where the list
- * of what may be baked into an artefact stops.
+ * The account that same `beta` build arrives with in its email box.
  *
  * Same file, same variant, same reasoning as the address: the owner recreates `mue_dev` with
  * `docker compose down -v` and reinstalls the beta often, and this client has no sign-up screen
@@ -60,22 +64,64 @@ val betaDefaultServerAddress: String = localProperty("mue.beta.server")
  * a phone keyboard. Two of those three name things — *which machine*, *which account* — and one
  * is a secret.
  *
- * **The password is not here, and it is not to be added.** Not as a third key, not behind a flag,
- * not "only for beta". `resValue` compiles its argument into `res/values/values.xml` inside the
- * APK, and an APK is a file that gets copied onto a phone, kept in `../` beside the PRDs, and
- * sent over a chat to be installed — anyone holding one reads that table back with `apktool`, or
- * with an unzip and `strings`. An address and an email survive that disclosure: they name a
- * machine on a home LAN and a mailbox their owner hands out anyway. A password does not, because
- * being unknown to everyone else is the whole of what it is worth. PRD_SERVER_SYNC_MCP 9.2 has it
- * typed at every pairing on purpose, and `SyncViewModel.onLeaveSettings` drops it when the screen
- * closes — which would be theatre if the same string sat in the resource table of every copy of
- * the build.
+ * **That third key now exists, and the line this note used to draw has moved.** It said there
+ * would be no key for the password, and the reason it gave was that `resValue` compiles its
+ * argument into `res/values/values.xml` inside the APK, that an APK is a file that gets copied
+ * onto a phone, kept in `../` beside the PRDs and sent over a chat to be installed, and that a
+ * password is the one value whose whole worth is that nobody else holds it. The first half of
+ * that is still exactly true — the string *is* readable in the artefact, and
+ * `betaDefaultAccountPassword` below names the command that reads it. What was re-argued and
+ * decided differently is the second half: the account these two keys name is a throwaway on a
+ * development database, behind a server that answers on nobody's network but the owner's, so
+ * what an APK gives away opens nothing whoever holds it could reach. Read that note before
+ * setting the key — the arbitration holds only under the condition it states.
  *
- * The seeding command on the server side is the other half of this chore and refuses the same
- * thing for the same kind of reason: `scripts/admin.ts accounts create` will not take the
- * password as an argument, because a command line lands in the shell history.
+ * The seeding command on the server side refuses a password argument and keeps refusing it,
+ * which is a different rule and not a weaker version of this one: `scripts/admin.ts accounts
+ * create` takes the password from `MUE_ACCOUNT_PASSWORD` or from a prompt because an argument
+ * lands in the shell history, in `argv`, and therefore in `ps` and the task manager — files and
+ * process tables on the *development machine*, which the arbitration below says nothing about.
  */
 val betaDefaultAccountEmail: String = localProperty("mue.beta.email")
+
+/*
+ * The password that same `beta` build arrives with in its third box: the one value here that is a
+ * credential, and the only one whose note has to be read before the key is set.
+ *
+ * **It travels into the APK in clear, and that is the decision rather than an oversight.**
+ * `resValue` puts it in the resource table and nothing downstream hides it: R8 renames classes
+ * and never touches `res/values`, and `isShrinkResources` removes resources that are unused
+ * rather than obscuring the ones that are used. It was checked on the artefact, not assumed —
+ *
+ *     aapt2 dump resources app-beta.apk
+ *
+ * prints `string/default_account_password` with its value spelled out beside it, and that is the
+ * command that proved it. Anyone holding a beta APK reads the password out of it in one step.
+ *
+ * The owner weighed that and took it, and the argument is about what the secret defends rather
+ * than about how well it is hidden. The account `mue.beta.email` names is disposable: it lives on
+ * `mue_dev`, a database `docker compose down -v` destroys and `scripts/admin.ts accounts create`
+ * refills, and the server holding it runs on his own machine, on his own home network, with no
+ * hosting, no public name and nothing forwarded to it. A reader who extracts this string has
+ * learned the credentials of an account he has no route to, guarding data that is recreated by a
+ * command. The secret protects nothing an attacker can reach.
+ *
+ * **Which is the condition, and it is the whole of it: this key takes a throwaway password and
+ * nothing else.** Not the owner's own, not one that also opens the production server, not one
+ * reused anywhere a person or a service would accept it. The reasoning above is not that a
+ * password in an APK is acceptable; it is that *this* password costs nothing when it leaks. The
+ * day `mue.beta.password` holds a password that is worth something somewhere else, every line of
+ * that argument is false and the disclosure is a real one — and what has to go then is the key,
+ * not this note. The same day arrives if the development server ever becomes reachable from
+ * outside that network, or if the beta ever pairs against anything but a disposable database.
+ *
+ * Bounded like the other two, and the bound is checked rather than intended: `defaultConfig`
+ * declares the empty string, `beta` alone overrides it, and `verifyReleaseCarriesNoBetaDefaults`
+ * below reads the release APK's own resource table back and fails the build if any of the three
+ * arrives carrying a value. A claim about what is *not* in an artefact is worth what the artefact
+ * says, not what this file says.
+ */
+val betaDefaultAccountPassword: String = localProperty("mue.beta.password")
 
 android {
     namespace = "fr.kristenjestin.mue"
@@ -176,9 +222,10 @@ android {
          * above — the view model itself takes the answer as a parameter and stays provable by a
          * JVM test.
          *
-         * The email box gets the same treatment from `default_account_email` below, and the
-         * password gets none: the note on `betaDefaultAccountEmail` at the top of this file draws
-         * that line and says what it costs to move it.
+         * The email and the password boxes get the same treatment from `default_account_email`
+         * and `default_account_password` below. The third one is not the same kind of value as
+         * the first two, and the note on `betaDefaultAccountPassword` at the top of this file
+         * says what it costs and under which condition it was allowed at all.
          */
         resValue("string", "default_server_address", "")
 
@@ -196,6 +243,25 @@ android {
          * resource is the empty string, and `SyncViewModel` reads empty as *no default*.
          */
         resValue("string", "default_account_email", "")
+
+        /*
+         * The password `Server settings` starts with, which for every build but one is none — and
+         * the declaration that matters most in this block, because the empty string here is what
+         * keeps a credential out of the application the owner carries.
+         *
+         * `release`, `local` and `debug` never override it, and unlike the other two that is not
+         * merely "nothing useful to propose". `local` *is* the daily build and `release` is what a
+         * store would get; a password compiled into either would be readable in an artefact whose
+         * reader can reach the server it opens, which is the exact thing the note on
+         * `betaDefaultAccountPassword` says was **not** accepted. Only `beta` overrides it, only
+         * from `local.properties`, and only with a throwaway.
+         *
+         * Declared here rather than only on `beta` for the reason the other two are: `getString`
+         * has to answer for every variant, and a resource that exists in one build type and not in
+         * the others is a `Resources.NotFoundException` on the three that were meant to be
+         * untouched.
+         */
+        resValue("string", "default_account_password", "")
     }
 
     /*
@@ -304,13 +370,19 @@ android {
             // than none.
             resValue("string", "default_server_address", betaDefaultServerAddress)
             // The account that goes with it, under the same terms and from the same file: absent
-            // key, empty string, a beta that behaves exactly as it did before. The two keys are
-            // read independently, so configuring one and not the other is a supported state and
+            // key, empty string, a beta that behaves exactly as it did before. The three keys are
+            // read independently, so configuring one and not the others is a supported state and
             // not a half-configured build — `SyncViewModel` decides each field on its own.
-            //
-            // There is no third line here, and `betaDefaultAccountEmail`'s note at the top of the
-            // file says why: the password is a secret and this is an artefact.
             resValue("string", "default_account_email", betaDefaultAccountEmail)
+            // And the password, which is the line to stop at before copying this block anywhere
+            // else. It is a credential compiled into an artefact, readable with `aapt2 dump
+            // resources`, and it is here on one condition — that `mue.beta.password` holds a
+            // throwaway for a disposable account on a server nobody off this network can reach.
+            // `betaDefaultAccountPassword`'s note at the top of the file carries the argument in
+            // full and says what stops being true if that condition ever does. This line belongs
+            // to `beta` and to no other build type: `verifyReleaseCarriesNoBetaDefaults` checks
+            // that on the release APK rather than trusting the absence of a line here.
+            resValue("string", "default_account_password", betaDefaultAccountPassword)
         }
 
         /*
@@ -477,6 +549,179 @@ androidComponents.finalizeDsl { extension ->
             resValue("color", "launcher_background", "#1E7A47")
         }
     }
+}
+
+/*
+ * The three `beta` defaults, checked on the release APK because that is where the claim is made.
+ *
+ * Everything else about these keys is decided in this file: `defaultConfig` declares the empty
+ * string, one build type overrides it, and nobody intends to change that. Intent is exactly what
+ * this task refuses to accept as the evidence. `default_account_password` carries a credential in
+ * `beta`, and the sentence that makes that acceptable — "the application the owner carries, and
+ * the artefact a store would get, contain none of it" — is a statement about a binary. A line in a
+ * build script is not a binary, and the history of this very file says so twice over: the
+ * `applicationIdSuffix` set from `buildTypes.configureEach` compiled, configured, ran and did
+ * nothing, and it took `aapt dump badging` on the APK to notice. A resource that leaked into
+ * `release` through a `matchingFallbacks`, an `initWith`, a merged source set or a plugin nobody
+ * read would fail exactly as quietly.
+ *
+ * So the release APK is opened and its own resource table is read back:
+ *
+ *   1. each of the three resources must be absent from it or hold a blank string;
+ *   2. no string in it, under any resource name at all, may equal a value `local.properties`
+ *      configured — which is the half that still holds if some future line copies one of these
+ *      across under a different name.
+ *
+ * The second rule compares whole pooled values rather than searching for a substring, on purpose:
+ * a scan for a short password inside a 30 MB artefact finds it in a class name and fails a build
+ * that was fine, and a check that cries wolf gets deleted by the third person it stops.
+ *
+ * `aapt2 dump resources` and not an unzip: `resources.arsc` is a binary table whose strings are
+ * pooled and length-prefixed, and `strings(1)` over the APK answers a slightly different question
+ * than the one asked. `aapt2` is the tool that produced the table, it ships with the build tools
+ * this module already requires, and it is the command the arbitration was verified with by hand.
+ */
+val betaOnlyStringResources = listOf(
+    "default_server_address",
+    "default_account_email",
+    "default_account_password",
+)
+
+abstract class VerifyNoBetaDefaultsInApk : DefaultTask() {
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val apkDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val builtArtifacts: Property<BuiltArtifactsLoader>
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val aapt2: RegularFileProperty
+
+    /** The resources that must be blank in this artefact, whatever any build type says. */
+    @get:Input
+    abstract val resourceNames: ListProperty<String>
+
+    /**
+     * What `local.properties` actually configured, so the check has something to look for even
+     * when the resources themselves are fine. Blank entries are dropped by the registration: an
+     * unconfigured machine has nothing to leak, and "" would match every empty string in the table.
+     */
+    @get:Input
+    abstract val forbiddenValues: ListProperty<String>
+
+    @get:OutputFile
+    abstract val receipt: RegularFileProperty
+
+    @get:Inject
+    abstract val exec: ExecOperations
+
+    @TaskAction
+    fun verify() {
+        val apk = builtArtifacts.get().load(apkDirectory.get())?.elements?.singleOrNull()?.outputFile
+            ?.let(::File)
+            ?: error("no single APK to read; this task is wired to a variant that produced none")
+
+        val dump = ByteArrayOutputStream()
+        exec.exec {
+            commandLine(aapt2.get().asFile.absolutePath, "dump", "resources", apk)
+            standardOutput = dump
+        }
+        val lines = dump.toString(Charsets.UTF_8.name()).lines().map(String::trim)
+
+        // `resource 0x7f0e003b string/default_account_password` followed by `() "…"`.
+        val declaration = Regex("""^resource 0x[0-9a-fA-F]+ string/(\S+)$""")
+        val value = Regex("""^\([^)]*\)\s+"(.*)"$""")
+
+        val offences = mutableListOf<String>()
+        val checked = mutableListOf<String>()
+
+        lines.forEachIndexed { index, line ->
+            val name = declaration.find(line)?.groupValues?.get(1) ?: return@forEachIndexed
+            if (name !in resourceNames.get()) return@forEachIndexed
+            val held = lines.drop(index + 1).firstOrNull(String::isNotEmpty)
+                ?.let { value.find(it)?.groupValues?.get(1) }
+                .orEmpty()
+            checked += "string/$name = \"$held\""
+            if (held.isNotBlank()) {
+                offences += "string/$name carries \"$held\" and must be blank in this build"
+            }
+        }
+
+        val pooled = lines.mapNotNull { value.find(it)?.groupValues?.get(1) }.toSet()
+        forbiddenValues.get().filter { it in pooled }.forEach {
+            offences += "the value \"$it\" configured in local.properties is in this resource table"
+        }
+
+        receipt.get().asFile.apply { parentFile.mkdirs() }
+            .writeText((checked + offences).joinToString(System.lineSeparator(), postfix = System.lineSeparator()))
+
+        if (offences.isNotEmpty()) {
+            error(
+                offences.joinToString(
+                    separator = System.lineSeparator(),
+                    prefix = "${apk.name} carries a `beta` default:" + System.lineSeparator(),
+                    postfix = System.lineSeparator() +
+                        "These three resources belong to `beta` alone, and one of them is a " +
+                        "credential. See the note on `betaDefaultAccountPassword` in " +
+                        "app/build.gradle.kts before changing either this task or the build type " +
+                        "that produced this artefact.",
+                ),
+            )
+        }
+    }
+}
+
+/*
+ * Where aapt2 is, without guessing harder than necessary.
+ *
+ * `android.buildToolsVersion` is the version AGP resolved for this build, so its folder is the one
+ * whose `aapt2` produced the table being read back. The fallback exists because a machine may have
+ * the SDK laid out with a newer build-tools only, and a verification that disappears when a tool
+ * moves is worse than one that reads a neighbouring copy: the format of `dump resources` has not
+ * changed across these versions. Absent entirely, the task fails and says so — `release` is not
+ * assembled without proof.
+ */
+val resolvedBuildToolsVersion: String = android.buildToolsVersion
+
+val aapt2Executable: Provider<File> = androidComponents.sdkComponents.sdkDirectory.map { sdk ->
+    val executable = if (System.getProperty("os.name").startsWith("Windows")) "aapt2.exe" else "aapt2"
+    val buildTools = sdk.asFile.resolve("build-tools")
+    val preferred = buildTools.resolve(resolvedBuildToolsVersion).resolve(executable)
+    when {
+        preferred.isFile -> preferred
+        else -> buildTools.listFiles().orEmpty()
+            .sortedByDescending { it.name }
+            .map { it.resolve(executable) }
+            .firstOrNull { it.isFile }
+            ?: preferred
+    }
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    val verify = tasks.register<VerifyNoBetaDefaultsInApk>("verifyReleaseCarriesNoBetaDefaults") {
+        group = "verification"
+        description = "Reads the release APK's resource table back and fails if a `beta` default is in it."
+        apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+        builtArtifacts.set(variant.artifacts.getBuiltArtifactsLoader())
+        aapt2.fileProvider(aapt2Executable)
+        resourceNames.set(betaOnlyStringResources)
+        // Read here, at configuration time, from the same three vals the `beta` build type uses —
+        // so the task looks for what this machine is actually configured with rather than for a
+        // list someone remembered to update.
+        forbiddenValues.set(
+            listOf(betaDefaultServerAddress, betaDefaultAccountEmail, betaDefaultAccountPassword)
+                .filter(String::isNotBlank),
+        )
+        receipt.set(layout.buildDirectory.file("reports/betaDefaults/release.txt"))
+    }
+    // Wired to `assembleRelease` rather than left to be remembered: the artefact this proves
+    // something about is the one that task produces, and a check nobody runs proves nothing.
+    // `matching` because the assemble tasks do not exist yet while variants are being created.
+    tasks.matching { it.name == "assemble${variant.name.replaceFirstChar(Char::titlecase)}" }
+        .configureEach { dependsOn(verify) }
 }
 
 kotlin {

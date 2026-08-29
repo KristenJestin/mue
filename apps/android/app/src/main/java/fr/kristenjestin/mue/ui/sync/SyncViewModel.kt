@@ -77,15 +77,37 @@ class SyncViewModel(
      * and is taken as a parameter for the same reason — this class is proved on the JVM and holds
      * no [android.content.Context].
      *
-     * **There is no third parameter for the password and there is not to be one.** The email is
-     * an account name; the password is what that account is worth. `build.gradle.kts` makes the
-     * same refusal at the other end of this wire and explains what an APK is — the short version
-     * is that a `resValue` is a string in a file anyone holding the build can read back, and that
-     * PRD_SERVER_SYNC_MCP 9.2 has the password typed at every pairing precisely so that no copy
-     * of it outlives the screen. [onLeaveSettings] clearing it would mean nothing if a build-time
-     * constant put it straight back.
+     * **The third parameter below is the password, and this paragraph used to say there would
+     * never be one.** The refusal it stated is still half right and the half that survives is the
+     * factual half: a `resValue` is a string anyone holding the build reads back, so a default
+     * password is a disclosed password, and PRD_SERVER_SYNC_MCP 9.2 does have it typed at every
+     * pairing. What was re-argued is what that disclosure costs. It is spelled out on
+     * [defaultAccountPassword] and in `build.gradle.kts`, and it is conditional: read it before
+     * assuming this class may seed any credential at all.
      */
     private val defaultAccountEmail: String = "",
+    /**
+     * The password the pairing form starts with on a phone that has never been paired.
+     *
+     * The third key, `mue.beta.password`, reaching `default_account_password` exactly as the
+     * other two reach their own resources — empty in `release`, `local` and `debug`, empty in a
+     * `beta` whose owner configured nothing, and taken as a parameter so this class stays
+     * provable on the JVM with no [android.content.Context] anywhere on the path.
+     *
+     * **It is a credential and the build hands it out in clear.** That is not a leak to be fixed
+     * here; it is a decision taken upstream, and it stands on the account being a throwaway on a
+     * disposable development database behind a server that answers only on the owner's own
+     * network. `build.gradle.kts` carries that argument in full, including what stops being true
+     * if the key is ever given a password that is worth something elsewhere. Nothing in this
+     * class can hold that condition up, so nothing here pretends to: what this class *does*
+     * guarantee is the shape of the offer — never over a stored pairing, never over a character
+     * the owner has typed, and never at all when the string is blank, which is every build the
+     * decision did not cover.
+     *
+     * [onLeaveSettings] still clears the password on the way out, and it still means something;
+     * [seedForm]'s note says exactly what, now that re-entering the screen can put a default back.
+     */
+    private val defaultAccountPassword: String = "",
 ) : ViewModel() {
 
     private val transient = MutableStateFlow(TransientState())
@@ -310,10 +332,11 @@ class SyncViewModel(
      * Two sources for one form, and the order between them is the rule rather than a preference.
      *
      * `sync_state` is what this phone actually belongs to, so it wins outright: **a paired phone
-     * sees neither default**, whatever the build put there. That is the property worth stating,
-     * because the failure it forbids is silent — an address swapped under a working pairing would
-     * send the next `Sign in` to a machine that is not the one holding this phone's history, and
-     * an account name offered over a pairing made under a different one would be an invitation to
+     * sees no default at all**, whatever the build put there — not the address, not the email and
+     * not the password. That is the property worth stating, because the failure it forbids is
+     * silent — an address swapped under a working pairing would send the next `Sign in` to a
+     * machine that is not the one holding this phone's history, and an account name or a
+     * credential offered over a pairing made under a different one would be an invitation to
      * `Connect` somewhere that history is not.
      *
      * The address is filled from the stored row and the email deliberately is not, though
@@ -322,12 +345,32 @@ class SyncViewModel(
      * bounds this whole mechanism to `beta` is that the resources are empty everywhere else. A
      * field nobody reads is the right price: `Sign in` takes the account from
      * `ServerPairing.reauthenticate`, never from this form, so a paired phone has no use for it.
+     * The password has no stored row to be filled from in the first place: the bearer lives in the
+     * Keystore and the password itself is kept nowhere, which is the arrangement PRD 9.2 asks for
+     * and the one this change does not touch.
      *
      * Unpaired, each default reaches only a field that is still blank, and each is decided on its
-     * own — configuring one key and not the other is an ordinary state, not a half-built form. So
-     * a value the owner has begun typing is not replaced, and neither is one left from an earlier
-     * visit to the screen: [onLeaveSettings] clears the password and deliberately not the other
-     * two, so re-entering runs this again over fields that already hold something.
+     * own — configuring one key and not the others is an ordinary state, not a half-built form.
+     * So a value the owner has begun typing is never replaced, whichever of the three it is.
+     *
+     * ## Why the password comes back and the typed one does not
+     *
+     * [onLeaveSettings] clears the password and deliberately keeps the address and the email, so
+     * re-entering runs this again over two fields that already hold something and one that no
+     * longer does. For the password that is a real question rather than a detail, because it means
+     * a `beta` default is offered again on every return to the screen.
+     *
+     * It is the right answer because of *what* that clearing protects. This view model belongs to
+     * the activity and is shared with the `Data & sync` section, so it outlives `Server settings`
+     * by a long way; the rule is that **a password the owner typed does not survive the screen
+     * that collected it**, and that rule is untouched — a real credential typed over the default
+     * is still gone on the way out, and [attempt] empties the box on a failed pairing without
+     * re-seeding it. What comes back is only the build's own constant, and putting it back spends
+     * nothing that was not already spent: `getString` read it out of the resource table at
+     * construction, the APK carries it for the life of the process, and clearing one copy of a
+     * string the artefact hands out anyway would be theatre. The alternative — seeding once and
+     * never again — would make the second visit to the screen behave differently from the first
+     * for no gain at all.
      *
      * Every condition is read inside the `update` and after the suspending DAO call rather than
      * before it, because [onEnterSettings] runs in `viewModelScope`: the keyboard is live while
@@ -340,9 +383,9 @@ class SyncViewModel(
             return
         }
         // Blank is "this build proposes nothing", which is every build but `beta` and `beta`
-        // itself on a machine whose `local.properties` says nothing. The two guards keep the
-        // no-default path byte for byte what it was before the parameters existed, including the
-        // case where one key is set and the other is not.
+        // itself on a machine whose `local.properties` says nothing. The three guards keep the
+        // no-default path byte for byte what it was before the parameters existed, including
+        // every combination in which some keys are set and others are not.
         if (defaultServerAddress.isNotBlank()) {
             formState.update { form ->
                 if (form.address.isBlank()) form.copy(address = defaultServerAddress) else form
@@ -353,9 +396,21 @@ class SyncViewModel(
                 if (form.email.isBlank()) form.copy(email = defaultAccountEmail) else form
             }
         }
+        if (defaultAccountPassword.isNotBlank()) {
+            formState.update { form ->
+                if (form.password.isBlank()) form.copy(password = defaultAccountPassword) else form
+            }
+        }
     }
 
-    /** The password never outlives the screen that collected it. */
+    /**
+     * The password never outlives the screen that collected it.
+     *
+     * Still true of every password a person typed, which is the one this line was written for: it
+     * clears on the way out and no button but [onEnterSettings] can put anything back. What a
+     * configured `beta` puts back is the build's own default, and [seedForm] argues why that is
+     * not the same thing.
+     */
     fun onLeaveSettings() {
         formState.update { it.copy(password = "", failure = null, success = null) }
     }
@@ -381,13 +436,16 @@ class SyncViewModel(
                     engine = sync.engine,
                     pairing = sync.pairing,
                     requestFollowUpSync = { SyncScheduler.syncNow(app) },
-                    // The only two resources read on this path, and they are read here rather
+                    // The only three resources read on this path, and they are read here rather
                     // than in the view model for the reason the parameters' own notes give: a
                     // `Context` in `SyncViewModel` would put the seeding rule out of reach of a
-                    // JVM test. Both are empty for `release`, `local` and `debug`, which is what
-                    // makes these two lines change nothing for them.
+                    // JVM test. All three are empty for `release`, `local` and `debug` — checked
+                    // on the release APK itself by `verifyReleaseCarriesNoBetaDefaults` in
+                    // `build.gradle.kts`, not merely declared — which is what makes these three
+                    // lines change nothing for them.
                     defaultServerAddress = app.getString(R.string.default_server_address),
                     defaultAccountEmail = app.getString(R.string.default_account_email),
+                    defaultAccountPassword = app.getString(R.string.default_account_password),
                 )
             }
         }
