@@ -27,6 +27,12 @@ import kotlinx.coroutines.withContext
  * do from a DataStore preference and only asks for a database handle on the one launch where the
  * answer is yes, and the synchronisation is handed to WorkManager rather than run inline, so it
  * happens under the network and battery constraints of sync PRD 19 and off this path entirely.
+ *
+ * L'appairage automatique de la bêta est le seul ajout qui lise `sync_state` à chaque démarrage, et
+ * il ne le lit que là où il existe : `SyncContainer.betaAutoPairing` vaut `null` dès qu'une des
+ * trois ressources `default_*` est vide, donc `release`, `local` et `debug` n'ouvrent rien de plus
+ * qu'avant. Le reste de sa dépense est celle de ce bloc : il tourne dans `applicationScope`, sur
+ * `Dispatchers.IO`, hors du chemin du premier écran, et rien n'en remonte.
  */
 class MueApplication : Application() {
 
@@ -60,6 +66,28 @@ class MueApplication : Application() {
             // periodic one. Both are WorkManager requests, so an unpaired phone, a phone with no
             // network and a phone on a low battery all enqueue and none of them runs.
             SyncScheduler.onApplicationStart(this@MueApplication)
+
+            // L'appairage automatique de la bêta, et `null` partout ailleurs : `SyncContainer` ne
+            // construit l'objet que si les trois ressources `default_*` portent une valeur, ce qui
+            // n'arrive que dans une `beta` dont le `local.properties` les a données. Sur
+            // `release`, `local` et `debug` cette ligne est un `?.` sur `null` et rien de plus.
+            //
+            // Ici plutôt qu'à l'ouverture d'un écran, parce que le propriétaire veut que ce soit
+            // fait *avant* qu'il ouvre quoi que ce soit — un appairage qui attend `Server settings`
+            // n'a rien enlevé de ce qu'il coûtait. C'est le même raisonnement que les deux semis
+            // au-dessus, et le même scope : hors du chemin critique du premier écran, sur
+            // `Dispatchers.IO`, sans rien qui remonte si ça rate.
+            //
+            // **Après `healthProfileSeeding.seedOnce()`, et l'ordre n'est pas un hasard.** Un
+            // appairage réussi déclenche la synchronisation initiale de PRD 9.2 dans la foulée ; si
+            // la taille et la date de naissance d'avant la version 5 n'étaient pas encore montées
+            // dans Room, ce premier envoi proposerait au serveur un profil vide et écraserait ce
+            // que le propriétaire avait saisi. Une seconde coroutine, qui laisserait cet appel
+            // courir en parallèle, rouvrirait exactement cette fenêtre.
+            //
+            // Dernier, en revanche, parce que les deux lignes au-dessus ne sont que des mises en
+            // file WorkManager : les faire attendre un aller-retour réseau ne servirait rien.
+            container.sync.betaAutoPairing?.pairOnce()
         }
 
         startLiveSync()
