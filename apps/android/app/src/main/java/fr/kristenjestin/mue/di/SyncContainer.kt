@@ -7,6 +7,9 @@ import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.datastore.syncTokenDataStore
 import fr.kristenjestin.mue.data.local.datastore.userProfileDataStore
+import fr.kristenjestin.mue.data.pairing.AndroidAutoPairingLog
+import fr.kristenjestin.mue.data.pairing.BetaAutoPairing
+import fr.kristenjestin.mue.data.pairing.BetaPairingDefaults
 import fr.kristenjestin.mue.data.pairing.CleartextPolicy
 import fr.kristenjestin.mue.data.pairing.KeystoreTokenStore
 import fr.kristenjestin.mue.data.pairing.KtorPairingApi
@@ -220,5 +223,41 @@ class SyncContainer(
             // so opening `Server settings` still does not run the `inflight` recovery.
             firstSync = { engine.sync() },
         )
+    }
+
+    /**
+     * L'appairage automatique de la bêta — **ou `null`, qui est la réponse de presque toutes les
+     * builds de ce dépôt.**
+     *
+     * C'est ici que les trois ressources sont lues, au même endroit et pour la même raison que
+     * `cleartext_server_permitted` juste au-dessus : `buildConfig` est éteint dans ce module, une
+     * variante énonce donc ce genre de chose en ressource générée, et ce conteneur est le seul
+     * objet du chemin qui tienne un `Context`. `SyncViewModel.Factory` lit les trois mêmes pour
+     * pré-remplir le formulaire ; les deux lectures sont indépendantes et disent la même chose,
+     * parce qu'elles lisent la même table.
+     *
+     * `BetaPairingDefaults.of` rend `null` dès qu'une des trois est vide, et `BetaAutoPairing` ne
+     * se construit pas sans elle : dans `release`, `local`, `debug` — et dans une `beta` dont le
+     * `local.properties` ne dit rien — cette propriété vaut `null`, `RoomPairingStore` n'est jamais
+     * construit, `syncDao` n'est jamais demandé par ce chemin, et `MueApplication` n'a rien à
+     * appeler. Trois `getString` sur une table déjà chargée, et c'est tout ce que le mécanisme
+     * coûte à l'application que le propriétaire porte.
+     *
+     * `pairing` et non un second `ServerPairing` : c'est le chemin du bouton `Connect`, donc les
+     * mêmes erreurs, la même écriture de `sync_state` et la même synchronisation initiale.
+     */
+    val betaAutoPairing: BetaAutoPairing? by lazy {
+        BetaPairingDefaults.of(
+            serverAddress = applicationContext.getString(R.string.default_server_address),
+            accountEmail = applicationContext.getString(R.string.default_account_email),
+            accountPassword = applicationContext.getString(R.string.default_account_password),
+        )?.let { defaults ->
+            BetaAutoPairing(
+                defaults = defaults,
+                store = RoomPairingStore(syncDao),
+                pair = { address, email, password -> pairing.pair(address, email, password) },
+                log = AndroidAutoPairingLog,
+            )
+        }
     }
 }
