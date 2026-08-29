@@ -224,6 +224,21 @@ Prérequis, tous deux non versionnés :
   Java 17 contre laquelle le code est compilé, mais il lui faut une JVM pour
   démarrer.
 
+Le même `local.properties` accepte une clé **facultative** :
+
+```properties
+mue.beta.server=http://192.168.1.100:3000
+```
+
+`mue.beta.server` est l'adresse dont la variante `beta` pré-remplit le champ
+serveur de `Server settings`, pour que le propriétaire n'ait pas à retaper l'IP
+de sa machine de développement à chaque réinstallation de la bêta. Elle voyage
+par `resValue("string", "default_server_address", …)` comme `app_name` (§7),
+n'est lue par aucune autre variante, et n'écrase jamais l'adresse d'un téléphone
+déjà appairé ni une saisie en cours. **Absente, rien ne change** : la bêta se
+construit et se comporte exactement comme avant, champ vide et aucun message —
+il n'y a donc rien à configurer pour qu'un dépôt fraîchement cloné compile.
+
 Le cache de tâches Vite+ est **désactivé**. Gradle seul décide de ce qu'une
 construction Android doit refaire, et une empreinte Vite+ sur cette arborescence
 pourrait annoncer un *cache hit* pour une construction qui n'a jamais eu lieu.
@@ -844,7 +859,7 @@ main dans le nouveau répertoire :
 | Fichier | Pourquoi il manque | Conséquence |
 |---|---|---|
 | `.env` | `.gitignore` | tout script `--env-file` échoue sur `DATABASE_URL is not set` |
-| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android |
+| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android ; et sans `mue.beta.server` (§4.5), la bêta s'assemble avec un champ serveur vide |
 | `node_modules/` | `.gitignore` | `vp`, `tsc` et les tests n'existent pas — relancer `bun install` |
 | `certs/` | `.gitignore` | le serveur TLS local ne démarre pas |
 
