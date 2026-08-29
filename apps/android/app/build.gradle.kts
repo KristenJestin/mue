@@ -93,7 +93,7 @@ android {
             versionNameSuffix = "-debug"
             resValue("string", "app_name", "Mue Debug")
             // Oxblood behind the amber. Unmistakable at 48 dp, and no asset was drawn for it.
-            resValue("color", "launcher_background", "#2E1114")
+            resValue("color", "launcher_background", "#14301C")
         }
 
         release {
@@ -297,7 +297,7 @@ androidComponents.finalizeDsl { extension ->
             // installs under `.debug` still labelled `Mue`, which is the exact confusion the
             // three names exist to prevent — a launcher entry that reads as the daily app.
             resValue("string", "app_name", "Mue Debug")
-            resValue("color", "launcher_background", "#2E1114")
+            resValue("color", "launcher_background", "#14301C")
         }
     }
 }
