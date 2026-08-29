@@ -1,4 +1,17 @@
-export { createAuth, type AuthHandle, type CreateAuthOptions, type MueAuth } from "./auth";
+export {
+  createAuth,
+  MIN_PASSWORD_LENGTH,
+  type AuthHandle,
+  type CreateAuthOptions,
+  type MueAuth,
+} from "./auth";
+export {
+  createDevelopmentAccount,
+  DEVELOPMENT_DATABASE,
+  developmentDatabaseNames,
+  type AccountCreation,
+  type DevelopmentAccountOptions,
+} from "./accounts";
 export { oauthIssuer, readAuthConfig, type AuthConfig, type Env } from "./config";
 export { MUE_SCOPES, OAUTH_SCOPES, SCOPE_DESCRIPTIONS, isMueScope, type MueScope } from "./scopes";
 export {
