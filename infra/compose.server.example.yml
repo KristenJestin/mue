@@ -1,0 +1,116 @@
+# Déploiement sur le serveur personnel, quand le dépôt est cloné dans un sous-dossier.
+#
+# Ce fichier n'est pas fait pour être utilisé depuis le dépôt : **copie-le à côté du clone**,
+# pas dedans. La disposition qu'il attend est celle-ci :
+#
+#     mue/
+#       compose.yml     <- ce fichier, renommé
+#       .env            <- la configuration du déploiement, jamais dans le dépôt
+#       app/            <- le clone de https://github.com/KristenJestin/mue.git
+#
+# Ce que cette disposition achète : `git pull` dans `app/` ne touche ni au compose ni au
+# `.env`. La configuration d'une machine n'a pas à être versionnée avec le code qu'elle
+# déploie, et un secret posé dans un arbre de travail git finit par être suivi le jour où
+# quelqu'un lance `git add -A`.
+#
+# `infra/compose.yml`, dans le dépôt, est l'autre variante : celle qui se lance depuis la
+# racine du clone lui-même. Les deux ne diffèrent que par les chemins.
+#
+# Depuis `mue/` :
+#
+#     docker compose build
+#     docker compose --profile migrate up migrate
+#     docker compose up -d
+#
+# Pas de `--env-file` ici, contrairement à la variante du dépôt : Compose lit `.env` à côté
+# du fichier de composition, et il y est.
+
+name: mue
+
+services:
+  platform:
+    build:
+      # Le clone. Le contexte est sa racine et non `app/apps/platform`, parce que les espaces
+      # de travail Bun ont besoin du fichier de verrouillage, du catalogue de versions et de
+      # `packages/` — les paquets internes sont consommés en TypeScript source.
+      context: ./app
+      dockerfile: Dockerfile
+    image: mue-platform:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # L'image fixe déjà `HOST=0.0.0.0`. Répété ici parce que c'est la valeur dont dépend le
+      # fait que le serveur soit joignable, et qu'on la veut lisible dans le fichier de
+      # déploiement plutôt que dans une couche.
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "${MUE_PLATFORM_PORT:-3000}:3000"
+    extra_hosts:
+      # Rend `host.docker.internal` résolvable sous Linux. C'est ce qui permet à
+      # `DATABASE_URL` de viser un PostgreSQL qui tourne **sur l'hôte**. Si la base est
+      # elle-même un conteneur, voir la note en bas de fichier.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # `/health/ready` interroge la base ; `/health/live` ne dit que « le processus tourne ».
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Les migrations, explicitement, jamais au démarrage du serveur.
+  #
+  # Le profil fait que ce service est ignoré par un `up` ordinaire : la migration est une
+  # étape du déploiement qu'on décide (PRD_SERVER_SYNC_MCP 20.3), pas un effet de bord de
+  # `n` conteneurs qui démarrent ensemble. Un `depends_on` aurait produit exactement ce que
+  # cette règle interdit.
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: mue-platform:latest
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # `src/migrate.ts` et non le bundle : la migration est un point d'entrée à part, qui lit
+    # les fichiers SQL de `packages/db/migrations` à côté de lui. Le script `bun run --filter
+    # @mue/db migrate` du dépôt n'est pas utilisé : il porte un `--env-file=../../.env` qui
+    # pointerait à côté dans le conteneur, où l'environnement vient d'`env_file`.
+    command: ["bun", "run", "packages/db/src/migrate.ts"]
+    restart: "no"
+
+# ---------------------------------------------------------------------------------------
+# Le `.env`, à côté de ce fichier
+#
+#     DATABASE_URL=postgres://mue:<mot-de-passe>@host.docker.internal:5432/mue
+#     BETTER_AUTH_SECRET=<openssl rand -base64 32>
+#     BETTER_AUTH_URL=http://192.168.1.50:3000
+#     MUE_PLATFORM_PORT=3000
+#
+# `BETTER_AUTH_URL` doit être **exactement** l'adresse que le téléphone compose, IP et port
+# compris. C'est elle qui signe les cookies et construit les redirections : une valeur en
+# `127.0.0.1` donne une authentification qui fonctionne depuis le serveur et échoue depuis le
+# téléphone, sans message clair nulle part.
+#
+# Si PostgreSQL est un conteneur sur la même machine, ne pas passer par l'hôte. Rattacher les
+# services à son réseau et le viser par son nom :
+#
+#     networks:
+#       db:
+#         external: true
+#         name: <nom-du-reseau-de-la-base>
+#
+# à ajouter sous `platform` et sous `migrate`, avec
+# `DATABASE_URL=postgres://mue:<mdp>@<nom-du-conteneur>:5432/mue`.
+#
+# TLS : ne rien poser. Sans `MUE_TLS_CERT_FILE` ni `MUE_TLS_KEY_FILE`, le serveur écoute en
+# clair. N'en poser qu'une fait échouer le démarrage plutôt que d'ouvrir un port en clair qui
+# aurait l'air configuré. Côté Android, seules les variantes `debug`, `beta` et `local`
+# acceptent une adresse `http://` ; `release` la refuse toujours.
+#
+# La base n'est pas démarrée ici : elle est administrée à part, et la provision se fait une
+# fois à la main par la procédure « Production — what the DBA must run » de `app/infra/README.md`.
