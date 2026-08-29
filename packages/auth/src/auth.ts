@@ -9,6 +9,19 @@ import { isMcpResourceUsable, oauthIssuer, readAuthConfig, type AuthConfig } fro
 import { OAUTH_SCOPES } from "./scopes";
 
 /**
+ * The shortest password Better Auth will accept on this server.
+ *
+ * Named rather than written twice. `createDevelopmentAccount` in ./accounts.ts
+ * refuses a shorter one before it calls sign-up, so that a seeding command run
+ * from a terminal answers "the password must be at least 12 characters" instead
+ * of Better Auth's own `PASSWORD_TOO_SHORT` arriving as an `APIError` with a
+ * status code -- and two literals would let the early refusal drift below the
+ * real bound, which is the one shape of this that is worse than no early
+ * refusal at all.
+ */
+export const MIN_PASSWORD_LENGTH = 12;
+
+/**
  * Better Auth is the identity authority for all three client shapes of
  * section 15.1: a Web cookie, an Android bearer token, and OAuth 2.1 + PKCE
  * for an agent. One human account, three ways to present it.
@@ -39,7 +52,7 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
       // A private single-user server has no mail transport (section 6). Email
       // verification would lock the only account out of its own instance.
       requireEmailVerification: false,
-      minPasswordLength: 12,
+      minPasswordLength: MIN_PASSWORD_LENGTH,
     },
 
     session: {

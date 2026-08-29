@@ -63,11 +63,29 @@ class SyncViewModel(
      * same arrangement `cleartext_server_permitted` uses to reach `ServerAddresses.parse` through
      * `SyncContainer`.
      *
-     * Defaulted to the empty string, and that is not a placeholder — [seedAddress] reads blank as
+     * Defaulted to the empty string, and that is not a placeholder — [seedForm] reads blank as
      * *no default at all*, so every caller and every test that does not name it keeps exactly the
      * behaviour it had.
      */
     private val defaultServerAddress: String = "",
+    /**
+     * The account the pairing form starts with on a phone that has never been paired.
+     *
+     * The address's twin, one key later: `mue.beta.email` in `local.properties` reaches the
+     * `default_account_email` resource the same way `mue.beta.server` reaches
+     * `default_server_address`, is empty in every build but a `beta` whose owner configured it,
+     * and is taken as a parameter for the same reason — this class is proved on the JVM and holds
+     * no [android.content.Context].
+     *
+     * **There is no third parameter for the password and there is not to be one.** The email is
+     * an account name; the password is what that account is worth. `build.gradle.kts` makes the
+     * same refusal at the other end of this wire and explains what an APK is — the short version
+     * is that a `resValue` is a string in a file anyone holding the build can read back, and that
+     * PRD_SERVER_SYNC_MCP 9.2 has the password typed at every pairing precisely so that no copy
+     * of it outlives the screen. [onLeaveSettings] clearing it would mean nothing if a build-time
+     * constant put it straight back.
+     */
+    private val defaultAccountEmail: String = "",
 ) : ViewModel() {
 
     private val transient = MutableStateFlow(TransientState())
@@ -226,7 +244,7 @@ class SyncViewModel(
                     formState.value = PairingFormState(
                         success = "Connected to ${result.serverName} as ${result.account}.",
                     )
-                    seedAddress()
+                    seedForm()
                     transient.update {
                         it.copy(syncing = false, note = SyncMessages.describe(result.firstSync))
                     }
@@ -285,39 +303,55 @@ class SyncViewModel(
      * server was retyped from memory, correctly, which is the retyping this whole change removes.
      */
     fun onEnterSettings() {
-        viewModelScope.launch { seedAddress() }
+        viewModelScope.launch { seedForm() }
     }
 
     /**
-     * Two sources for one field, and the order between them is the rule rather than a preference.
+     * Two sources for one form, and the order between them is the rule rather than a preference.
      *
-     * `sync_state.server_url` is where this phone actually synchronises, so it wins outright: a
-     * paired phone never sees [defaultServerAddress], whatever the build put there. That is the
-     * property worth stating, because the failure it forbids is silent — an address swapped under
-     * a working pairing would send the next `Sign in` to a machine that is not the one holding
-     * this phone's history.
+     * `sync_state` is what this phone actually belongs to, so it wins outright: **a paired phone
+     * sees neither default**, whatever the build put there. That is the property worth stating,
+     * because the failure it forbids is silent — an address swapped under a working pairing would
+     * send the next `Sign in` to a machine that is not the one holding this phone's history, and
+     * an account name offered over a pairing made under a different one would be an invitation to
+     * `Connect` somewhere that history is not.
      *
-     * Unpaired, the default only reaches a field that is still blank. So an address the owner has
-     * begun typing is not replaced, and neither is one left from an earlier visit to the screen —
-     * [onLeaveSettings] clears the password and deliberately not the address, so re-entering runs
-     * this again over a field that already holds something.
+     * The address is filled from the stored row and the email deliberately is not, though
+     * `sync_state.account_id` holds it. Seeding it would change `release`, `local` and `debug`
+     * too — they would start showing the paired account in a box that is empty today — and what
+     * bounds this whole mechanism to `beta` is that the resources are empty everywhere else. A
+     * field nobody reads is the right price: `Sign in` takes the account from
+     * `ServerPairing.reauthenticate`, never from this form, so a paired phone has no use for it.
      *
-     * Both conditions are read inside the `update` and after the suspending DAO call rather than
+     * Unpaired, each default reaches only a field that is still blank, and each is decided on its
+     * own — configuring one key and not the other is an ordinary state, not a half-built form. So
+     * a value the owner has begun typing is not replaced, and neither is one left from an earlier
+     * visit to the screen: [onLeaveSettings] clears the password and deliberately not the other
+     * two, so re-entering runs this again over fields that already hold something.
+     *
+     * Every condition is read inside the `update` and after the suspending DAO call rather than
      * before it, because [onEnterSettings] runs in `viewModelScope`: the keyboard is live while
      * the read is in flight.
      */
-    private suspend fun seedAddress() {
+    private suspend fun seedForm() {
         val stored = syncDao.syncState()?.serverUrl?.takeUnless(String::isBlank)
         if (stored != null) {
             formState.update { it.copy(address = stored) }
             return
         }
         // Blank is "this build proposes nothing", which is every build but `beta` and `beta`
-        // itself on a machine whose `local.properties` says nothing. The early return keeps the
-        // no-default path byte for byte what it was before the parameter existed.
-        if (defaultServerAddress.isBlank()) return
-        formState.update { form ->
-            if (form.address.isBlank()) form.copy(address = defaultServerAddress) else form
+        // itself on a machine whose `local.properties` says nothing. The two guards keep the
+        // no-default path byte for byte what it was before the parameters existed, including the
+        // case where one key is set and the other is not.
+        if (defaultServerAddress.isNotBlank()) {
+            formState.update { form ->
+                if (form.address.isBlank()) form.copy(address = defaultServerAddress) else form
+            }
+        }
+        if (defaultAccountEmail.isNotBlank()) {
+            formState.update { form ->
+                if (form.email.isBlank()) form.copy(email = defaultAccountEmail) else form
+            }
         }
     }
 
@@ -347,12 +381,13 @@ class SyncViewModel(
                     engine = sync.engine,
                     pairing = sync.pairing,
                     requestFollowUpSync = { SyncScheduler.syncNow(app) },
-                    // The single resource read on this path, and it is here rather than in the
-                    // view model for the reason the parameter's own note gives: a `Context` in
-                    // `SyncViewModel` would put the seeding rule out of reach of a JVM test.
-                    // Empty for `release`, `local` and `debug`, which is what makes this line
-                    // change nothing for them.
+                    // The only two resources read on this path, and they are read here rather
+                    // than in the view model for the reason the parameters' own notes give: a
+                    // `Context` in `SyncViewModel` would put the seeding rule out of reach of a
+                    // JVM test. Both are empty for `release`, `local` and `debug`, which is what
+                    // makes these two lines change nothing for them.
                     defaultServerAddress = app.getString(R.string.default_server_address),
+                    defaultAccountEmail = app.getString(R.string.default_account_email),
                 )
             }
         }
