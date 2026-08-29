@@ -18,9 +18,84 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        /*
+         * The launcher label and the launcher background, declared as variant properties rather
+         * than as files.
+         *
+         * `android:label` still points at `@string/app_name`; what moved is who declares it.
+         * `src/main/res/values/strings.xml` used to, and it no longer does, because keeping both
+         * is worse than it looks: AGP does not reject the pair, it resolves it silently in favour
+         * of the generated value. Checked, not assumed — with the `<string>` still in place,
+         * `mergeDebugResources` succeeded and
+         * `build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values/values.xml`
+         * held one `app_name`, reading `Mue Debug`. A `<string>Mue</string>` sitting in
+         * `strings.xml` looking authoritative while contributing nothing is the kind of line
+         * someone later edits and watches do nothing, so there is exactly one declaration and it
+         * is here. The cost is `translatable="false"`, which the generator adds by itself; a
+         * product name is not translated, and the day one has to be, this moves back into
+         * `values/` for `main` and the build types override the label another way.
+         *
+         * A `manifestPlaceholder` on `android:label` would avoid the merge question entirely, and
+         * is the wrong trade: it inlines a bare string into the manifest, so nothing else in the
+         * app can reference the name and no qualified `values-*` folder can ever answer for it.
+         *
+         * `launcher_background` is the fill of `ic_launcher_background.xml`, which was the literal
+         * `#101012`. Three applications side by side under one icon is a tap the owner loses, and
+         * a flat colour behind the same amber is the only way to tell them apart that costs no new
+         * asset: the foreground and the monochrome layer are untouched, so the drawn shape stays
+         * the product's.
+         *
+         * Not `src/debug/res/values/colors.xml`, and that is not a matter of taste: `local` and
+         * `beta` point their `res` at `src/debug` to pick up the trust store (see the source-set
+         * block below), so a colour dropped in that folder to mark debug builds would follow the
+         * pointer into both of them — giving `local`, which has to be indistinguishable from
+         * production, the debug icon, and `beta`, which has to look like neither, the same one. A
+         * `resValue` is attached to the build type and travels with nothing.
+         */
+        resValue("string", "app_name", "Mue")
+        resValue("color", "launcher_background", "#101012")
     }
 
+    /*
+     * Three applications on one phone, and `applicationIdSuffix` is what makes them three.
+     *
+     * `applicationId` is the whole of an application's identity on Android: two builds sharing one
+     * share a data directory, a launcher entry and a row in `pm list packages`, so installing
+     * either replaces the other and uninstalling either takes the data with it. That is not a
+     * hypothesis about this project. Every variant here used to answer to `fr.kristenjestin.mue`,
+     * and `connectedAndroidTest` — which installs what it tests and then uninstalls it again —
+     * deleted the owner's real weight history.
+     *
+     *   release, local      fr.kristenjestin.mue         the application he carries
+     *   beta                fr.kristenjestin.mue.beta    the pre-release he also carries
+     *   debug, androidTest  fr.kristenjestin.mue.debug   everything an instrumentation may touch
+     *
+     * The third line is the one that had to exist. `debug` is AGP's default `testBuildType` and
+     * nothing here changes it, so every instrumented test — this module's `androidTest`, and the
+     * test APK built beside it — installs under `.debug` and can no longer name the daily
+     * application, whatever device happens to be attached and whoever typed the command.
+     *
+     * The suffix is a property of the *variant* and never of the branch. Nothing in this file
+     * reads git, so `main` and `develop` carry it byte for byte identical: a merge between them
+     * has nothing to resolve here, and one commit built twice yields the same three package names.
+     */
     buildTypes {
+        /*
+         * The sandbox, and the only build type a test ever reaches.
+         *
+         * `.debug` gives it a data directory of its own, which is what makes `connectedAndroidTest`
+         * safe to run rather than merely discouraged: it may create and destroy that directory as
+         * often as it likes and never touch the one holding the owner's measurements.
+         */
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "Mue Debug")
+            // Oxblood behind the amber. Unmistakable at 48 dp, and no asset was drawn for it.
+            resValue("color", "launcher_background", "#2E1114")
+        }
+
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -33,6 +108,41 @@ android {
             if (providers.gradleProperty("mueDebugSigning").isPresent) {
                 signingConfig = signingConfigs.getByName("debug")
             }
+        }
+
+        /*
+         * `develop`'s build: the pre-release, and the one variant whose inheritance had to be
+         * argued rather than assumed.
+         *
+         * It initialises from `release`, and for the reason `local`'s note below spells out at
+         * length: a build that is not minified is not a rehearsal of anything. R8, the resource
+         * shrinker and the ProGuard rules are where a missing `keep` shows up, and a beta built
+         * without them would find nothing the release build would not then find on the owner's
+         * phone instead.
+         *
+         * It also reads `debug`'s trust store, and *that* is the arbitration. A beta is not a
+         * screenshot: it is the pre-release its owner runs for real, for a week, before it becomes
+         * `release`. Running it for real means synchronising, and `network_security_config.xml`
+         * explains why synchronising means trusting a certificate authority that exists only on
+         * his network — no public authority will ever issue for a machine on somebody's home WiFi.
+         * A beta that cannot reach the server can only exercise the half of the app that was never
+         * in doubt. So it takes the same `src/debug` overlay `local` takes, and the widening is
+         * bounded the same way: the anchor is `src="user"`, nothing is trusted that the person
+         * holding the phone did not install himself, and `release` still sees none of it.
+         *
+         * What it does not inherit is the store key. Signed with the debug key like `local`, so it
+         * installs without a flag — a pre-release its owner cannot install is not one — and so it
+         * can never be the artefact that reaches the store by accident.
+         */
+        create("beta") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".beta"
+            versionNameSuffix = "-beta"
+            signingConfig = signingConfigs.getByName("debug")
+            resValue("string", "app_name", "Mue Beta")
+            // Deep indigo behind the same amber: a different application at a glance, no new asset.
+            resValue("color", "launcher_background", "#11223A")
         }
 
         /*
@@ -56,9 +166,26 @@ android {
         create("local") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
+            /*
+             * No suffix, and now the line says why instead of merely being null.
+             *
+             * `local` *is* the daily application. The data directory under
+             * `fr.kristenjestin.mue` is the one holding his weight history, so this variant has to
+             * answer to that identity exactly and installing it over a release build has to be an
+             * update rather than a second icon. It inherits from `release`, which carries no
+             * suffix, so the assignment changes nothing today — it is here so that a suffix added
+             * to `release` later cannot reach the one variant that must never move.
+             */
             applicationIdSuffix = null
+            /*
+             * Which leaves the version name as the only place the two can differ, so it is used:
+             * sharing an `applicationId` means Android's app info screen shows one entry, and
+             * `1.0-local` against `1.0` is what tells him which of the two is currently installed.
+             */
+            versionNameSuffix = "-local"
             signingConfig = signingConfigs.getByName("debug")
         }
+
     }
 
     compileOptions {
@@ -72,6 +199,15 @@ android {
         buildConfig = false
         shaders = false
         renderScript = false
+        /*
+         * On by necessity, not by habit. AGP 9 defaults it off and fails configuration with
+         * "defaultConfig contains custom resource values, but the feature is disabled" rather than
+         * quietly dropping them, so the two `resValue` declarations in `defaultConfig` — the
+         * launcher label and the launcher background — need it stated. It generates one
+         * `values.xml` per variant and nothing else; `buildConfig` above stays off, the two
+         * features being unrelated despite the similar spelling.
+         */
+        resValues = true
     }
 
     testOptions {
@@ -87,24 +223,81 @@ android {
     }
 
     /*
-     * `local` reads the `debug` source set rather than owning a copy of it.
+     * `local` and `beta` read the `debug` source set rather than owning a copy of it.
      *
-     * The only thing it needs from there is the manifest overlay contributing
+     * The only thing either needs from there is the manifest overlay contributing
      * `android:networkSecurityConfig` and the `res/xml` it points at — the two files that let a
      * build trust a user-installed authority, and therefore reach a server whose certificate no
-     * public CA would ever issue. Copying them would be two files free to drift, and the drift
+     * public CA would ever issue. Copying them would be four files free to drift, and the drift
      * would show up as a phone that pairs on one build and refuses on the other.
      *
-     * Pointed, not copied, so `debug` and `local` cannot disagree about what they trust.
+     * Pointed, not copied, so the three builds that talk to his server cannot disagree about what
+     * they trust. It is also why the per-variant launcher colour is a `resValue` in `defaultConfig`
+     * and not a `values/colors.xml` under `src/debug`: anything added to that folder is added to
+     * these two at the same time, and `local` is the one build that has to look like production.
      */
-    sourceSets.getByName("local") {
-        manifest.srcFile("src/debug/AndroidManifest.xml")
-        res.srcDirs(files("src/debug/res"))
+    listOf("local", "beta").forEach { trustsTheDevelopmentAuthority ->
+        sourceSets.getByName(trustsTheDevelopmentAuthority) {
+            manifest.srcFile("src/debug/AndroidManifest.xml")
+            res.srcDirs(files("src/debug/res"))
+        }
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+/*
+ * The six build types nobody wrote, pinned to the sandbox with the four above.
+ *
+ * `androidx.baselineprofile` does not add build types to a list — it derives a pair from every
+ * non-debuggable build type it finds, so `release`, `local` and `beta` yield `nonMinifiedRelease` /
+ * `benchmarkRelease`, `nonMinifiedLocal` / `benchmarkLocal` and `nonMinifiedBeta` /
+ * `benchmarkBeta`. Each is created with `initWith` on its parent and the plugin sets no
+ * `applicationIdSuffix` of its own — checked by disassembling
+ * `benchmark-baseline-profile-gradle-plugin-1.5.0-rc02.jar`, in which the string does not occur.
+ * Four of the six therefore inherited `fr.kristenjestin.mue` exactly, and every one of them is a
+ * *macrobenchmark target*: an APK `:benchmark` installs over whatever already answers to that name
+ * and then drives through UiAutomator.
+ *
+ * That is the same hole the suffixes above close, one plugin along, and leaving it open would have
+ * left the guarantee resting on a habit again: `BaselineProfileGenerator`'s KDoc is careful to pin
+ * `adb -s <serial>`, and a guarantee that depends on someone typing the right serial is not one.
+ * `connectedNonMinifiedReleaseAndroidTest` needs no serial at all.
+ *
+ * `.debug` rather than an identity of their own, because these builds *are* instrumented tests and
+ * the table above already names where those go. They overwrite each other on a device, which is
+ * correct: only one is ever being measured and all of them are throwaway.
+ *
+ * ## Why `finalizeDsl` and not `buildTypes.configureEach`
+ *
+ * Because the obvious version silently does nothing, and the APK is what said so. Gradle's
+ * `create(name, action)` fires the container's `configureEach` rules when the object is *added*
+ * and runs the creation action afterwards, so a suffix set from `configureEach` is applied first
+ * and then wiped by the plugin's own `initWith(release)`. Written that way,
+ * `aapt dump badging app-nonMinifiedRelease.apk` still read `package: name='fr.kristenjestin.mue'`.
+ * `finalizeDsl` runs once every plugin has finished contributing to the DSL and before any variant
+ * is created, which is the only window where all ten build types exist and none is locked.
+ *
+ * This costs the profile nothing. What `BaselineProfileRule` records is class and method
+ * descriptors, and those come from `namespace` — still `fr.kristenjestin.mue` — and not from
+ * `applicationId`; the recording is unchanged and remains valid for the `release` APK it is
+ * packaged into. What it does cost is `MUE_PACKAGE` in `:benchmark`, which names the target to
+ * drive and had to follow.
+ */
+androidComponents.finalizeDsl { extension ->
+    extension.buildTypes.configureEach {
+        if (name.startsWith("nonMinified") || name.startsWith("benchmark")) {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-$name"
+            // And they have to *look* like the sandbox too. Left alone, `nonMinifiedRelease`
+            // installs under `.debug` still labelled `Mue`, which is the exact confusion the
+            // three names exist to prevent — a launcher entry that reads as the daily app.
+            resValue("string", "app_name", "Mue Debug")
+            resValue("color", "launcher_background", "#2E1114")
         }
     }
 }
