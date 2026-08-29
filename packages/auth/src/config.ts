@@ -39,6 +39,25 @@ function required(env: Env, name: string): string {
   return value;
 }
 
+/**
+ * Ce qui autorise un `BETTER_AUTH_URL` en clair hors de la boucle locale.
+ *
+ * La section 16 n'admet que HTTPS, et un réseau privé n'en est pas un substitut : le jeton de
+ * session traverse le réseau à chaque synchronisation, et quiconque le lit n'obtient pas la
+ * lecture d'un poids mais l'écriture sur des données de santé et l'accès aux outils MCP.
+ *
+ * L'échappatoire existe parce que le déploiement visé est un serveur domestique, sans nom de
+ * domaine et sans autorité publique, dont le propriétaire a choisi le clair en connaissance de
+ * cause. Elle demande une phrase entière plutôt qu'un `true` pour la même raison que
+ * `MUE_ALLOW_DESTRUCTIVE_TESTS` : une valeur qu'on ne peut pas poser distraitement.
+ *
+ * Elle ne relâche **que** le contrôle de schéma. `secureCookies` ne la lit pas : il suit le
+ * schéma réellement servi, faute de quoi un cookie marqué `Secure` ne partirait jamais sur une
+ * origine en clair et l'authentification échouerait sans message.
+ */
+export const CLEARTEXT_VARIABLE = "MUE_ALLOW_CLEARTEXT";
+export const CLEARTEXT_ACKNOWLEDGEMENT = "yes-in-clear-on-my-network";
+
 function isLoopbackOrigin(origin: string): boolean {
   try {
     const { hostname } = new URL(origin);
@@ -55,10 +74,16 @@ export function readAuthConfig(env: Env = process.env): AuthConfig {
   }
   const baseUrl = required(env, "BETTER_AUTH_URL").replace(/\/+$/, "");
   const loopback = isLoopbackOrigin(baseUrl);
-  if (!loopback && !baseUrl.startsWith("https://")) {
+  const cleartext = env[CLEARTEXT_VARIABLE] === CLEARTEXT_ACKNOWLEDGEMENT;
+  if (!loopback && !cleartext && !baseUrl.startsWith("https://")) {
     // Section 16: the traffic is encrypted, and a private network is not a
-    // substitute for it. Only a developer loopback origin is exempt.
-    throw new Error(`BETTER_AUTH_URL must be https outside loopback, got ${baseUrl}`);
+    // substitute for it. A developer loopback origin is exempt, and so is a
+    // deployment that has said in full what it is giving up -- see
+    // CLEARTEXT_VARIABLE.
+    throw new Error(
+      `BETTER_AUTH_URL must be https outside loopback, got ${baseUrl}. ` +
+        `Set ${CLEARTEXT_VARIABLE}=${CLEARTEXT_ACKNOWLEDGEMENT} to serve it in clear anyway.`,
+    );
   }
 
   const origins = (env.MUE_TRUSTED_ORIGINS ?? "")
@@ -76,7 +101,13 @@ export function readAuthConfig(env: Env = process.env): AuthConfig {
     mcpResource: env.MUE_MCP_RESOURCE ?? `${baseUrl}/mcp`,
     loginPage: env.MUE_LOGIN_PAGE ?? "/sign-in",
     consentPage: env.MUE_CONSENT_PAGE ?? "/consent",
-    secureCookies: !loopback,
+    // Le schéma réellement servi, et non `!loopback`.
+    //
+    // Les deux coïncidaient tant qu'une origine hors boucle locale était forcément en HTTPS.
+    // Depuis que le clair est possible ailleurs, dériver de `loopback` marquerait le cookie
+    // `Secure` sur une origine en `http://` — le navigateur ne l'enverrait alors jamais, et la
+    // panne serait une session qui ne s'ouvre pas, sans erreur nulle part.
+    secureCookies: baseUrl.startsWith("https://"),
   };
 }
 
