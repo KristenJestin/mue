@@ -1,11 +1,13 @@
 package fr.kristenjestin.mue.di
 
 import android.content.Context
+import fr.kristenjestin.mue.R
 import fr.kristenjestin.mue.data.local.database.HealthProfileDao
 import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncDao
 import fr.kristenjestin.mue.data.local.datastore.syncTokenDataStore
 import fr.kristenjestin.mue.data.local.datastore.userProfileDataStore
+import fr.kristenjestin.mue.data.pairing.CleartextPolicy
 import fr.kristenjestin.mue.data.pairing.KeystoreTokenStore
 import fr.kristenjestin.mue.data.pairing.KtorPairingApi
 import fr.kristenjestin.mue.data.pairing.PairingApi
@@ -201,6 +203,19 @@ class SyncContainer(
             store = RoomPairingStore(syncDao),
             tokenStore = KeystoreTokenStore(tokenStore),
             api = pairingApi,
+            // Where the build type finally gets to answer (`CleartextPolicy`). `buildConfig` is
+            // off in this module, so a build type states such a thing as a generated resource —
+            // the road `app_name` and `launcher_background` already take — and this is the one
+            // object on the path from that resource to `ServerAddresses.parse` that holds a
+            // `Context`. The parser stays pure and JVM-testable because the reading happens here.
+            //
+            // `defaultConfig` declares it false and `release` does not override it, so a build
+            // that says nothing refuses cleartext; only `local`, `beta` and `debug` opt in.
+            cleartext = if (applicationContext.resources.getBoolean(R.bool.cleartext_server_permitted)) {
+                CleartextPolicy.Permitted
+            } else {
+                CleartextPolicy.Refused
+            },
             // The engine is resolved when the pairing succeeds, not when the container is built,
             // so opening `Server settings` still does not run the `inflight` recovery.
             firstSync = { engine.sync() },
