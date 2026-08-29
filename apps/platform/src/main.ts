@@ -97,26 +97,68 @@ async function serveAsset(pathname: string): Promise<Response | null> {
  */
 const IDLE_TIMEOUT_SECONDS = 60;
 
+/**
+ * Une ligne par requête, et ce qu'elle ne dit surtout pas.
+ *
+ * Le serveur n'en écrivait aucune. Trois `console` dans tout le dépôt — démarrage, arrêt, et
+ * une panne de synchronisation non rattrapée — ce qui veut dire qu'un `400` de Better Auth sur
+ * un corps mal formé ne produisait rien du tout : la requête arrivait, échouait, et le journal
+ * restait vide. On cherche alors du côté du réseau une panne qui est dans le corps du message.
+ *
+ * Ce qui est écrit : la méthode, le chemin, le code de retour, la durée. Rien d'autre, et c'est
+ * délibéré.
+ *
+ * - **Pas de corps.** Il porte un mot de passe sur `/api/auth/sign-in/email` et des données de
+ *   santé sur `/api/v1/sync/push`. Un journal est un fichier qui traîne, se copie et se
+ *   sauvegarde ; ce qui n'y entre pas ne peut pas en sortir.
+ * - **Pas d'en-têtes.** `Authorization` porte le jeton de session, `Cookie` la session Web.
+ *   Journaliser un jeton revient à l'écrire en clair sur le disque, ce que même le TLS ne
+ *   rattraperait pas.
+ * - **Pas de chaîne de requête.** PRD_SERVER_SYNC_MCP 16 interdit d'y mettre une donnée
+ *   personnelle, mais un journal ne doit pas dépendre du respect d'une règle écrite ailleurs.
+ * - **Pas d'adresse d'appelant.** Un seul utilisateur, sur son réseau : elle n'apprendrait rien
+ *   et serait une donnée de plus à protéger.
+ *
+ * Les sondes de santé réussies sont muettes : le `healthcheck` de Compose en émet une toutes
+ * les trente secondes, et un journal noyé sous 2 880 lignes par jour est un journal que
+ * personne ne lit. Une sonde qui échoue, elle, est exactement ce qu'on veut voir.
+ */
+function logRequest(method: string, pathname: string, status: number, elapsedMs: number): void {
+  if (status < 400 && pathname.startsWith("/health/")) return;
+  console.log(`${method} ${pathname} ${status} ${elapsedMs}ms`);
+}
+
+/**
+ * Le routage, extrait de `fetch` pour que la journalisation voie le code de retour de tous les
+ * chemins — l'asset servi depuis le disque comme la réponse de Start.
+ */
+async function handle(request: Request, pathname: string): Promise<Response> {
+  /**
+   * The delegated prefixes are asked first and are never looked for on disk. That
+   * is the boundary of section 20.2, restated where it can be violated: a file
+   * dropped into the client bundle must not be able to answer for `/api/*`,
+   * `/mcp`, `/health/*` or `/.well-known/*`.
+   */
+  if (!isDelegatedPath(pathname) && (request.method === "GET" || request.method === "HEAD")) {
+    const asset = await serveAsset(pathname);
+    if (asset !== null) return asset;
+  }
+  // Wrapped rather than passed by reference: Bun hands its `Server` as the second
+  // argument, and Start reads a request-options object there.
+  return runtime.entry.fetch(request);
+}
+
 const server = Bun.serve({
   port,
   hostname,
   idleTimeout: IDLE_TIMEOUT_SECONDS,
   ...tlsOption,
   fetch: async (request) => {
+    const startedAt = Date.now();
     const { pathname } = new URL(request.url);
-    /**
-     * The delegated prefixes are asked first and are never looked for on disk. That
-     * is the boundary of section 20.2, restated where it can be violated: a file
-     * dropped into the client bundle must not be able to answer for `/api/*`,
-     * `/mcp`, `/health/*` or `/.well-known/*`.
-     */
-    if (!isDelegatedPath(pathname) && (request.method === "GET" || request.method === "HEAD")) {
-      const asset = await serveAsset(pathname);
-      if (asset !== null) return asset;
-    }
-    // Wrapped rather than passed by reference: Bun hands its `Server` as the second
-    // argument, and Start reads a request-options object there.
-    return runtime.entry.fetch(request);
+    const response = await handle(request, pathname);
+    logRequest(request.method, pathname, response.status, Date.now() - startedAt);
+    return response;
   },
 });
 
