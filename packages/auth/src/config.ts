@@ -58,6 +58,32 @@ function required(env: Env, name: string): string {
 export const CLEARTEXT_VARIABLE = "MUE_ALLOW_CLEARTEXT";
 export const CLEARTEXT_ACKNOWLEDGEMENT = "yes-in-clear-on-my-network";
 
+/**
+ * Le greffon MCP peut-il seulement être chargé avec cette ressource ?
+ *
+ * `@better-auth/mcp` valide son `resource` lui-même, à la construction, et **lève** pour toute
+ * URL qui n'est ni HTTPS ni en boucle locale. Ce n'est pas notre règle et on ne peut pas la
+ * relâcher : elle vit dans la bibliothèque.
+ *
+ * Sur une origine en clair hors boucle locale, la seule issue est donc de ne pas charger le
+ * greffon. Ce qui se perd est l'appairage d'agents : le flux OAuth, la page de consentement et
+ * `/mcp`. Ce qui reste est tout ce dont le téléphone a besoin — `/api/auth/sign-in/email`,
+ * `/api/auth/get-session`, `/api/auth/sign-out`, `/health/*` et `/api/v1/sync/*` —, aucun de
+ * ces chemins n'appartenant au greffon.
+ *
+ * Autrement dit : en clair, la synchronisation fonctionne et les agents non. Rendre les agents
+ * à un serveur domestique demande un certificat, pas un réglage.
+ */
+export function isMcpResourceUsable(resource: string): boolean {
+  try {
+    const url = new URL(resource);
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && isLoopbackOrigin(url.origin);
+  } catch {
+    return false;
+  }
+}
+
 function isLoopbackOrigin(origin: string): boolean {
   try {
     const { hostname } = new URL(origin);

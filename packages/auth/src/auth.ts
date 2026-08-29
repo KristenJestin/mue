@@ -5,7 +5,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, jwt } from "better-auth/plugins";
 import { fetchClientMetadataResource } from "./cimd-transport";
-import { oauthIssuer, readAuthConfig, type AuthConfig } from "./config";
+import { isMcpResourceUsable, oauthIssuer, readAuthConfig, type AuthConfig } from "./config";
 import { OAUTH_SCOPES } from "./scopes";
 
 /**
@@ -83,6 +83,17 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
        */
       jwt({ jwt: { issuer: oauthIssuer(config.baseUrl) } }),
 
+      /**
+       * Le greffon MCP, **seulement s'il peut être construit**.
+       *
+       * `@better-auth/mcp` valide `resource` dans son constructeur et lève sur une URL qui
+       * n'est ni HTTPS ni en boucle locale. Sur un serveur domestique servi en clair, la
+       * bibliothèque fait donc échouer le démarrage entier — et l'application devient
+       * inatteignable pour un défaut qui ne concerne que l'appairage d'agents.
+       *
+       * Le charger sous condition échange une panne totale contre une fonctionnalité en
+       * moins, annoncée au démarrage. Voir `isMcpResourceUsable`.
+       */
       // @ts-expect-error better-auth 1.7.1 ships an endpoint metadata type that
       // `exactOptionalPropertyTypes` rejects: an OpenAPI parameter declares
       // `items?: undefined` where the target requires `{ type }`. The plugin is
@@ -90,58 +101,65 @@ function buildAuth(config: AuthConfig, database: DatabaseHandle) {
       // mismatch is pinned to this one line. A Better Auth release that fixes
       // it turns this directive into an unused-suppression error, which is the
       // reminder to delete it.
-      mcp({
-        loginPage: config.loginPage,
-        consentPage: config.consentPage,
-        resource: config.mcpResource,
-        scopes: [...OAUTH_SCOPES],
+      //
+      // La directive porte sur le spread et non sur `mcp({` : c'est l'expression
+      // conditionnelle entière que le vérificateur confronte à `BetterAuthPlugin`.
+      ...(isMcpResourceUsable(config.mcpResource)
+        ? [
+            mcp({
+              loginPage: config.loginPage,
+              consentPage: config.consentPage,
+              resource: config.mcpResource,
+              scopes: [...OAUTH_SCOPES],
 
-        /**
-         * RFC 7591 dynamic client registration, at `<base>/oauth2/register`.
-         *
-         * It is not a convenience. A shipping MCP client mints a fresh loopback
-         * redirect path per session -- `http://127.0.0.1:33418/callback/UW4qso…`
-         * -- and RFC 8252 section 7.3 relaxes the *port* of a loopback redirect,
-         * never the path. Better Auth implements exactly that relaxation and
-         * nothing wider (`findRegisteredRedirectUri`, quoted in
-         * `packages/api/src/mcp/registration.ts`), so a client registered once by
-         * hand is refused on its next run. Such a client can only ever work by
-         * registering the URI it is about to use, which is what this endpoint is
-         * for. The alternative on offer -- a Client ID Metadata Document -- needs
-         * a `client_id` that is a globally routable HTTPS URL, and `./ssrf.ts`
-         * refuses every address a home network has.
-         *
-         * `allowUnauthenticatedClientRegistration` is what makes it usable: the
-         * MCP SDK's `registerClient` sends a bare JSON POST with no credential
-         * of any kind, so a token- or session-backed mode would close the
-         * endpoint to every client it exists for.
-         *
-         * That is deliberately *not* the same as leaving it open. Section 16 is
-         * explicit -- "Le caractère privé du réseau ne remplace ni
-         * l'authentification ni le chiffrement" -- so being on the owner's WiFi
-         * authorises nothing. The endpoint is closed by
-         * `packages/api/src/mcp/registration.ts` and opens only while the owner
-         * has deliberately opened a pairing window, the way a device is paired.
-         * Better Auth never sees a request outside one.
-         */
-        allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: true,
-      }),
+              /**
+               * RFC 7591 dynamic client registration, at `<base>/oauth2/register`.
+               *
+               * It is not a convenience. A shipping MCP client mints a fresh loopback
+               * redirect path per session -- `http://127.0.0.1:33418/callback/UW4qso…`
+               * -- and RFC 8252 section 7.3 relaxes the *port* of a loopback redirect,
+               * never the path. Better Auth implements exactly that relaxation and
+               * nothing wider (`findRegisteredRedirectUri`, quoted in
+               * `packages/api/src/mcp/registration.ts`), so a client registered once by
+               * hand is refused on its next run. Such a client can only ever work by
+               * registering the URI it is about to use, which is what this endpoint is
+               * for. The alternative on offer -- a Client ID Metadata Document -- needs
+               * a `client_id` that is a globally routable HTTPS URL, and `./ssrf.ts`
+               * refuses every address a home network has.
+               *
+               * `allowUnauthenticatedClientRegistration` is what makes it usable: the
+               * MCP SDK's `registerClient` sends a bare JSON POST with no credential
+               * of any kind, so a token- or session-backed mode would close the
+               * endpoint to every client it exists for.
+               *
+               * That is deliberately *not* the same as leaving it open. Section 16 is
+               * explicit -- "Le caractère privé du réseau ne remplace ni
+               * l'authentification ni le chiffrement" -- so being on the owner's WiFi
+               * authorises nothing. The endpoint is closed by
+               * `packages/api/src/mcp/registration.ts` and opens only while the owner
+               * has deliberately opened a pairing window, the way a device is paired.
+               * Better Auth never sees a request outside one.
+               */
+              allowDynamicClientRegistration: true,
+              allowUnauthenticatedClientRegistration: true,
+            }),
 
-      /**
-       * OAuth 2.1 + PKCE client discovery by Client ID Metadata Document.
-       * `fetchClientMetadataResource` is a required option and is deliberately
-       * ours: ./cimd-transport.ts explains why the shipped Node transport
-       * cannot be used on Bun.
-       */
-      cimd({
-        fetchClientMetadataResource,
-        // MCP 2026-07-28 pins CIMD draft-00, which makes `client_name` and
-        // `redirect_uris` mandatory. That revision is not negotiable by any
-        // shipping MCP SDK (PLATFORM-CONTRACT section 5bis), but the metadata
-        // profile is independent of the transport revision.
-        metadataProfile: "mcp-2026-07-28",
-      }),
+            /**
+             * OAuth 2.1 + PKCE client discovery by Client ID Metadata Document.
+             * `fetchClientMetadataResource` is a required option and is deliberately
+             * ours: ./cimd-transport.ts explains why the shipped Node transport
+             * cannot be used on Bun.
+             */
+            cimd({
+              fetchClientMetadataResource,
+              // MCP 2026-07-28 pins CIMD draft-00, which makes `client_name` and
+              // `redirect_uris` mandatory. That revision is not negotiable by any
+              // shipping MCP SDK (PLATFORM-CONTRACT section 5bis), but the metadata
+              // profile is independent of the transport revision.
+              metadataProfile: "mcp-2026-07-28",
+            }),
+          ]
+        : []),
     ],
   });
 }
