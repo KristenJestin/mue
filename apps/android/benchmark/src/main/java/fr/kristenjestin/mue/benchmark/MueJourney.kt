@@ -7,8 +7,21 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 
-/** The package the profile is recorded for and the frames are counted in. */
-const val MUE_PACKAGE: String = "fr.kristenjestin.mue"
+/**
+ * The package the profile is recorded for and the frames are counted in.
+ *
+ * `.debug`, and not `fr.kristenjestin.mue`, because that is what the APK this module drives is
+ * called. `:app` gives every `nonMinified…` and `benchmark…` build type the same
+ * `applicationIdSuffix` the `debug` build type carries — the block in `app/build.gradle.kts`
+ * argues it — so a macrobenchmark run can no longer install over the application the owner
+ * carries, whichever serial the command happened to reach.
+ *
+ * It does not change what is recorded. A baseline profile lists class and method descriptors, and
+ * those are built from `namespace`, which is still `fr.kristenjestin.mue`; the file this produces
+ * is byte-identical to the one produced before the suffix existed and is still the file
+ * `assembleRelease` packages.
+ */
+const val MUE_PACKAGE: String = "fr.kristenjestin.mue.debug"
 
 /** Long enough for a cold, uncompiled first frame on a loaded emulator; not a pacing device. */
 private const val AppearTimeoutMs: Long = 15_000

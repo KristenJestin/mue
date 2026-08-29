@@ -1,3 +1,9 @@
 <resources>
-    <string name="app_name">Mue</string>
+    <!--
+      `app_name` is not declared here any more. It is a `resValue` in `app/build.gradle.kts`,
+      because the launcher label is a property of the variant: Mue, Mue Beta, Mue Debug. Declaring
+      it in this file as well would not fail the build — AGP resolves the pair in favour of the
+      generated value without a word — it would just leave a dead string here that reads as the
+      real one. The block in `defaultConfig` explains the rest.
+    -->
 </resources>

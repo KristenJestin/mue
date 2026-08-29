@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The debug overlay. AGP merges it into `app/src/main/AndroidManifest.xml` for the `debug`
-  build type and for `debugAndroidTest`, and for nothing else — `release` never sees this
-  file, so the shipped application keeps the platform trust store exactly as Android
-  configured it.
+  build type and for `debugAndroidTest` by itself, and `local` and `beta` are pointed at it
+  by hand in `app/build.gradle.kts` — the three builds that have to reach the owner's own
+  server. `release` is the one variant that never sees this file, so the shipped application
+  keeps the platform trust store exactly as Android configured it.
 
   It adds one attribute and declares no component. `android:networkSecurityConfig` is
   absent from the main manifest, so the merger contributes it rather than overriding
