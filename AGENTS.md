@@ -224,36 +224,79 @@ Prérequis, tous deux non versionnés :
   Java 17 contre laquelle le code est compilé, mais il lui faut une JVM pour
   démarrer.
 
-Le même `local.properties` accepte deux clés **facultatives** :
+Le même `local.properties` accepte trois clés **facultatives** :
 
 ```properties
 mue.beta.server=http://192.168.1.100:3000
 mue.beta.email=kris@example.org
+mue.beta.password=<un mot de passe jetable, et rien d'autre — lire ci-dessous>
 ```
 
-`mue.beta.server` est l'adresse et `mue.beta.email` le compte dont la variante
-`beta` pré-remplit les champs de `Server settings`, pour que le propriétaire
-n'ait à retaper ni l'IP de sa machine de développement ni son courriel à chaque
-réinstallation de la bêta — le client Android n'ayant pas de parcours
-d'inscription, le compte lui-même se sème avec `admin.ts accounts create`
-(§4.9). Les deux voyagent par `resValue("string", …)` comme `app_name` (§7),
-dans `default_server_address` et `default_account_email`, ne sont lues par
-aucune autre variante, et n'écrasent jamais ce qu'un téléphone déjà appairé
-porte ni une saisie en cours. Elles sont lues indépendamment : configurer l'une
-sans l'autre est un état ordinaire. **Absentes, rien ne change** : la bêta se
-construit et se comporte exactement comme avant, champs vides et aucun message —
-il n'y a donc rien à configurer pour qu'un dépôt fraîchement cloné compile.
+`mue.beta.server` est l'adresse, `mue.beta.email` le compte et
+`mue.beta.password` son mot de passe, dont la variante `beta` pré-remplit les
+champs de `Server settings`, pour que le propriétaire n'ait rien à retaper au
+clavier d'un téléphone à chaque réinstallation de la bêta — le client Android
+n'ayant pas de parcours d'inscription, le compte lui-même se sème avec
+`admin.ts accounts create` (§4.9). Les trois voyagent par `resValue("string", …)`
+comme `app_name` (§7), dans `default_server_address`, `default_account_email` et
+`default_account_password`, ne sont lues par aucune autre variante, et
+n'écrasent jamais ce qu'un téléphone déjà appairé porte ni une saisie en cours.
+Elles sont lues indépendamment : en configurer une sans les autres est un état
+ordinaire. **Absentes, rien ne change** : la bêta se construit et se comporte
+exactement comme avant, champs vides et aucun message — il n'y a donc rien à
+configurer pour qu'un dépôt fraîchement cloné compile.
 
-**Il n'y aura pas de troisième clé pour le mot de passe.** Une `resValue` finit
-dans `res/values/values.xml` à l'intérieur de l'APK, et un APK se copie sur un
-téléphone, se garde à côté des PRD et s'envoie pour être installé : n'importe
-qui le tenant relit cette table. Une adresse et un courriel survivent à cette
-divulgation, un mot de passe non — c'est la seule des trois valeurs dont tout le
-prix est que personne d'autre ne l'ait. PRD_SERVER_SYNC_MCP 9.2 le fait saisir à
-chaque appairage exprès, et `SyncViewModel.onLeaveSettings` le jette à la
-fermeture de l'écran, ce qui ne voudrait rien dire si la même chaîne était
-compilée dans la construction. La commande de semis côté serveur tranche pareil
-et pour la même raison (§4.9).
+**La troisième clé descend un mot de passe dans l'APK, en clair, et c'est
+assumé.** Ce paragraphe disait l'inverse et le refusait ; la moitié factuelle de
+ce refus reste vraie mot pour mot. Une `resValue` finit dans
+`res/values/values.xml` à l'intérieur de l'APK, un APK se copie sur un
+téléphone, se garde à côté des PRD et s'envoie pour être installé, et n'importe
+qui le tenant relit cette table :
+
+```sh
+aapt2 dump resources app-beta.apk     # affiche default_account_password en clair
+```
+
+C'est la commande qui l'a prouvé sur l'artefact, pas une supposition : R8 renomme
+des classes et ne touche pas à `res/values`, et `shrinkResources` retire les
+ressources inutilisées au lieu de masquer celles qui servent.
+
+Ce qui a été rejugé, c'est le coût de cette divulgation. Le compte visé est
+**jetable** : il vit sur `mue_dev`, une base que `docker compose down -v` détruit
+et que `admin.ts accounts create` regarnit, et le serveur qui le sert tourne sur
+la machine du propriétaire, sur son réseau domestique, sans hébergement, sans nom
+public et sans port ouvert. Qui extrait cette chaîne d'un APK a appris les
+identifiants d'un compte qu'il ne peut pas joindre, gardant des données qu'une
+commande recrée. Le secret ne protège rien qu'un attaquant puisse atteindre.
+
+**Et c'est là toute la condition : cette clé ne reçoit qu'un mot de passe
+jetable.** Jamais celui du propriétaire, jamais un qui ouvre aussi le serveur de
+production, jamais un réutilisé quelque part où une personne ou un service
+l'accepterait. L'argument n'est pas qu'un mot de passe dans un APK soit
+acceptable ; c'est que *celui-là* ne coûte rien quand il fuit. Le jour où
+`mue.beta.password` porte un mot de passe qui vaut quelque chose ailleurs — ou
+le jour où le serveur de développement devient joignable depuis l'extérieur de
+ce réseau — chaque ligne ci-dessus est fausse, et ce qui doit partir est la clé,
+pas ce paragraphe.
+
+La borne, elle, ne se lit pas dans une intention : `release` et `local` sont
+l'application que le propriétaire porte, `debug` le bac à sable des
+instrumentations, et les trois ressources y sont la chaîne vide. C'est vérifié
+**sur le binaire** — `verifyReleaseCarriesNoBetaDefaults`, dans
+`app/build.gradle.kts`, relit la table de ressources de l'APK `release` avec
+`aapt2` et fait échouer `assembleRelease` si l'une des trois y arrive avec une
+valeur. L'historique de ce fichier justifie cette méfiance : un
+`applicationIdSuffix` posé depuis `buildTypes.configureEach` compilait, se
+configurait, s'exécutait et ne faisait rien, et il a fallu `aapt dump badging`
+sur l'APK pour s'en apercevoir (§7).
+
+La commande de semis côté serveur continue de refuser un mot de passe en
+argument, et c'est une règle distincte, pas une version affaiblie de celle-ci :
+`admin.ts accounts create` le prend dans `MUE_ACCOUNT_PASSWORD` ou à une invite
+parce qu'un argument part dans l'historique du shell et dans `argv` — donc dans
+`ps` et le gestionnaire des tâches. Ce sont des fichiers et des tables de
+processus sur la *machine de développement*, dont l'arbitrage ci-dessus ne dit
+rien (§4.9).
 
 Le cache de tâches Vite+ est **désactivé**. Gradle seul décide de ce qu'une
 construction Android doit refaire, et une empreinte Vite+ sur cette arborescence
@@ -903,7 +946,7 @@ main dans le nouveau répertoire :
 | Fichier | Pourquoi il manque | Conséquence |
 |---|---|---|
 | `.env` | `.gitignore` | tout script `--env-file` échoue sur `DATABASE_URL is not set` |
-| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android ; et sans `mue.beta.server` ni `mue.beta.email` (§4.5), la bêta s'assemble avec des champs serveur et compte vides |
+| `apps/android/local.properties` | `.gitignore` | Gradle ne trouve pas le SDK Android ; et sans `mue.beta.server`, `mue.beta.email` ni `mue.beta.password` (§4.5), la bêta s'assemble avec les trois champs d'appairage vides |
 | `node_modules/` | `.gitignore` | `vp`, `tsc` et les tests n'existent pas — relancer `bun install` |
 | `certs/` | `.gitignore` | le serveur TLS local ne démarre pas |
 
