@@ -1,5 +1,7 @@
 package fr.kristenjestin.mue.data.scale.ble
 
+import fr.kristenjestin.mue.data.scale.protocol.FakeScaleFrames
+import fr.kristenjestin.mue.data.scale.protocol.FakeWeightOnlyScaleDriver
 import fr.kristenjestin.mue.data.scale.protocol.MueScaleDrivers
 import fr.kristenjestin.mue.data.scale.protocol.REAL_IMPEDANCE_ABSENT_FRAME
 import fr.kristenjestin.mue.data.scale.protocol.REAL_IMPEDANCE_ACK
@@ -8,8 +10,10 @@ import fr.kristenjestin.mue.data.scale.protocol.REAL_INIT_COMMANDS
 import fr.kristenjestin.mue.data.scale.protocol.REAL_STABLE_WEIGHT_FRAME
 import fr.kristenjestin.mue.data.scale.protocol.REAL_WEIGHT_ACK
 import fr.kristenjestin.mue.data.scale.protocol.hexToBytes
+import fr.kristenjestin.mue.data.scale.protocol.ScaleDriverList
 import fr.kristenjestin.mue.data.scale.protocol.toHex
 import fr.kristenjestin.mue.domain.model.ScaleDevice
+import fr.kristenjestin.mue.domain.model.ScaleDriverRegistry
 import fr.kristenjestin.mue.domain.model.ScaleReading
 import fr.kristenjestin.mue.domain.model.ScaleSessionState
 import fr.kristenjestin.mue.domain.model.ScaleUnavailableReason
@@ -66,7 +70,11 @@ class BleScaleSessionSourceTest {
      * vit aussi longtemps que la machine, et une portée qu'il faudrait attendre empêcherait tout
      * test de se terminer.
      */
-    private class Fixture(scope: CoroutineScope, devices: List<ScaleDevice>) {
+    private class Fixture(
+        scope: CoroutineScope,
+        devices: List<ScaleDevice>,
+        drivers: ScaleDriverRegistry,
+    ) {
         val transport = FakeScaleTransport()
         val scales = FakeScaleRepository(devices)
         private var sessions = 0
@@ -74,7 +82,7 @@ class BleScaleSessionSourceTest {
         val source = BleScaleSessionSource(
             transport = transport,
             scales = scales,
-            drivers = MueScaleDrivers,
+            drivers = drivers,
             scope = scope,
             now = { TEST_NOW },
             newSessionId = { "session-${++sessions}" },
@@ -86,8 +94,18 @@ class BleScaleSessionSourceTest {
         val link: FakeScaleLink get() = transport.links.last()
     }
 
-    private fun TestScope.fixture(devices: List<ScaleDevice> = listOf(pairedScale())) =
-        Fixture(backgroundScope, devices)
+    /**
+     * @param drivers Le registre livré par défaut, celui de l'application. Il est **paramétrable**
+     *   pour une seule raison, et elle est une exigence : FR-SCALE-030 promet qu'un pilote qui
+     *   déclare ne pas fournir d'impédance traverse la machine sans qu'aucune ligne ne le
+     *   connaisse, et cette promesse ne se vérifie qu'avec un pilote que l'application
+     *   n'enregistre pas. Le câbler ici est aussi ce que fait `ScaleContainer` avec le pilote
+     *   fictif de débogage, donc le chemin éprouvé est celui de production.
+     */
+    private fun TestScope.fixture(
+        devices: List<ScaleDevice> = listOf(pairedScale()),
+        drivers: ScaleDriverRegistry = MueScaleDrivers,
+    ) = Fixture(backgroundScope, devices, drivers)
 
     /** Scan lancé, balance découverte, liaison ouverte, séquence émise : l'état d'attente. */
     private fun Fixture.reachWaitingForStepOn(scope: TestScope) {
@@ -646,6 +664,65 @@ class BleScaleSessionSourceTest {
     }
 
     /**
+     * FR-SCALE-030 et PRD_SCALE 23 : « un pilote déclarant ne pas fournir d'impédance produit un
+     * module cohérent. »
+     *
+     * **Cette branche n'était atteinte par aucun test.** `MueScaleDriversTest` prouve que le
+     * registre traite `FakeWeightOnlyScaleDriver` exactement comme les autres, et
+     * `FakeScaleDriverTest` que sa session ignore une trame d'impédance ; ni l'un ni l'autre ne
+     * fait passer ce pilote par la machine à états, donc `capabilities.providesImpedance` pouvait
+     * disparaître de [BleScaleSessionSource] sans qu'une assertion ne rougisse. La session serait
+     * alors restée dix secondes à attendre une grandeur que l'appareil n'a jamais annoncée, sur un
+     * matériel où la pesée est *finie* — et la panne aurait été un écran qui reste éveillé et une
+     * pastille qui pulse dix secondes de trop, ce que personne ne rapporte comme un bug.
+     *
+     * Le pilote employé n'est enregistré nulle part dans l'application : c'est ce qui fait que ce
+     * test prouve aussi la seconde moitié de FR-SCALE-030 — le registre suffit, aucune ligne de la
+     * machine ne nomme un pilote.
+     */
+    @Test
+    fun `un pilote sans impédance conclut sans ouvrir la fenêtre d'impédance`() = runTest {
+        val liteScale = pairedScale(
+            id = "scale-lite",
+            address = "AA:BB:CC:DD:EE:11",
+            advertisedName = "MUE FAKE SCALE LITE",
+            driverId = FakeWeightOnlyScaleDriver.ID,
+        )
+        val f = fixture(
+            devices = listOf(liteScale),
+            drivers = ScaleDriverList(listOf(FakeWeightOnlyScaleDriver)),
+        )
+
+        f.source.start()
+        runCurrent()
+        f.transport.advertise(advertisementOf(address = liteScale.address, name = "MUE FAKE SCALE LITE"))
+        runCurrent()
+        assertEquals(ScaleSessionState.WaitingForStepOn, f.state)
+
+        f.link.deliver(FakeScaleFrames.weight(hundredthsKg = 8_575, stable = true))
+        runCurrent()
+
+        // Pas une milliseconde d'attente : l'horloge virtuelle n'a pas bougé et la session est
+        // déjà conclue, liaison refermée comprise.
+        val complete = assertIs<ScaleSessionState.Complete>(f.state)
+        assertEquals(8_575, complete.reading.weightHundredthsKg)
+        assertNull(complete.reading.impedanceOhm)
+        assertFalse(
+            complete.impedanceRefused,
+            "rien n'a été refusé : cet appareil n'annonce pas d'impédance (PRD_SCALE 18.3)",
+        )
+        assertTrue(f.link.closed)
+
+        // Et une trame d'impédance qui arriverait quand même — protocole bavard, appareil
+        // apparenté — est présentée à une session close et n'y change rien (BR-SCALE-012).
+        f.link.deliver(FakeScaleFrames.impedance(545))
+        advanceTimeBy(IMPEDANCE_WINDOW_MS + 1)
+        runCurrent()
+        assertEquals(1, f.link.lateFrames.size, "la trame doit avoir été réellement présentée")
+        assertNull(assertIs<ScaleSessionState.Complete>(f.state).reading.impedanceOhm)
+    }
+
+    /**
      * PRD_SCALE 14.3 point 6 : la balance répète sa trame stable, et acquitter chaque répétition
      * empilerait des écritures dans une fenêtre déjà courte. FR-SCALE-015 : après un poids stable,
      * aucune autre source ne peut remplacer la mesure.
@@ -693,6 +770,40 @@ class BleScaleSessionSourceTest {
         f.link.deliver(weightFrame(8_575, stable = true))
         runCurrent()
         assertEquals(hbScale.id, assertIs<ScaleSessionState.Stable>(f.state).reading.scaleId)
+    }
+
+    /**
+     * FR-SCALE-001 : « le rattachement est **proposé, jamais silencieux** ».
+     *
+     * Une pesée ne peut rien proposer, donc elle ne rattache rien : la session ne reconnaît une
+     * balance que par son **adresse**. L'annonce ci-dessous porte le nom annoncé et le pilote de
+     * la balance enregistrée, à une autre adresse — c'est exactement la forme qu'aurait un second
+     * exemplaire du même modèle dans le foyer, et exactement celle qu'aurait la balance de
+     * l'utilisateur après un changement de piles (PRD_SCALE 10.1). Les deux se ressemblent au
+     * point d'être indiscernables ici, et c'est pourquoi la machine s'abstient : le flux
+     * d'appairage, lui, pose la question (`ScaleMatchingTest`, `ScaleScanViewModelTest`).
+     *
+     * Sans ce test, câbler `ScaleMatching.proposeReattachment` dans `candidateFor` — la
+     * « correction » qui se propose d'elle-même le jour où l'on retrouve une balance muette —
+     * compilait et passait toute la suite, en liant silencieusement Mue à l'appareil du voisin.
+     */
+    @Test
+    fun `une adresse inconnue au même nom n'est jamais rattachée par la session`() = runTest {
+        val f = fixture(listOf(hbScale))
+
+        f.source.start()
+        runCurrent()
+        f.transport.advertise(advertisementOf(address = "FF:10:00:1F:52:FF", name = "HB BODY FAT"))
+        runCurrent()
+
+        assertTrue(f.transport.connectRequests.isEmpty(), "aucune liaison ne s'ouvre sur un homonyme")
+        assertEquals(ScaleSessionState.Searching, f.state)
+        assertTrue(f.transport.isScanning, "la recherche continue sur le temps restant")
+
+        // La vraie, elle, est reconnue à l'adresse enregistrée.
+        f.transport.advertise(hbAdvertisement)
+        runCurrent()
+        assertEquals(listOf(hbAdvertisement.address), f.transport.connectRequests)
     }
 
     /**
