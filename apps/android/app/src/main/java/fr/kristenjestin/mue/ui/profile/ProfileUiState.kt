@@ -2,6 +2,7 @@ package fr.kristenjestin.mue.ui.profile
 
 import androidx.compose.runtime.Immutable
 import fr.kristenjestin.mue.domain.logic.Bmi
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import java.io.File
 import java.time.LocalDate
@@ -21,6 +22,23 @@ data class ProfileUiState(
     val ageYears: Int? = null,
     val heightError: String? = null,
     val birthDateError: String? = null,
+    /**
+     * Le sexe, facultatif (PRD_SCALE FR-PROFILE-007).
+     *
+     * `null` est l'état « non renseigné », qui est **valide** et ne bloque jamais l'enregistrement
+     * du profil. Il est délibérément absent de tout ce qui touche à [bmi] : les catégories adultes
+     * de PRD FR-BMI-002 sont les mêmes pour tout le monde, et ce champ ne sert qu'aux estimations
+     * de composition corporelle de PRD_SCALE 13.2.
+     */
+    val sex: Sex? = null,
+    /**
+     * Combien de balances sont associées (FR-SCALE-010).
+     *
+     * `0` se lit `No scale paired`, qui est un état parfaitement normal : `Entry` reste strictement
+     * l'écran du PRD socle sans balance (PRD_SCALE 18.1), et rien sur `Profile` ne le présente
+     * comme une lacune.
+     */
+    val pairedScaleCount: Int = 0,
     /**
      * Recomputed from the *form* and the latest measurement, so the readout follows the
      * height being typed. The case matters: only [Bmi.Classified] may be named.

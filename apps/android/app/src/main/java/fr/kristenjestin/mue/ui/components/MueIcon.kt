@@ -123,6 +123,17 @@ object MueIcons {
     const val HISTORY: String = "ic_history"
     const val ROTATE_CW: String = "ic_rotate_cw"
 
+    /*
+     * The scale module (PRD_SCALE 19), which imports exactly one new vector.
+     *
+     * The scales list, the `Scales` row on `Profile` and the pairing flow all draw `ic_scale`,
+     * which the Entry tab already ships: two names for one drawable is what puts the wrong glyph
+     * on screen the day one of them is repointed, and `MueIconTest` refuses it outright.
+     */
+
+    /** The radio itself — the scan, and the `Bluetooth is off · Enable` state of PRD_SCALE 18.5. */
+    const val BLUETOOTH: String = "ic_bluetooth"
+
     @DrawableRes
     fun resource(name: String): Int = when (name) {
         ActivityIcons.TAB_ENTRY -> R.drawable.ic_scale
@@ -181,6 +192,7 @@ object MueIcons {
         CIRCLE_DOT -> R.drawable.ic_circle_dot
         HISTORY -> R.drawable.ic_history
         ROTATE_CW -> R.drawable.ic_rotate_cw
+        BLUETOOTH -> R.drawable.ic_bluetooth
 
         FoodIcons.TAB_FOOD -> R.drawable.ic_utensils
         FoodIcons.APPLE -> R.drawable.ic_apple
@@ -239,6 +251,13 @@ object MueIcons {
         FoodIcons.STAR,
     )
 
+    /**
+     * The single glyph the scale module introduces (PRD_SCALE 19), named as a group for the same
+     * reason as [timerNames] and [foodNames]: [names] must not be the one place it is forgotten,
+     * and a second scale icon added later has an obvious home.
+     */
+    val scaleNames: List<String> = listOf(BLUETOOTH)
+
     /** Every name this app can draw. A test walks it so an unimported icon cannot ship. */
     val names: List<String> = listOf(
         ActivityIcons.TAB_ENTRY,
@@ -284,7 +303,7 @@ object MueIcons {
         CLOCK,
         LIST_PLUS,
         ZAP,
-    ) + timerNames + foodNames
+    ) + timerNames + foodNames + scaleNames
 }
 
 @Preview(name = "Icons", showBackground = true, backgroundColor = 0xFF101012)

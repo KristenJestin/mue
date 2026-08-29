@@ -12,8 +12,10 @@ import fr.kristenjestin.mue.domain.logic.BmiCalculator
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.logic.ProfileValidation
 import fr.kristenjestin.mue.domain.logic.valueOrNull
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.repository.MeasurementRepository
+import fr.kristenjestin.mue.domain.repository.ScaleRepository
 import fr.kristenjestin.mue.domain.repository.UserPreferencesRepository
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
 import kotlinx.coroutines.CancellationException
@@ -41,6 +43,14 @@ class ProfileViewModel(
     private val profileRepository: UserProfileRepository,
     private val preferencesRepository: UserPreferencesRepository,
     private val measurementRepository: MeasurementRepository,
+    /**
+     * Uniquement pour compter (FR-SCALE-010).
+     *
+     * `Profile` porte la section `Scales` et annonce combien de balances sont associées ; tout le
+     * reste — associer, renommer, oublier, diagnostiquer — vit sur l'écran dédié de PRD_SCALE 8 et
+     * dans son propre ViewModel. Ce champ ne fait donc rien d'autre que lire un nombre.
+     */
+    private val scaleRepository: ScaleRepository,
     private val exporter: WeightDataExporter,
     private val savedStateHandle: SavedStateHandle,
     private val today: () -> LocalDate = LocalDate::now,
@@ -52,7 +62,7 @@ class ProfileViewModel(
     /** One-shot effects; the screen turns [ProfileEvent.ShareCsv] into an Android intent. */
     val events: Flow<ProfileEvent> = eventChannel.receiveAsFlow()
 
-    private val form: Flow<FormSnapshot> = combine(
+    private val fields: Flow<FormSnapshot> = combine(
         savedStateHandle.getStateFlow(KEY_DISPLAY_NAME, ""),
         savedStateHandle.getStateFlow(KEY_HEIGHT, ""),
         savedStateHandle.getStateFlow(KEY_BIRTH_DATE, ""),
@@ -68,12 +78,24 @@ class ProfileViewModel(
         )
     }
 
+    /*
+     * Le sexe est combiné à part parce que `combine` typé s'arrête à cinq flux, et que les cinq
+     * premiers étaient déjà pris. Il est stocké sous sa forme filaire — la même que la base et que
+     * la synchronisation — de sorte qu'une chaîne illisible relue après une mise à jour redonne
+     * `null`, c'est-à-dire l'état non renseigné, qui est valide (FR-PROFILE-007).
+     */
+    private val form: Flow<FormSnapshot> = combine(
+        fields,
+        savedStateHandle.getStateFlow(KEY_SEX, ""),
+    ) { snapshot, sex -> snapshot.copy(sex = Sex.fromWire(sex.ifEmpty { null })) }
+
     val state: StateFlow<ProfileUiState> = combine(
         form,
         measurementRepository.observeLatest(),
         preferencesRepository.preferences,
         transient,
-    ) { snapshot, latest, preferences, transientState ->
+        scaleRepository.observeAll(),
+    ) { snapshot, latest, preferences, transientState, pairedScales ->
         val currentDay = today()
         // The card follows the form, not the stored profile: typing a height must move the
         // BMI immediately, and clearing the field must make it disappear (PRD FR-PROFILE-001).
@@ -87,6 +109,14 @@ class ProfileViewModel(
             ageYears = UserProfile(birthDate = birthDate.valueOrNull).ageOn(currentDay),
             heightError = snapshot.heightError,
             birthDateError = snapshot.birthDateError,
+            sex = snapshot.sex,
+            pairedScaleCount = pairedScales.size,
+            /*
+             * FR-PROFILE-007 : **l'IMC n'utilise pas le sexe.** Le calcul ne le reçoit pas, et
+             * cette absence est un test — `BmiCalculator` prend le poids, la taille et la date de
+             * naissance, un point c'est tout. Les catégories adultes de PRD FR-BMI-002 restent
+             * identiques pour tous.
+             */
             bmi = BmiCalculator.calculate(
                 weight = latest?.weight,
                 heightCm = height.valueOrNull,
@@ -132,6 +162,10 @@ class ProfileViewModel(
                 savedStateHandle[KEY_DISPLAY_NAME] = stored.displayName.orEmpty()
                 savedStateHandle[KEY_HEIGHT] = stored.heightCm?.toString().orEmpty()
                 savedStateHandle[KEY_BIRTH_DATE] = stored.birthDate?.toString().orEmpty()
+                // FR-PROFILE-007 : le sexe suit exactement le même chemin que ses deux voisins,
+                // et pour la même raison — il est stocké dans `health_profile` (contrat §4) et
+                // PRD_SCALE 22 le fait descendre du serveur comme eux.
+                savedStateHandle[KEY_SEX] = stored.sex?.wireValue.orEmpty()
             }
         }
     }
@@ -159,6 +193,18 @@ class ProfileViewModel(
     }
 
     /**
+     * Choisit ou retire le sexe (PRD_SCALE FR-PROFILE-007).
+     *
+     * `null` est l'état non renseigné, qu'il faut pouvoir **atteindre** et pas seulement quitter :
+     * un champ facultatif qu'on ne peut plus vider n'est pas facultatif. Il n'y a aucune erreur à
+     * effacer ici, parce qu'aucune valeur de ce champ n'est invalide.
+     */
+    fun onSexChange(sex: Sex?) {
+        takeOverForm()
+        savedStateHandle[KEY_SEX] = sex?.wireValue.orEmpty()
+    }
+
+    /**
      * PRD FR-PROFILE-003: one invalid field blocks the whole save, the typed values stay,
      * and every failing field states its own message.
      */
@@ -183,9 +229,16 @@ class ProfileViewModel(
             is ProfileValidation.Valid -> {
                 savedStateHandle[KEY_HEIGHT_ERROR] = ""
                 savedStateHandle[KEY_BIRTH_DATE_ERROR] = ""
+                /*
+                 * FR-PROFILE-007 : le sexe s'enregistre avec le reste et ne participe à aucune
+                 * validation. `MueValidation.validateProfile` ne le connaît même pas — un champ
+                 * dont aucune valeur, y compris l'absence, ne peut être fausse n'a rien à faire
+                 * dans une validation, et l'y mettre serait le premier pas vers un champ obligé.
+                 */
+                val sex = Sex.fromWire((savedStateHandle[KEY_SEX] ?: "").ifEmpty { null })
                 viewModelScope.launch {
                     try {
-                        profileRepository.save(validation.profile)
+                        profileRepository.save(validation.profile.copy(sex = sex))
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (error: Exception) {
@@ -255,6 +308,8 @@ class ProfileViewModel(
         val birthDate: LocalDate?,
         val heightError: String?,
         val birthDateError: String?,
+        /** FR-PROFILE-007 : facultatif, sans message d'erreur possible, donc sans champ d'erreur. */
+        val sex: Sex? = null,
     )
 
     /** State that is meaningless after a process death and therefore stays out of saved state. */
@@ -279,6 +334,9 @@ class ProfileViewModel(
         private const val KEY_HEIGHT_ERROR = "profile.heightError"
         private const val KEY_BIRTH_DATE_ERROR = "profile.birthDateError"
 
+        /** La forme filaire de `Sex`, ou une chaîne vide pour l'état non renseigné. */
+        private const val KEY_SEX = "profile.sex"
+
         /** True once the form reflects the user rather than a pending first read. */
         private const val KEY_FORM_OWNED = "profile.formOwned"
 
@@ -291,6 +349,7 @@ class ProfileViewModel(
                     profileRepository = container.userProfileRepository,
                     preferencesRepository = container.userPreferencesRepository,
                     measurementRepository = container.measurementRepository,
+                    scaleRepository = container.scale.scaleRepository,
                     exporter = WeightDataExporter { measurements, exportDate ->
                         container.csvExportWriter.write(measurements, exportDate)
                     },

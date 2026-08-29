@@ -1,19 +1,11 @@
 package fr.kristenjestin.mue.ui.profile
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,11 +15,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -41,34 +33,36 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.timer.TimerNotificationPermission
 import fr.kristenjestin.mue.timer.rememberTimerNotificationPermission
 import fr.kristenjestin.mue.ui.components.MueContentTopFade
 import fr.kristenjestin.mue.ui.components.MueHeaderChip
+import fr.kristenjestin.mue.ui.components.MueIcon
+import fr.kristenjestin.mue.ui.components.MueIcons
 import fr.kristenjestin.mue.ui.components.MuePickerField
 import fr.kristenjestin.mue.ui.components.MuePrimaryButton
 import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueSecondaryButton
+import fr.kristenjestin.mue.ui.components.MueSegmentedChoice
 import fr.kristenjestin.mue.ui.components.MueSurfaceCard
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.MueTextField
 import fr.kristenjestin.mue.ui.components.rememberMueLocale
+import fr.kristenjestin.mue.ui.scale.ScaleMessages
+import fr.kristenjestin.mue.ui.scale.ScaleTestTags
 import fr.kristenjestin.mue.ui.sync.DataSyncSection
 import fr.kristenjestin.mue.ui.sync.DataSyncUiState
-import fr.kristenjestin.mue.ui.sync.ServerSettingsRoute
 import fr.kristenjestin.mue.ui.sync.SyncMessages
 import fr.kristenjestin.mue.ui.sync.SyncStatus
 import fr.kristenjestin.mue.ui.sync.SyncViewModel
-import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
-import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
 import fr.kristenjestin.mue.ui.timer.TimerMessages
 import java.time.LocalDate
@@ -91,120 +85,24 @@ private const val HAPTICS_BODY =
 private const val NOT_SET = "Not set"
 
 /**
- * The screens `Profile` holds: its own, and the two reached from it.
- *
- * It replaces the single saved boolean this tab used while `Server settings` was the only
- * sub-screen. A second one landed — `Food preferences`, which used to be a sheet in the Food
- * tab's stack — and a second boolean beside the first would have admitted a state that cannot
- * exist, both open at once, with nothing in the type to say which of the two the back handler
- * should close.
- *
- * Each route carries the string it crosses a `Bundle` as, exactly as `ActivityRoute` and
- * `FoodRoute` do, and [fromKey] is **total** for their reason: a key saved by one build and read
- * back by another outlives the code that wrote it, and landing on the root is a better outcome
- * than taking the first frame down. `foodPreferences` is what a build before this one has never
- * written, and `root` is what it reads back as.
- */
-internal enum class ProfileRoute(val key: String) {
-    ROOT("root"),
-    SERVER_SETTINGS("serverSettings"),
-    FOOD_PREFERENCES("foodPreferences"),
-    ;
-
-    companion object {
-        fun fromKey(key: String): ProfileRoute = entries.firstOrNull { it.key == key } ?: ROOT
-    }
-}
-
-/**
  * `Profile`: the health profile, the BMI it feeds, the preferences and the CSV export.
  *
  * The bottom tab bar is drawn by the navigation layer, above this screen, so that it never
  * moves during a tab transition (PRD 8).
+ *
+ * Cet écran est la **racine** de la pile de l'onglet, pas la pile elle-même : les trois portes
+ * qu'il ouvre — `Scales` (FR-SCALE-010), `Server settings` (sync PRD 9.1) et `Food preferences`
+ * (PRD_FOOD 6.7) — remontent à `ProfileNavHost`, qui tient la pile pour tous les sous-écrans à la
+ * fois. Un booléen par sous-écran admettrait un état qui ne peut pas exister — deux ouverts en
+ * même temps, sans rien dans le type pour dire lequel le retour doit refermer — et c'est
+ * exactement ce qu'une pile modélisée comme une liste de routes rend impossible.
  */
 @Composable
-fun ProfileScreen(modifier: Modifier = Modifier) {
-    /*
-     * Sync PRD 9.1 puts `Data & sync` inside `Profile`, and 9.1's `Server settings` is a screen
-     * of its own; PRD_FOOD 6.7's `Food preferences` is now the second. That makes `Profile` the
-     * third tab holding more than one screen, and it models the stack the way the other two do
-     * rather than adopting a library for it: one saved key, one `AnimatedContent`, and a
-     * `BackHandler` nested inside the shell's so back closes the sub-screen before it ever
-     * reaches the tab selection.
-     *
-     * A key and not the route itself, which is what `MueApp` does with the Activity tab's: a
-     * `String` crosses a `Bundle` on its own, where an enum constant that a later build renames
-     * comes back as a deserialisation failure on the first frame.
-     */
-    var routeKey by rememberSaveable { mutableStateOf(ProfileRoute.ROOT.key) }
-    val route = ProfileRoute.fromKey(routeKey)
-
-    BackHandler(enabled = route != ProfileRoute.ROOT) { routeKey = ProfileRoute.ROOT.key }
-
-    // Resolved outside `transitionSpec`, which runs outside composition.
-    val deeper = profileStackTransition(deeper = true)
-    val shallower = profileStackTransition(deeper = false)
-
-    AnimatedContent(
-        targetState = route,
-        modifier = modifier,
-        transitionSpec = { if (targetState != ProfileRoute.ROOT) deeper else shallower },
-        label = "profileStack",
-    ) { current ->
-        val back = { routeKey = ProfileRoute.ROOT.key }
-        when (current) {
-            ProfileRoute.SERVER_SETTINGS -> ServerSettingsRoute(
-                onNavigateBack = back,
-                modifier = Modifier.fillMaxSize(),
-            )
-
-            /*
-             * PRD_FOOD 6.7 and 13.2, on the tab that already holds the app's preferences.
-             *
-             * The screen came here whole rather than the button alone: leaving it in `FoodRoute`
-             * would have made this tab push onto another tab's stack, so the bar would say `Food`
-             * while this handler was the one that had to close it.
-             */
-            ProfileRoute.FOOD_PREFERENCES -> FoodPreferencesRoute(
-                onBack = back,
-                modifier = Modifier.fillMaxSize(),
-            )
-
-            ProfileRoute.ROOT -> ProfileRoot(
-                onOpenServerSettings = { routeKey = ProfileRoute.SERVER_SETTINGS.key },
-                onOpenFoodPreferences = { routeKey = ProfileRoute.FOOD_PREFERENCES.key },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    }
-}
-
-/**
- * Going deeper raises the new screen over the old one, exactly as the Activity tab's stack does;
- * reduced motion drops the movement and keeps the cross-fade.
- */
-@Composable
-@ReadOnlyComposable
-private fun profileStackTransition(deeper: Boolean): ContentTransform {
-    val enterSpec = MueMotion.spec<Float>(MueMotion.ActivityOpenMillis, MueMotion.Enter)
-    val exitSpec = MueMotion.spec<Float>(MueMotion.ActivityOpenMillis, MueMotion.Exit)
-    if (LocalReduceMotion.current) {
-        return fadeIn(enterSpec) togetherWith fadeOut(exitSpec)
-    }
-    val offsetSpec = MueMotion.spec<IntOffset>(MueMotion.ActivityOpenMillis, MueMotion.Standard)
-    val direction = if (deeper) 1 else -1
-    return (
-        slideInVertically(offsetSpec) { height -> direction * height / 8 } + fadeIn(enterSpec)
-        ) togetherWith (
-        slideOutVertically(offsetSpec) { height -> -direction * height / 8 } + fadeOut(exitSpec)
-        )
-}
-
-@Composable
-private fun ProfileRoot(
-    onOpenServerSettings: () -> Unit,
-    onOpenFoodPreferences: () -> Unit,
+fun ProfileScreen(
     modifier: Modifier = Modifier,
+    onOpenScales: () -> Unit = {},
+    onOpenServerSettings: () -> Unit = {},
+    onOpenFoodPreferences: () -> Unit = {},
 ) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory)
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -249,10 +147,12 @@ private fun ProfileRoot(
         onDisplayNameChange = viewModel::onDisplayNameChange,
         onHeightChange = viewModel::onHeightChange,
         onBirthDateChange = viewModel::onBirthDateChange,
+        onSexChange = viewModel::onSexChange,
         onSave = viewModel::saveProfile,
         onSaveConfirmationFinished = viewModel::onSaveConfirmationFinished,
         onHapticsEnabledChange = viewModel::onHapticsEnabledChange,
         onExport = viewModel::exportWeightData,
+        onOpenScales = onOpenScales,
         onSyncNow = syncViewModel::syncNow,
         onOpenServerSettings = onOpenServerSettings,
         onOpenFoodPreferences = onOpenFoodPreferences,
@@ -282,6 +182,10 @@ internal fun ProfileScreen(
     today: LocalDate = LocalDate.now(),
     showNotificationSettings: Boolean = false,
     onOpenNotificationSettings: () -> Unit = {},
+    /** FR-PROFILE-007. Par défaut inerte, pour les tests écrits avant que ce champ existe. */
+    onSexChange: (Sex?) -> Unit = {},
+    /** FR-SCALE-010. La section `Scales` ouvre l'écran dédié de PRD_SCALE 8. */
+    onOpenScales: () -> Unit = {},
 ) {
     val spacing = MueTheme.spacing
     val focusManager = LocalFocusManager.current
@@ -316,6 +220,21 @@ internal fun ProfileScreen(
                 },
             )
 
+            MueSurfaceCard(
+                shape = MueTheme.shapes.field,
+                contentPadding = PaddingValues(spacing.lg),
+            ) {
+                MueText(PRIVACY_TITLE, MueTheme.typography.sectionTitle)
+                MueText(
+                    text = PRIVACY_BODY,
+                    style = MueTheme.typography.caption,
+                    color = MueTheme.colors.textSecondary,
+                    modifier = Modifier.padding(top = spacing.xs),
+                )
+            }
+
+            SexSection(sex = state.sex, onSexChange = onSexChange)
+
             Column(verticalArrangement = Arrangement.spacedBy(spacing.sm)) {
                 MuePrimaryButton(
                     label = SAVE_LABEL,
@@ -328,19 +247,6 @@ internal fun ProfileScreen(
                     onSuccessFinished = onSaveConfirmationFinished,
                 )
                 state.saveError?.let { StatusLine(it, MueTheme.colors.error, assertive = true) }
-            }
-
-            MueSurfaceCard(
-                shape = MueTheme.shapes.field,
-                contentPadding = PaddingValues(spacing.lg),
-            ) {
-                MueText(PRIVACY_TITLE, MueTheme.typography.sectionTitle)
-                MueText(
-                    text = PRIVACY_BODY,
-                    style = MueTheme.typography.caption,
-                    color = MueTheme.colors.textSecondary,
-                    modifier = Modifier.padding(top = spacing.xs),
-                )
             }
 
             ProfileSection(title = "Preferences") {
@@ -372,6 +278,11 @@ internal fun ProfileScreen(
                     )
                 }
             }
+
+            ScalesSection(
+                pairedScaleCount = state.pairedScaleCount,
+                onOpenScales = onOpenScales,
+            )
 
             ProfileSection(title = "Your data") {
                 MueSurfaceCard(
@@ -547,6 +458,110 @@ private fun ProfileForm(
                             error(message)
                             liveRegion = LiveRegionMode.Polite
                         },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Le sexe, dans un groupe qui n'est pas celui de la taille et de la date de naissance
+ * (PRD_SCALE FR-PROFILE-007).
+ *
+ * **La disposition porte la règle.** La taille et la date de naissance alimentent l'IMC — le
+ * relevé d'IMC est d'ailleurs collé sous la taille, dans leur groupe — et le sexe ne sert qu'aux
+ * estimations de composition corporelle. Les réunir suggérerait visuellement le lien que le PRD
+ * prend soin de nier ; ce bloc est donc séparé du formulaire par la carte de confidentialité, porte
+ * son propre intitulé — celui de son unique usage — et le rappelle en une phrase. Documenter la
+ * règle sans la disposer aurait laissé l'écran dire le contraire du texte.
+ *
+ * Trois segments, dont `Not set`, parce qu'un champ facultatif dont on ne peut pas revenir à
+ * l'état vide n'est pas facultatif. Rien ici ne peut être invalide, donc rien ne bloque
+ * l'enregistrement et aucun message d'erreur n'existe. `MueSegmentedChoice` publie déjà la
+ * sémantique de groupe de boutons radio, si bien que le champ s'annonce comme le contrôle à choix
+ * que PRD_SCALE 20 demande, avec son libellé d'usage.
+ */
+@Composable
+private fun SexSection(sex: Sex?, onSexChange: (Sex?) -> Unit) {
+    val spacing = MueTheme.spacing
+    ProfileSection(title = ScaleMessages.SEX_SECTION_TITLE) {
+        MueSurfaceCard(
+            modifier = Modifier.testTag(ScaleTestTags.SEX_SECTION),
+            shape = MueTheme.shapes.field,
+            contentPadding = PaddingValues(spacing.lg),
+        ) {
+            MueText(
+                text = ScaleMessages.SEX_SECTION_BODY,
+                style = MueTheme.typography.caption,
+                color = MueTheme.colors.textSecondary,
+            )
+            MueText(
+                text = ScaleMessages.SEX_LABEL,
+                style = MueTheme.typography.label,
+                color = MueTheme.colors.textTertiary,
+                modifier = Modifier.padding(top = spacing.lg, bottom = spacing.sm),
+            )
+            MueSegmentedChoice(
+                options = SEX_OPTIONS,
+                selected = sex,
+                onSelect = onSexChange,
+                label = ::sexLabel,
+                modifier = Modifier.testTag(ScaleTestTags.SEX_FIELD),
+            )
+        }
+    }
+}
+
+/** `Female`, `Male`, et l'état non renseigné, qui est une option comme les autres. */
+private val SEX_OPTIONS: List<Sex?> = listOf(Sex.FEMALE, Sex.MALE, null)
+
+private fun sexLabel(sex: Sex?): String = when (sex) {
+    Sex.FEMALE -> ScaleMessages.FEMALE
+    Sex.MALE -> ScaleMessages.MALE
+    null -> ScaleMessages.SEX_NOT_SET
+}
+
+/**
+ * `Scales` sur `Profile` : combien de balances sont associées, et le chemin vers l'écran dédié
+ * (FR-SCALE-010, PRD_SCALE 8).
+ *
+ * Un réglage d'appareil, rangé exactement comme `Data & sync` : invisible depuis les écrans
+ * principaux, et sans le moindre badge. `No scale paired` est un état normal et non une lacune —
+ * `Entry` est strictement l'écran du PRD socle sans balance (PRD_SCALE 18.1) — donc la ligne
+ * l'énonce sans rien réclamer. Le flux d'appairage n'est jamais proposé d'ailleurs que d'ici.
+ */
+@Composable
+private fun ScalesSection(pairedScaleCount: Int, onOpenScales: () -> Unit) {
+    val spacing = MueTheme.spacing
+    ProfileSection(title = ScaleMessages.SCALES) {
+        MueSurfaceCard(
+            modifier = Modifier.testTag(ScaleTestTags.PROFILE_SECTION),
+            shape = MueTheme.shapes.field,
+            contentPadding = PaddingValues(spacing.lg),
+            onClick = onOpenScales,
+            onClickLabel = ScaleMessages.MANAGE_YOUR_SCALES,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    MueText(
+                        text = if (pairedScaleCount == 0) {
+                            ScaleMessages.NO_SCALE_PAIRED
+                        } else {
+                            ScaleMessages.scalesPaired(pairedScaleCount)
+                        },
+                        style = MueTheme.typography.bodyStrong,
+                    )
+                    MueText(
+                        text = ScaleMessages.SCALES_ROW_BODY,
+                        style = MueTheme.typography.caption,
+                        color = MueTheme.colors.textSecondary,
+                        modifier = Modifier.padding(top = spacing.xxs),
+                    )
+                }
+                MueIcon(
+                    iconName = MueIcons.CHEVRON_RIGHT,
+                    tint = MueTheme.colors.textTertiary,
+                    size = 18.dp,
                 )
             }
         }

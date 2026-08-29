@@ -35,6 +35,8 @@ import androidx.room.RoomDatabase
         RecipeIngredientEntity::class,
         FoodLogEntryEntity::class,
         MealPlanEntryEntity::class,
+        ScaleEntity::class,
+        BodyCompositionEntity::class,
     ],
     version = MueDatabase.VERSION,
     exportSchema = true,
@@ -61,6 +63,12 @@ abstract class MueDatabase : RoomDatabase() {
 
     abstract fun mealPlanDao(): MealPlanDao
 
+    /**
+     * Les balances appairées. Sans journal de synchronisation, contrairement à tous les autres
+     * DAO métier : PRD_SCALE 22 tient cette collection hors du fil.
+     */
+    abstract fun scaleDao(): ScaleDao
+
     companion object {
         const val NAME = "mue.db"
 
@@ -73,8 +81,13 @@ abstract class MueDatabase : RoomDatabase() {
          *    synchronisation column of their own — `sync_aggregate_state` already keys that
          *    metadata by aggregate type, and PRD_FOOD 20.1's own reason for asking is served
          *    better by a table that never has to be migrated again.
+         * 7: le module balance (PRD_SCALE 21.1) — `scale`, `body_composition`, les trois colonnes
+         *    de provenance et d'impédance de `measurements`, et `health_profile.sex`. Additive :
+         *    aucun poids n'est réécrit, aucune ligne n'est perdue. `scale` est la première table
+         *    **jamais synchronisée** du fichier (PRD_SCALE 22), et la seule dont le DAO n'hérite
+         *    pas de `SyncJournalDao`.
          */
-        const val VERSION = 6
+        const val VERSION = 7
 
         fun build(context: Context): MueDatabase =
             Room.databaseBuilder(context.applicationContext, MueDatabase::class.java, NAME)

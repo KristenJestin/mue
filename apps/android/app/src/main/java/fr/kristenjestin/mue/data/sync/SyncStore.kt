@@ -1,7 +1,6 @@
 package fr.kristenjestin.mue.data.sync
 
 import androidx.room.withTransaction
-import fr.kristenjestin.mue.data.local.database.MeasurementEntity
 import fr.kristenjestin.mue.data.local.database.MueDatabase
 import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
@@ -396,12 +395,7 @@ class RoomSyncStore(
             "no local store for aggregate type ${change.aggregateType}"
         }
         when (change) {
-            is MeasurementUpsertChangeDto -> database.measurementDao().upsert(
-                MeasurementEntity(
-                    date = change.payload.date,
-                    weightCg = change.payload.weightCg,
-                )
-            )
+            is MeasurementUpsertChangeDto -> applyMeasurementUpsert(change)
 
             /*
              * A whole session, written through the same five tables its own save uses — and
@@ -477,6 +471,9 @@ class RoomSyncStore(
             // profile would then have deleted the measurement dated `me`, which is a row that
             // cannot exist — a silent no-op hiding a change that was never applied.
             is DeleteChangeDto -> when (localType) {
+                // La composition suit par `ON DELETE CASCADE` (BR-SCALE-007), l'autre moitié de
+                // la règle que l'upsert ci-dessus tient par `upsertAggregate`. Une suppression ne
+                // décrit aucun champ : elle retire la mesure entière, enfant compris.
                 SyncAggregateStateEntity.TYPE_MEASUREMENT ->
                     database.measurementDao().deleteByDate(change.aggregateId)
 
@@ -536,6 +533,56 @@ class RoomSyncStore(
                 originType = change.meta.originType,
                 originId = change.meta.originId,
             )
+        )
+    }
+
+    /**
+     * Un upsert descendu du serveur, appliqué **comme le payload complet qu'il est désormais**.
+     *
+     * ## La règle provisoire est levée
+     *
+     * Cette fonction comparait le poids descendu au poids local et ne réécrivait rien lorsqu'ils
+     * étaient égaux. C'était une garde, pas une optimisation : `MeasurementPayloadV1Dto` ne
+     * portait alors que `date` et `weightCg`, un changement descendu était **partiel par
+     * construction**, et appliquer BR-SCALE-007 — « un payload complet sans composition retire
+     * l'ancienne composition » — à un payload connu pour être partiel aurait fait d'une
+     * synchronisation un effaceur d'impédance irremplaçable.
+     *
+     * Son échéance portait un nom, et elle est arrivée : PRD_SCALE 22 fait traverser au fil la
+     * provenance, l'impédance et la composition. La prémisse tombe, et avec elle la garde. Un
+     * upsert descendu est de nouveau ce que PRD 12.2 dit qu'un upsert est — l'état complet de
+     * l'agrégat — donc il s'écrit d'un bloc, sans lecture préalable et sans condition.
+     *
+     * ## Ce que cela rend vrai
+     *
+     * - **BR-SCALE-007 à la lettre.** `upsertAggregate` supprime la composition de la date puis
+     *   réécrit celle du payload, s'il y en a une. Une descente sans composition retire donc bien
+     *   celle qui existait : c'est une information portée par le payload et non un silence.
+     * - **BR-SCALE-008.** L'impédance du payload est écrite telle quelle, y compris pour une
+     *   mesure sans composition — ce qui est exactement la matière dont le calcul rétroactif de
+     *   FR-BODY-006 a besoin sur chaque client.
+     * - **BR-SCALE-015.** `SyncWire.bodyCompositionEntity` reprend `date` et `inputWeightCg` du
+     *   parent, donc la composition écrite ne peut pas contredire le poids qui la porte.
+     *
+     * ## Ce que cela coûte, et pourquoi c'est le prix juste
+     *
+     * L'écho que le serveur renvoie de la propre poussée de cet appareil est appliqué — rien dans
+     * ce paquet ne filtre par `origin` ni ne compare les révisions — et il ne coûte plus rien,
+     * puisqu'il rapporte les champs qu'il avait emportés. **Sauf `source_scale_id`, qui ne quitte
+     * jamais le téléphone (PRD_SCALE 16.2 et 22) et qu'aucune descente ne peut donc rétablir.**
+     * Cette perte est bornée par construction : la colonne est déjà annulable par BR-SCALE-010 —
+     * oublier une balance l'annule — et `source_type = 'scale'`, le fait métier, est synchronisé
+     * et revient intact.
+     *
+     * **La contrepartie serveur est une dépendance, pas une hypothèse.** Tant que le gestionnaire
+     * de `measurement` de `packages/domain` ne persiste pas et ne renvoie pas ces trois champs,
+     * son écho est un payload complet *vide* de composition — et cette fonction, correctement,
+     * l'appliquera comme un retrait. Les deux moitiés vont ensemble.
+     */
+    private suspend fun applyMeasurementUpsert(change: MeasurementUpsertChangeDto) {
+        database.measurementDao().upsertAggregate(
+            SyncWire.measurementEntity(change.payload),
+            SyncWire.bodyCompositionEntity(change.payload),
         )
     }
 }

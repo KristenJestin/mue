@@ -403,12 +403,12 @@ class ProgressViewModelTest {
     fun `the period survives a process death`() = runTest {
         val handle = SavedStateHandle()
         val repository = FakeMeasurementRepository(listOf(measurement(0, 74.5)))
-        val first = ProgressViewModel(repository, FakeUserProfileRepository(), handle, clock)
+        val first = ProgressViewModel(repository, FakeUserProfileRepository(), FakeScaleRepository(), handle, clock)
         collect(first)
         first.selectPeriod(Period.ALL)
         advanceUntilIdle()
 
-        val restored = ProgressViewModel(repository, FakeUserProfileRepository(), handle.copy(), clock)
+        val restored = ProgressViewModel(repository, FakeUserProfileRepository(), FakeScaleRepository(), handle.copy(), clock)
         collect(restored)
         advanceUntilIdle()
 
@@ -419,14 +419,14 @@ class ProgressViewModelTest {
     fun `an open panel and its edits survive a process death`() = runTest {
         val handle = SavedStateHandle()
         val repository = FakeMeasurementRepository(listOf(measurement(5, 74.9)))
-        val first = ProgressViewModel(repository, FakeUserProfileRepository(), handle, clock)
+        val first = ProgressViewModel(repository, FakeUserProfileRepository(), FakeScaleRepository(), handle, clock)
         collect(first)
         first.openEditor(measurement(5, 74.9))
         first.updateWeightInput("73.1")
         first.requestDelete()
         advanceUntilIdle()
 
-        val restored = ProgressViewModel(repository, FakeUserProfileRepository(), handle.copy(), clock)
+        val restored = ProgressViewModel(repository, FakeUserProfileRepository(), FakeScaleRepository(), handle.copy(), clock)
         collect(restored)
         advanceUntilIdle()
 
@@ -455,6 +455,9 @@ class ProgressViewModelTest {
         val viewModel = ProgressViewModel(
             measurementRepository = repository,
             userProfileRepository = FakeUserProfileRepository(profile),
+            // PRD_SCALE 18.4 : ces tests-là ne parlent pas de balance ; l'absence est le cas par
+            // défaut de l'écran et celui que la suite antérieure au module décrit.
+            scaleRepository = FakeScaleRepository(),
             savedStateHandle = SavedStateHandle(),
             clock = clock,
         )

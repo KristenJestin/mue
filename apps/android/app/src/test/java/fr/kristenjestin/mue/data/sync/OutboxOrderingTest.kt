@@ -190,7 +190,7 @@ class OutboxOrderingTest {
         repository.save(measurement("2026-08-21", 7_400))
         profiles.upsertWithMutation(
             HealthProfileEntity(heightCm = 178),
-            profileOutbox.healthProfileUpsert(heightCm = 178, birthDate = null),
+            profileOutbox.healthProfileUpsert(heightCm = 178, birthDate = null, sex = null),
         )
         wallClock = 500L
         repository.save(measurement("2026-08-22", 7_420))
@@ -221,7 +221,11 @@ class OutboxOrderingTest {
 
         profiles.upsertWithMutation(
             HealthProfileEntity(heightCm = 171, birthDate = "1998-11-18"),
-            profileOutbox.healthProfileUpsert(heightCm = 171, birthDate = LocalDate.of(1998, 11, 18)),
+            profileOutbox.healthProfileUpsert(
+                heightCm = 171,
+                birthDate = LocalDate.of(1998, 11, 18),
+                sex = null,
+            ),
         )
         repository.save(measurement("2026-08-21", 7_400))
 

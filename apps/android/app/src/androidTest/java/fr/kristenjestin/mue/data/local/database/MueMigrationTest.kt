@@ -117,8 +117,8 @@ class MueMigrationTest {
         try {
             val measurements = database.measurementDao().getAll()
             assertEquals(seeded.size, measurements.size)
-            assertEquals(7450, measurements.first { it.date == "2026-08-23" }.weightCg)
-            assertEquals(74.5, measurements.first { it.date == "2026-08-23" }.toDomain().weight.kilograms, 0.0)
+            assertEquals(7450, measurements.first { it.measurement.date == "2026-08-23" }.measurement.weightCg)
+            assertEquals(74.5, measurements.first { it.measurement.date == "2026-08-23" }.toDomain().weight.kilograms, 0.0)
             assertNull(database.measurementDao().findByDate("1999-01-01"))
         } finally {
             database.close()

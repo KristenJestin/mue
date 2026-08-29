@@ -2,11 +2,13 @@ package fr.kristenjestin.mue.data.remote.sync
 
 import fr.kristenjestin.mue.data.local.database.ActivityMetricEntity
 import fr.kristenjestin.mue.data.local.database.ActivitySessionEntity
+import fr.kristenjestin.mue.data.local.database.BodyCompositionEntity
 import fr.kristenjestin.mue.data.local.database.ExerciseDefinitionEntity
 import fr.kristenjestin.mue.data.local.database.FoodEntity
 import fr.kristenjestin.mue.data.local.database.FoodLogEntryEntity
 import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.local.database.MealPlanEntryEntity
+import fr.kristenjestin.mue.data.local.database.MeasurementEntity
 import fr.kristenjestin.mue.data.local.database.NutrientColumns
 import fr.kristenjestin.mue.data.local.database.RecipeEntity
 import fr.kristenjestin.mue.data.local.database.RecipeIngredientEntity
@@ -17,11 +19,13 @@ import fr.kristenjestin.mue.data.local.database.SyncAggregateStateEntity
 import fr.kristenjestin.mue.data.local.database.SyncMutationEntity
 import fr.kristenjestin.mue.data.local.database.encodeSteps
 import fr.kristenjestin.mue.data.sync.HealthProfilePayload
+import fr.kristenjestin.mue.data.sync.MeasurementPayload
 import fr.kristenjestin.mue.data.sync.PAYLOAD_SCHEMA_VERSION
 import fr.kristenjestin.mue.domain.model.ExerciseDefinition
 import fr.kristenjestin.mue.domain.model.Food
 import fr.kristenjestin.mue.domain.model.FoodAggregates
 import fr.kristenjestin.mue.domain.model.MealPlanKey
+import fr.kristenjestin.mue.domain.model.MeasurementSource
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import java.time.DateTimeException
@@ -379,12 +383,18 @@ object SyncWire {
      * It exists so `SyncOutbox`'s [HealthProfilePayload] and the wire's
      * [HealthProfilePayloadV1Dto] have one crossing point instead of two, and so a test can
      * feed a real height and a real birth date through it rather than assert a shape.
+     *
+     * [HealthProfilePayload.sex] traverse ici depuis PRD_SCALE 22. Il ne traversait pas : le DTO
+     * ne déclarait pas le champ, `SyncJson` a `ignoreUnknownKeys = true`, et relire le payload
+     * stocké à travers un DTO qui ignore une clé **la retire**. Le sexe était journalisé à chaque
+     * enregistrement de profil et perdu à la sortie du téléphone, sans erreur nulle part.
      */
     fun healthProfilePayload(
         payload: HealthProfilePayload,
     ): HealthProfilePayloadV1Dto = HealthProfilePayloadV1Dto(
         heightCm = payload.heightCm,
         birthDate = payload.birthDate,
+        sex = payload.sex,
     )
 
     /**
@@ -401,7 +411,95 @@ object SyncWire {
         id = HealthProfileEntity.ROW_ID,
         heightCm = payload.heightCm,
         birthDate = payload.birthDate,
+        sex = payload.sex,
     )
+
+    /**
+     * The payload of a measurement upsert, as the outbox stores it — the measurement's half of
+     * the crossing point [healthProfilePayload] is the profile's.
+     *
+     * Les cinq champs traversent, et `sourceScaleId` n'existe ni d'un côté ni de l'autre :
+     * `MeasurementPayload` ne le lit déjà pas de la mesure (PRD_SCALE 16.2 et 22), et
+     * [MeasurementPayloadV1Dto] n'a pas de champ pour le recevoir. La règle est tenue deux fois,
+     * par deux absences, plutôt que par une ligne qu'il faudrait se souvenir de ne pas écrire.
+     */
+    fun measurementPayload(
+        payload: MeasurementPayload,
+    ): MeasurementPayloadV1Dto = MeasurementPayloadV1Dto(
+        date = payload.date,
+        weightCg = payload.weightCg,
+        sourceType = payload.sourceType,
+        impedanceOhm = payload.impedanceOhm,
+        bodyComposition = payload.bodyComposition?.let {
+            BodyCompositionV1Dto(
+                formulaId = it.formulaId,
+                formulaVersion = it.formulaVersion,
+                inputWeightCg = it.inputWeightCg,
+                inputHeightCm = it.inputHeightCm,
+                inputAgeYears = it.inputAgeYears,
+                inputSex = it.inputSex,
+                bodyFatDeciPercent = it.bodyFatDeciPercent,
+                fatFreeMassCg = it.fatFreeMassCg,
+                bodyWaterDeciPercent = it.bodyWaterDeciPercent,
+                restingEnergyKcal = it.restingEnergyKcal,
+            )
+        },
+    )
+
+    /**
+     * The local row a received measurement becomes — poids, provenance et impédance.
+     *
+     * **[MeasurementEntity.sourceScaleId] est écrit `null`, toujours.** L'identifiant de la
+     * balance ne traverse jamais le fil (PRD_SCALE 16.2 et 22), donc un changement descendu ne
+     * peut rien en dire ; le conserver reviendrait à rattacher la version du serveur à un appareil
+     * que cette version ne mentionne pas. La perte est bornée par construction : c'est la colonne
+     * que BR-SCALE-010 rend déjà annulable — oublier une balance l'annule aussi — et
+     * `source_type = 'scale'`, lui, est le fait métier et il est synchronisé.
+     *
+     * Une provenance absente ou illisible devient [MeasurementSource.SERVER] et non `manual`.
+     * `manual` affirmerait une saisie à la main que personne n'a faite, alors que la seule chose
+     * que ce build sache d'un payload muet sur sa provenance, c'est qu'il est descendu du serveur
+     * — ce dont [MeasurementSource] a la constante exactement pour ce cas.
+     */
+    fun measurementEntity(payload: MeasurementPayloadV1Dto): MeasurementEntity {
+        val source = payload.sourceType?.let(MeasurementSource::fromWire)
+            ?: MeasurementSource.SERVER
+        return MeasurementEntity(
+            date = payload.date,
+            weightCg = payload.weightCg,
+            sourceType = source.wireValue,
+            sourceScaleId = null,
+            impedanceOhm = payload.impedanceOhm,
+        )
+    }
+
+    /**
+     * La composition d'un changement descendu, ou `null` — auquel cas
+     * `MeasurementDao.upsertAggregate` retire celle qui existait (BR-SCALE-007).
+     *
+     * `date` et `inputWeightCg` sont repris **du parent** et non de l'objet imbriqué, exactement
+     * comme le fait `Measurement.toCompositionEntity` pour une écriture locale. BR-SCALE-015 est
+     * une contrainte du schéma Zod, or un DTO écrit à la main ne porte pas les `refine` du
+     * contrat : les prendre du parent rend l'inégalité impossible à écrire ici plutôt que
+     * détectable après coup, et il n'existe aucune requête qui la vérifierait après coup.
+     */
+    fun bodyCompositionEntity(
+        payload: MeasurementPayloadV1Dto,
+    ): BodyCompositionEntity? = payload.bodyComposition?.let {
+        BodyCompositionEntity(
+            date = payload.date,
+            formulaId = it.formulaId,
+            formulaVersion = it.formulaVersion,
+            inputWeightCg = payload.weightCg,
+            inputHeightCm = it.inputHeightCm,
+            inputAgeYears = it.inputAgeYears,
+            inputSex = it.inputSex,
+            bodyFatDeciPercent = it.bodyFatDeciPercent,
+            fatFreeMassCg = it.fatFreeMassCg,
+            bodyWaterDeciPercent = it.bodyWaterDeciPercent,
+            restingEnergyKcal = it.restingEnergyKcal,
+        )
+    }
 
     // --- the local rows a received change becomes ------------------------------------------
 

@@ -127,7 +127,7 @@ class MeasurementOutboxDaoTest {
         repository.save(measurement("2026-08-22", 7_420))
         syncDao.markFailed("mutation-0", "sync.invalid_payload", "weight out of range")
 
-        assertEquals(7_420, measurementDao.findByDate("2026-08-22")?.weightCg)
+        assertEquals(7_420, measurementDao.findByDate("2026-08-22")?.measurement?.weightCg)
     }
 
     /**

@@ -107,6 +107,92 @@ describe("the tool catalogue", () => {
   });
 });
 
+describe("the scale module in the catalogue (PRD_SCALE 16.2, 22)", () => {
+  const weightTools = (suffix: string) => MUE_TOOLS.filter((tool) => tool.name.endsWith(suffix));
+
+  test("a body composition is reachable only as part of its weighing", () => {
+    // BR-SCALE-006 and PRD_SCALE 22: *"il n'existe pas d'outil indépendant capable de créer une
+    // composition orpheline."* This is the catalogue-level half of that -- one input in the
+    // whole surface is named for a composition, and it belongs to the tool that writes the
+    // weight. A future `mue.create_body_composition` fails here before it is ever called.
+    const carriers = MUE_TOOLS.filter((tool) => "bodyComposition" in tool.inputSchema);
+    expect(carriers.map((tool) => tool.name)).toEqual(["mue.upsert_weight_measurement"]);
+    for (const tool of MUE_TOOLS) {
+      const named = /composition/i.test(tool.name);
+      expect({ name: tool.name, named }).toEqual({ name: tool.name, named: false });
+    }
+  });
+
+  test("no input in the whole catalogue names a scale, an address or a device", () => {
+    // PRD_SCALE 16.2: the local identifier, the Bluetooth address and the advertised name
+    // never leave the phone. There is no column for any of them either, which the integration
+    // test asserts against `information_schema`; this is the surface an agent can *speak*.
+    //
+    // `sourceType` is the exception the rule is built around and it is not matched here: it is
+    // a value, not a parameter name, and it says a scale was involved without saying which.
+    const identifying = /scaleid|scale_id|macaddress|bluetooth|advertised|deviceaddress/i;
+    for (const tool of MUE_TOOLS) {
+      for (const name of Object.keys(tool.inputSchema)) {
+        const input = `${tool.name}.${name}`;
+        expect({ input, identifying: identifying.test(name) }).toEqual({
+          input,
+          identifying: false,
+        });
+      }
+    }
+  });
+
+  test("a composition takes the scope of the weighing it belongs to, and no scope of its own", () => {
+    // PRD_SCALE 22 makes reading a composition as sensitive as reading a weight and writing one
+    // a health-data write. Both are satisfied by the weight tools' own scopes, because a
+    // composition is a field of that record and BR-SCALE-006 gives it no life apart from it. A
+    // scope of its own would advertise a permission over an object that does not exist -- and
+    // section 15.2's list is what a person is actually asked to consent to.
+    for (const tool of weightTools("_weight_measurement").concat(
+      weightTools("_weight_measurements"),
+    )) {
+      for (const scope of tool.scopes) {
+        expect({ name: tool.name, scope }).toEqual({
+          name: tool.name,
+          scope: tool.annotations.readOnlyHint
+            ? "weight:read"
+            : tool.name.includes(".delete_") && scope === "data:delete"
+              ? "data:delete"
+              : "weight:write",
+        });
+      }
+    }
+    // And the sex, which joined the health profile rather than the weighing (PRD_SCALE 22).
+    const profile = MUE_TOOLS.filter((tool) => tool.name.endsWith("_health_profile"));
+    expect(profile).toHaveLength(2);
+    for (const tool of profile) {
+      expect({ name: tool.name, scopes: [...tool.scopes] }).toEqual({
+        name: tool.name,
+        scopes: [tool.annotations.readOnlyHint ? "profile:read" : "profile:write"],
+      });
+    }
+    // No scope was invented for any of this: every one a tool declares is one section 15.2
+    // lists and `MUE_SCOPES` implements, or nobody could be asked to grant it.
+    for (const tool of MUE_TOOLS) {
+      for (const scope of tool.scopes) expect(ALL_SCOPES.has(scope)).toBe(true);
+    }
+  });
+
+  test("the sex is offered to an agent alongside the two fields it sits with", () => {
+    // PRD_SCALE 22: *"le sexe rejoint l'agrégat `HealthProfile`"*, so it is read and written by
+    // the profile tools and by nothing else. The `clear` flag is what keeps *"I emptied this"*
+    // sayable without *"I did not mention this"* meaning the same -- the distinction section
+    // 13.4's merge is built on, and the one whose absence deleted the field.
+    const update = MUE_TOOLS.find((tool) => tool.name === "mue.update_health_profile");
+    expect(Object.keys(update!.inputSchema)).toContain("sex");
+    expect(Object.keys(update!.inputSchema)).toContain("clearSex");
+    // And it says what it is for. FR-PROFILE-007 requires the field to justify itself wherever
+    // it is offered: a sex asked for without a stated use reads as gratuitous collection.
+    const description = (update!.inputSchema["sex"] as z.ZodType).description ?? "";
+    expect(description.toLowerCase()).toContain("composition");
+  });
+});
+
 describe("scope gating", () => {
   test("a read scope reaches no write tool", () => {
     // Section 22.5, at the unit level. The integration test proves the same thing

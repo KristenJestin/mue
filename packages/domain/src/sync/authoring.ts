@@ -2,7 +2,9 @@ import {
   ACTIVITY_SESSION_PAYLOAD_VERSION_1,
   type ActivitySessionPayloadV1,
   type AggregateType,
+  type BodyCompositionV1,
   MEASUREMENT_PAYLOAD_VERSION_1,
+  type MeasurementPayloadV1,
   type MueError,
   type MutationEnvelope,
   type MutationOp,
@@ -16,7 +18,7 @@ import { SyncRequestError } from "./errors";
 import { submitMutation } from "./push";
 import type { SyncContext } from "./types";
 
-const { activitySessions, measurements } = schema;
+const { activitySessions, bodyComposition, measurements } = schema;
 
 /**
  * Authoring mutations from the server side.
@@ -28,9 +30,33 @@ const { activitySessions, measurements } = schema;
  * FR-SYNC-004 true -- the phone receives it on its next pull as ordinary data.
  */
 
+/**
+ * One weighing to author, with everything PRD_SCALE 22 put on the wire beside the weight.
+ *
+ * The three scale fields are optional here and *omitted* rather than nulled in the payload
+ * below, because that is the distinction `measurementPayloadV1Schema` is built on: absent is
+ * the complete, valid statement of "there is none", and `null` is a value the schema refuses.
+ *
+ * Their absence is never a silence. Section 12.2 makes an upsert state the whole aggregate, so
+ * BR-SCALE-007 reads a complete payload with no `bodyComposition` as the order to remove the
+ * one that date already carried. A caller that means to keep a stored composition therefore
+ * has to say so by restating it -- which is the whole reason [listMeasurements] below reads
+ * these fields back, and the reason this interface carries them at all: an authoring API that
+ * could only state a weight could only ever delete the rest.
+ */
 export interface AuthoredMeasurement {
   readonly date: string;
   readonly weightCg: number;
+  /** Business provenance (PRD_SCALE 21.1). Absent means `manual` on the wire and in the row. */
+  readonly sourceType?: MeasurementPayloadV1["sourceType"];
+  /**
+   * Raw impedance in ohms, on the measurement and never on the composition (FR-BODY-004,
+   * BR-SCALE-008). Carried even when no composition could be computed, which is what gives
+   * FR-BODY-006's retroactive calculation the same material on every client.
+   */
+  readonly impedanceOhm?: number;
+  /** The optional child of BR-SCALE-006. Absent removes whatever the date held. */
+  readonly bodyComposition?: BodyCompositionV1;
   /** The revision the author believed it was editing; null for a creation. */
   readonly baseRevision?: string | null;
   /** Supplied when the caller has its own idempotency key; minted otherwise. */
@@ -55,17 +81,40 @@ function envelope(
   };
 }
 
+/**
+ * A key spread into the payload only when the author stated it.
+ *
+ * `exactOptionalPropertyTypes` makes `{ impedanceOhm: undefined }` a different value from an
+ * absent key, and only the second is what `.optional()` describes. It matters beyond the type
+ * checker: the payload is journalled verbatim, `pull` re-parses every entry it returns, and an
+ * explicit `undefined` serialises to JSON as a missing key here but as `null` through some
+ * clients -- a snapshot the schema then refuses, on a change the server itself wrote.
+ */
+function ifStated<K extends string, T>(
+  key: K,
+  value: T | undefined,
+): Record<K, T> | Record<string, never> {
+  return value === undefined ? {} : ({ [key]: value } as Record<K, T>);
+}
+
 export function buildMeasurementUpsert(
   origin: Origin,
   input: AuthoredMeasurement,
 ): MutationEnvelope {
+  const payload: MeasurementPayloadV1 = {
+    date: input.date,
+    weightCg: input.weightCg,
+    ...ifStated("sourceType", input.sourceType),
+    ...ifStated("impedanceOhm", input.impedanceOhm),
+    ...ifStated("bodyComposition", input.bodyComposition),
+  };
   return {
     ...envelope(origin, input.mutationId, input.occurredAt, input.baseRevision),
     aggregateType: "measurement",
     aggregateId: input.date,
     op: "upsert",
     payloadSchemaVersion: MEASUREMENT_PAYLOAD_VERSION_1,
-    payload: { date: input.date, weightCg: input.weightCg },
+    payload,
   };
 }
 
@@ -102,10 +151,43 @@ export async function deleteMeasurement(
   return submitMutation(handle, context, buildMeasurementDelete(origin, input));
 }
 
+/**
+ * One stored weighing, as an author reads it back before restating it.
+ *
+ * It carries the whole aggregate and not only the weight, and that is the point rather than
+ * completeness for its own sake. BR-SCALE-007 makes a complete payload with no composition an
+ * instruction to delete one, so an author that reads `{date, weightCg}` and writes it back has
+ * silently destroyed an impedance and a composition it never saw. A read shape narrower than
+ * the write shape is, for this aggregate, a data-loss path with no error in it.
+ */
 export interface MeasurementView {
   readonly date: string;
   readonly weightCg: number;
+  /** `manual`, `scale`, `agent` or `server` (PRD_SCALE 21.1). Never null: the column defaults. */
+  readonly sourceType: string;
+  /** Ohms, or null when no usable reading was taken (BR-SCALE-005, BR-SCALE-008). */
+  readonly impedanceOhm: number | null;
+  /** The optional child of BR-SCALE-006, or null when the date carries none. */
+  readonly bodyComposition: BodyCompositionV1 | null;
   readonly revision: string;
+}
+
+/** The child row, rebuilt into the shape the payload states it in. */
+function compositionOf(row: typeof bodyComposition.$inferSelect | null): BodyCompositionV1 | null {
+  if (row === null) return null;
+  return {
+    formulaId: row.formulaId,
+    formulaVersion: row.formulaVersion,
+    inputWeightCg: row.inputWeightCg,
+    inputHeightCm: row.inputHeightCm,
+    inputAgeYears: row.inputAgeYears,
+    // Plain text columns, narrowed by the schema that refuses anything else on the way in.
+    inputSex: row.inputSex as BodyCompositionV1["inputSex"],
+    bodyFatDeciPercent: row.bodyFatDeciPercent,
+    fatFreeMassCg: row.fatFreeMassCg,
+    bodyWaterDeciPercent: row.bodyWaterDeciPercent,
+    restingEnergyKcal: row.restingEnergyKcal,
+  };
 }
 
 /**
@@ -114,6 +196,10 @@ export interface MeasurementView {
  * The exclusion is the rule, not a convenience: FR-SYNC-005 keeps a deleted
  * row until retention sweeps it, so every reader that is not the journal must
  * filter it out, and that filter exists once.
+ *
+ * The composition is joined rather than fetched per row: it is at most one child per date, its
+ * foreign key is the pair this query already selects on, and a second round trip per weighing
+ * would be one place for the tombstone filter to be spelled differently.
  */
 export async function listMeasurements(
   handle: DatabaseHandle,
@@ -121,12 +207,15 @@ export async function listMeasurements(
   range: { from?: string; to?: string; limit?: number } = {},
 ): Promise<MeasurementView[]> {
   const rows = await handle.db
-    .select({
-      date: measurements.date,
-      weightCg: measurements.weightCg,
-      revision: measurements.revision,
-    })
+    .select({ measurement: measurements, composition: bodyComposition })
     .from(measurements)
+    .leftJoin(
+      bodyComposition,
+      and(
+        eq(bodyComposition.userId, measurements.userId),
+        eq(bodyComposition.date, measurements.date),
+      ),
+    )
     .where(
       and(
         eq(measurements.userId, context.userId),
@@ -138,9 +227,12 @@ export async function listMeasurements(
     .orderBy(asc(measurements.date))
     .limit(range.limit ?? 500);
   return rows.map((row) => ({
-    date: row.date,
-    weightCg: row.weightCg,
-    revision: row.revision.toString(),
+    date: row.measurement.date,
+    weightCg: row.measurement.weightCg,
+    sourceType: row.measurement.sourceType,
+    impedanceOhm: row.measurement.impedanceOhm,
+    bodyComposition: compositionOf(row.composition),
+    revision: row.measurement.revision.toString(),
   }));
 }
 

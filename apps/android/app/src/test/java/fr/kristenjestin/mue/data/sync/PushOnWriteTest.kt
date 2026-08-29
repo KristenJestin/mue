@@ -65,7 +65,11 @@ class PushOnWriteTest {
         val collector = launch { pushOnWrite { scheduled++ }.run() }
         advanceUntilIdle()
 
-        outbox.healthProfileUpsert(heightCm = 178, birthDate = LocalDate.of(1998, 11, 18))
+        outbox.healthProfileUpsert(
+            heightCm = 178,
+            birthDate = LocalDate.of(1998, 11, 18),
+            sex = null,
+        )
         advanceUntilIdle()
 
         assertEquals(1, scheduled, "a saved profile must schedule exactly one send")
@@ -139,9 +143,9 @@ class PushOnWriteTest {
         val collector = launch { pushOnWrite { scheduled++ }.run() }
         advanceUntilIdle()
 
-        outbox.healthProfileUpsert(heightCm = 178, birthDate = null)
+        outbox.healthProfileUpsert(heightCm = 178, birthDate = null, sex = null)
         advanceUntilIdle()
-        outbox.healthProfileUpsert(heightCm = 179, birthDate = null)
+        outbox.healthProfileUpsert(heightCm = 179, birthDate = null, sex = null)
         advanceUntilIdle()
 
         assertEquals(2, scheduled)
@@ -179,7 +183,7 @@ class PushOnWriteTest {
                 Unit
             },
             "measurementDelete" to { outbox.measurementDelete(LocalDate.of(2026, 8, 27)); Unit },
-            "healthProfileUpsert" to { outbox.healthProfileUpsert(178, null); Unit },
+            "healthProfileUpsert" to { outbox.healthProfileUpsert(178, null, null); Unit },
             "foodUpsert" to { outbox.foodUpsert(food); Unit },
             "foodDelete" to { outbox.foodDelete(FoodId("food-1")); Unit },
             "recipeUpsert" to { outbox.recipeUpsert(recipe); Unit },

@@ -400,6 +400,109 @@ internal object MueMigrations {
         }
     }
 
-    val ALL: Array<Migration> =
-        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    /**
+     * 6 → 7 : le module balance (PRD_SCALE 21.1).
+     *
+     * Additive au sens du PRD — « la migration Room est additive, elle ajoute les colonnes de
+     * provenance et d'impédance ainsi que la table enfant, **sans réécrire les poids existants** »
+     * — mais pas au sens de SQL : `measurements` gagne une clé étrangère, et SQLite ne sait pas en
+     * ajouter une par `ALTER TABLE`. La table est donc recréée exactement comme [MIGRATION_1_2] le
+     * fait déjà : table neuve, `INSERT … SELECT`, `DROP`, `RENAME`. `ALTER TABLE … RENAME COLUMN`
+     * n'est pas une option — il exige SQLite 3.25, qui arrive avec Android 11, et Mue supporte
+     * Android 8 (`minSdk 26`, PRD 20.1). Toutes les instructions tournent dans la transaction que
+     * Room ouvre autour d'une migration : une mise à jour interrompue laisse l'ancienne table
+     * intacte plutôt qu'une table à moitié copiée.
+     *
+     * **L'ordre des instructions est une contrainte, pas une préférence.**
+     *  1. `scale` d'abord : la clé étrangère `measurements.source_scale_id` la nomme, et une
+     *     référence vers une table absente n'est diagnostiquée qu'à la première écriture — donc
+     *     bien après la migration, sur le téléphone de l'utilisateur.
+     *  2. `measurements` ensuite, recréée puis renommée sous son nom définitif. À cet instant
+     *     `body_composition` n'existe pas encore, et c'est ce qui rend le `DROP` inoffensif :
+     *     supprimer une table dont un enfant dépend en `ON DELETE CASCADE` emporte cet enfant.
+     *     Créer la composition avant la recréation du parent reviendrait donc à écrire une
+     *     migration qui efface, à la ligne suivante, ce qu'elle vient de créer.
+     *  3. `body_composition` enfin, dont la clé étrangère cite `measurements` sous son nom final —
+     *     et non `measurements_v7`, un nom qui n'existe plus.
+     *
+     * `source_type` est rétro-rempli à `'manual'` pour tout l'historique, ce que
+     * `MeasurementSource.MANUAL` promet et ce que PRD_SCALE 21.1 exige explicitement : « avec
+     * `manual` par défaut pour tout l'historique existant ». La valeur est écrite en clair par
+     * l'`INSERT … SELECT` plutôt que laissée au `DEFAULT` de la colonne, pour que la ligne soit
+     * juste même si la valeur par défaut changeait un jour.
+     *
+     * `health_profile.sex` est le seul vrai `ALTER TABLE … ADD COLUMN` de la migration : la
+     * colonne est nullable, donc SQLite l'ajoute sans réécrire la ligne. Le champ vit ici et non
+     * dans DataStore parce que PRD_SCALE 22 le synchronise dans l'agrégat `HealthProfile` ; voir
+     * [HealthProfileEntity].
+     *
+     * Aucune ligne n'est semée. `scale` arrive vide parce qu'aucune balance n'a jamais été
+     * appairée, et `body_composition` arrive vide parce qu'aucune impédance n'a jamais été
+     * mesurée ; le calcul rétroactif de FR-BODY-006 est un geste de l'utilisateur, pas une
+     * migration.
+     *
+     * The statements are the ones Room exports for version 7, kept identical on purpose — a
+     * migrated file and a freshly created one have to be the same database, and
+     * `MigrationTestHelper` compares them column by column and index by index.
+     */
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `scale` " +
+                    "(`id` TEXT NOT NULL, `driver_id` TEXT NOT NULL, `address` TEXT NOT NULL, " +
+                    "`advertised_name` TEXT NOT NULL, `display_name` TEXT NOT NULL, " +
+                    "`last_seen_at` INTEGER, `created_at` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_scale_address` ON `scale` (`address`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `measurements_v7` " +
+                    "(`date` TEXT NOT NULL, `weight_cg` INTEGER NOT NULL, " +
+                    "`source_type` TEXT NOT NULL DEFAULT 'manual', `source_scale_id` TEXT, " +
+                    "`impedance_ohm` INTEGER, PRIMARY KEY(`date`), " +
+                    "FOREIGN KEY(`source_scale_id`) REFERENCES `scale`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE SET NULL )"
+            )
+            db.execSQL(
+                "INSERT INTO `measurements_v7` (`date`, `weight_cg`, `source_type`) " +
+                    "SELECT `date`, `weight_cg`, 'manual' FROM `measurements`"
+            )
+            db.execSQL("DROP TABLE `measurements`")
+            db.execSQL("ALTER TABLE `measurements_v7` RENAME TO `measurements`")
+            // Après le renommage, pour que l'index porte le nom que Room attend d'une table
+            // nommée `measurements` : un index créé avant aurait suivi la table sous le nom
+            // `index_measurements_v7_source_scale_id`, et la validation de schéma le verrait
+            // manquant.
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_measurements_source_scale_id` " +
+                    "ON `measurements` (`source_scale_id`)"
+            )
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `body_composition` " +
+                    "(`date` TEXT NOT NULL, `formula_id` TEXT NOT NULL, " +
+                    "`formula_version` INTEGER NOT NULL, `input_weight_cg` INTEGER NOT NULL, " +
+                    "`input_height_cm` INTEGER NOT NULL, `input_age_years` INTEGER NOT NULL, " +
+                    "`input_sex` TEXT NOT NULL, `body_fat_deci_percent` INTEGER NOT NULL, " +
+                    "`fat_free_mass_cg` INTEGER NOT NULL, " +
+                    "`body_water_deci_percent` INTEGER NOT NULL, " +
+                    "`resting_energy_kcal` INTEGER NOT NULL, PRIMARY KEY(`date`), " +
+                    "FOREIGN KEY(`date`) REFERENCES `measurements`(`date`) " +
+                    "ON UPDATE CASCADE ON DELETE CASCADE )"
+            )
+
+            db.execSQL("ALTER TABLE `health_profile` ADD COLUMN `sex` TEXT")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(
+        MIGRATION_1_2,
+        MIGRATION_2_3,
+        MIGRATION_3_4,
+        MIGRATION_4_5,
+        MIGRATION_5_6,
+        MIGRATION_6_7,
+    )
 }

@@ -1,5 +1,6 @@
 package fr.kristenjestin.mue.ui.entry
 
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.DecayAnimationSpec
 import androidx.compose.animation.core.SpringSpec
@@ -51,6 +52,22 @@ class RulerState internal constructor(
 
     /** True from touch-down until the scale has come to rest, inertia and magnetism included. */
     var interacting by mutableStateOf(false)
+        private set
+
+    /**
+     * True while [glideTo] is carrying the ruler towards a value nobody's finger chose.
+     *
+     * Read by the screen for one purpose, and it is not decoration: the save action publishes
+     * [displayedHundredths] back to the ViewModel so a press landed mid-glide records what is on
+     * screen. Mid-*glide*, that same reflex would publish an intermediate value — which would
+     * both save the wrong weight and read as a manual correction, stripping the provenance and
+     * the impedance of the measurement being saved (BR-SCALE-013). During a glide the screen's
+     * own weight is already the destination, so there is nothing to publish.
+     *
+     * Distinct from [interacting] on purpose: a glide must not suppress the digit roll nor block
+     * the screen from following later orders, which is exactly what [interacting] does.
+     */
+    var gliding by mutableStateOf(false)
         private set
 
     private val decay: DecayAnimationSpec<Float> = exponentialDecay(
@@ -113,10 +130,42 @@ class RulerState internal constructor(
         moveTo(hundredths.toFloat())
     }
 
+    /**
+     * The same order, travelled rather than teleported (PRD_SCALE 19).
+     *
+     * A weigh-in arriving from the scale is the one value the user did not put there, and
+     * PRD_SCALE 19 asks the ruler to *move* to it so the eye can follow where it came from.
+     * Everything else — the history seed, `−` / `+`, the keyboard — still lands through
+     * [jumpTo]: those are the user's own doing and travelling to them would only add lag to a
+     * gesture. Under reduced motion the caller uses [jumpTo] instead, which is that section's
+     * "changement direct de valeur".
+     *
+     * Interruptible like every other movement here (PRD 13): a touch calls [onDragStart], which
+     * bumps the generation and cancels this animation where it stands.
+     */
+    fun glideTo(hundredths: Int, spec: AnimationSpec<Float>) {
+        stopMotion()
+        interacting = false
+        val order = generation
+        gliding = true
+        motion = scope.launch {
+            try {
+                AnimationState(positionHundredths).animateTo(hundredths.toFloat(), spec) {
+                    moveTo(value)
+                }
+            } finally {
+                // Same guard as `onDragEnd`: a cancelled coroutine still runs its cleanup, one
+                // frame after the touch that cancelled it, and must not undo that touch's state.
+                if (order == generation) gliding = false
+            }
+        }
+    }
+
     private fun stopMotion() {
         generation++
         motion?.cancel()
         motion = null
+        gliding = false
     }
 
     private fun moveTo(hundredths: Float) {

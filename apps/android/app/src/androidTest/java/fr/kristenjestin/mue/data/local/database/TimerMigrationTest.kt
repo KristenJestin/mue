@@ -232,7 +232,7 @@ class TimerMigrationTest {
             assertEquals(2, live?.equipment?.size)
 
             val measurements = database.measurementDao().getAll()
-            assertEquals(7_450, measurements.first { it.date == "2026-08-23" }.weightCg)
+            assertEquals(7_450, measurements.first { it.measurement.date == "2026-08-23" }.measurement.weightCg)
         }
     }
 

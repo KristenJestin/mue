@@ -10,7 +10,21 @@
     "type": "android"
   },
   "payload": {
+    "bodyComposition": {
+      "bodyFatDeciPercent": 290,
+      "bodyWaterDeciPercent": 519,
+      "fatFreeMassCg": 5567,
+      "formulaId": "mue-foot-to-foot-v1",
+      "formulaVersion": 1,
+      "inputAgeYears": 27,
+      "inputHeightCm": 171,
+      "inputSex": "male",
+      "inputWeightCg": 7845,
+      "restingEnergyKcal": 1723
+    },
     "date": "2026-08-25",
+    "impedanceOhm": 520,
+    "sourceType": "scale",
     "weightCg": 7845
   },
   "payloadSchemaVersion": 1

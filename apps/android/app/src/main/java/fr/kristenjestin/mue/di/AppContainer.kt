@@ -98,4 +98,12 @@ class AppContainer(private val applicationContext: Context) {
      * second one, so every aggregate's mutation comes from the same place.
      */
     val food: FoodContainer by lazy { FoodContainer(applicationContext, database, sync.outbox) }
+
+    /**
+     * Le module balance, entier, pour la même raison que [timer], [sync] et [food]. Il ne prend
+     * pas [SyncContainer.outbox] : les balances enregistrées ne sont pas synchronisées
+     * (PRD_SCALE 22), et les mesures qu'elles produisent sont journalisées par
+     * [measurementRepository], qui l'a déjà.
+     */
+    val scale: ScaleContainer by lazy { ScaleContainer(applicationContext, database) }
 }

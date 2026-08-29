@@ -50,10 +50,17 @@ class EntryFormatTest {
         assertEquals("74.05 kilograms", EntryFormat.spokenWeight(weight, Locale.UK))
     }
 
+    /**
+     * The chip no longer answers `Today`, because the screen no longer draws it on today: a chip
+     * that repeats the default state of its own screen says nothing. What is left has one job —
+     * name the day the measurement belongs to — and it follows the phone's language like the rest.
+     */
     @Test
-    fun `the header says Today only on today`() {
-        assertEquals("Today", EntryFormat.headerDate(today, today, Locale.UK))
-        assertNotEquals("Today", EntryFormat.headerDate(today.minusDays(1), today, Locale.UK))
+    fun `the header chip is the day itself, never the word Today`() {
+        assertNotEquals("Today", EntryFormat.headerDate(today, Locale.UK))
+        val english = EntryFormat.headerDate(today.minusDays(1), Locale.UK)
+        assertTrue(english.contains("Aug") && english.contains("2026"), english)
+        assertTrue(EntryFormat.headerDate(today, Locale.FRANCE).contains("août"))
     }
 
     /** The exact pattern belongs to the JDK's locale data; only the language must follow. */

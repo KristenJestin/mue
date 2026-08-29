@@ -33,10 +33,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCalculator
+import fr.kristenjestin.mue.domain.logic.BodyCompositionCalculator
 import fr.kristenjestin.mue.domain.logic.ProgressStatistics
 import fr.kristenjestin.mue.domain.logic.StatisticsCalculator
+import fr.kristenjestin.mue.domain.logic.compositionOrNull
 import fr.kristenjestin.mue.domain.model.Measurement
+import fr.kristenjestin.mue.domain.model.MeasurementSource
 import fr.kristenjestin.mue.domain.model.Period
+import fr.kristenjestin.mue.domain.model.Sex
+import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.model.Weight
 import fr.kristenjestin.mue.ui.components.MueAnimatedNumber
 import fr.kristenjestin.mue.ui.components.MueBmiCard
@@ -72,6 +77,17 @@ internal const val EMPTY_STATE_BODY =
 internal object ProgressTestTags {
     const val LIST = "progress.list"
     const val CHART = "progress.chart"
+
+    /**
+     * PRD_SCALE 18.4: the profile is complete but sits outside the domain the foot-to-foot
+     * equation was developed in. `ScaleTestTags` reserved the incomplete-profile block and the
+     * retroactive offer but not this third state, so it is named here.
+     */
+    const val COMPOSITION_UNAVAILABLE = "progress.composition.unavailable"
+
+    /** FR-BODY-005: the way into the detailed caution text, and the sheet it opens. */
+    const val COMPOSITION_CAUTION = "progress.composition.caution"
+    const val COMPOSITION_CAUTION_SHEET = "progress.composition.cautionSheet"
 }
 
 private val PeriodLabels = mapOf(
@@ -84,9 +100,13 @@ private val PeriodLabels = mapOf(
 /**
  * The Progress tab (PRD 9.2). Renders its own header and content; the bottom navigation bar
  * belongs to the navigation host and is deliberately not drawn here.
+ *
+ * [onOpenProfile] is what PRD_SCALE 18.4 asks the incomplete-profile block to offer. It defaults
+ * to doing nothing so the shell that predates the scale module still compiles unchanged; the
+ * navigation host is expected to hand over its own tab selection.
  */
 @Composable
-fun ProgressScreen(modifier: Modifier = Modifier) {
+fun ProgressScreen(modifier: Modifier = Modifier, onOpenProfile: () -> Unit = {}) {
     val viewModel: ProgressViewModel = viewModel(factory = ProgressViewModel.Factory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -94,6 +114,8 @@ fun ProgressScreen(modifier: Modifier = Modifier) {
         state = state,
         onSelectPeriod = viewModel::selectPeriod,
         onMeasurementClick = viewModel::openEditor,
+        onOpenProfile = onOpenProfile,
+        onCompletePastWeighIns = viewModel::completePastWeighIns,
         editorActions = remember(viewModel) {
             ProgressEditorActions(
                 onDismiss = viewModel::dismissEditor,
@@ -118,6 +140,8 @@ internal fun ProgressContent(
     onMeasurementClick: (Measurement) -> Unit,
     editorActions: ProgressEditorActions,
     modifier: Modifier = Modifier,
+    onOpenProfile: () -> Unit = {},
+    onCompletePastWeighIns: () -> Unit = {},
 ) {
     val spacing = MueTheme.spacing
 
@@ -125,6 +149,14 @@ internal fun ProgressContent(
     // reset whenever the filter changes because the point may not exist in the new period.
     var selectedIso by rememberSaveable(state.period) { mutableStateOf<String?>(null) }
     val selected = state.chartPoints.firstOrNull { it.date.toString() == selectedIso }
+
+    /*
+     * FR-BODY-005: the detailed caution is a reading, not a state of the screen. It stays out of
+     * the ViewModel for the same reason the selected chart point does — nothing outside this
+     * composition needs to know a panel is open — and out of the UI state so the stateless
+     * content the Compose tests drive stays the one the app runs.
+     */
+    var detailedCautionVisible by rememberSaveable { mutableStateOf(false) }
 
     MueScreenScaffold(
         modifier = modifier,
@@ -180,6 +212,70 @@ internal fun ProgressContent(
                 MueBmiCard(bmi = state.bmi, modifier = Modifier.padding(top = spacing.md))
             }
 
+            /*
+             * PRD_SCALE FR-BODY-005: the body composition sits beside the BMI and follows the
+             * same period filter. It is composed after the BMI and before the history so the
+             * derived readings of the screen stay together, and it is absent altogether unless
+             * something justifies it (PRD_SCALE 18.1, 18.4).
+             *
+             * Below the empty-state early return on purpose: with no measurement at all, PRD 15.1
+             * owns this screen, and explaining what body-composition estimates would need on a
+             * page that reads `Your journey starts here` would answer a question nobody asked.
+             *
+             * One `item` per card rather than one holding four. A `LazyColumn` composes only what
+             * it shows, and `performScrollToNode` can only reach an item the list knows about;
+             * four cards in a single item would be four assertions riding on whether the first
+             * one happened to be tall enough to bring the fourth into view.
+             */
+            val composition = state.composition
+            if (composition.isVisible) {
+                item(key = "compositionHeader") {
+                    BodyCompositionHeader(
+                        state = composition,
+                        onShowDetailedCaution = { detailedCautionVisible = true },
+                        modifier = Modifier.padding(top = spacing.xxl, bottom = spacing.xs),
+                    )
+                }
+
+                if (composition.showCards) {
+                    BodyCompositionMetric.entries.forEach { metric ->
+                        item(key = "composition:${metric.name}") {
+                            BodyCompositionCard(
+                                metric = metric,
+                                state = composition,
+                                modifier = Modifier.padding(top = spacing.md),
+                            )
+                        }
+                    }
+                }
+
+                if (composition.showUnavailableForProfile) {
+                    item(key = "compositionUnavailable") {
+                        EstimatesUnavailableCard(modifier = Modifier.padding(top = spacing.md))
+                    }
+                }
+
+                if (composition.showIncompleteProfile) {
+                    item(key = "compositionIncompleteProfile") {
+                        IncompleteProfileCard(
+                            missing = composition.missingProfileInputs,
+                            onOpenProfile = onOpenProfile,
+                            modifier = Modifier.padding(top = spacing.md),
+                        )
+                    }
+                }
+
+                if (composition.showRetroactiveProposal) {
+                    item(key = "compositionRetroactive") {
+                        RetroactiveProposalCard(
+                            count = composition.retroactiveCount,
+                            onComplete = onCompletePastWeighIns,
+                            modifier = Modifier.padding(top = spacing.md),
+                        )
+                    }
+                }
+            }
+
             item(key = "historyTitle") {
                 MueText(
                     text = HISTORY_TITLE,
@@ -219,6 +315,11 @@ internal fun ProgressContent(
         editor = state.editor,
         today = state.today,
         actions = editorActions,
+    )
+
+    DetailedCautionSheet(
+        visible = detailedCautionVisible,
+        onDismissRequest = { detailedCautionVisible = false },
     )
 }
 
@@ -497,6 +598,7 @@ private fun previewState(
     bmi: Bmi = Bmi.Classified(23.0, BmiCalculator.categoryOf(23.0)),
     editor: EditorUiState? = null,
     hasAnyMeasurement: Boolean = points.isNotEmpty(),
+    composition: BodyCompositionUiState = BodyCompositionUiState.ABSENT,
 ) = ProgressUiState(
     period = Period.THIRTY_DAYS,
     today = PreviewToday,
@@ -507,7 +609,24 @@ private fun previewState(
     statistics = StatisticsCalculator.compute(points),
     bmi = if (points.isEmpty()) Bmi.Unavailable else bmi,
     editor = editor,
+    composition = composition,
 )
+
+/** Un profil complet et dans le domaine, pour la prévisualisation de la section. */
+private val PreviewProfile = UserProfile(
+    heightCm = 178,
+    birthDate = LocalDate.of(1990, 1, 1),
+    sex = Sex.MALE,
+)
+
+private fun previewComposedPoints(): List<Measurement> = PreviewPoints.map { point ->
+    val measured = point.copy(source = MeasurementSource.SCALE, impedanceOhm = 500)
+    measured.copy(
+        bodyComposition = BodyCompositionCalculator
+            .calculate(measured, PreviewProfile)
+            .compositionOrNull,
+    )
+}
 
 @Composable
 private fun ProgressPreviewHost(state: ProgressUiState) {
@@ -545,6 +664,25 @@ private fun ProgressEmptyPeriodPreview() {
 @Composable
 private fun ProgressEmptyPreview() {
     ProgressPreviewHost(previewState(emptyList()))
+}
+
+/** PRD_SCALE FR-BODY-005 : les quatre cartes en place, entre l'IMC et l'historique. */
+@Preview(name = "Progress — body composition", showBackground = true, heightDp = 1400)
+@Composable
+private fun ProgressBodyCompositionPreview() {
+    val points = previewComposedPoints()
+    ProgressPreviewHost(
+        previewState(
+            points = points,
+            composition = BodyCompositionUiState.from(
+                allMeasurements = points,
+                inPeriod = points,
+                profile = PreviewProfile,
+                today = PreviewToday,
+                hasPairedScale = true,
+            ),
+        ),
+    )
 }
 
 @Preview(name = "Progress — sheet open", showBackground = true, heightDp = 900)

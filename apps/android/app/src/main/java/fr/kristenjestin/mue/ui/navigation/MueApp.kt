@@ -31,7 +31,7 @@ import fr.kristenjestin.mue.ui.components.MueBottomBar
 import fr.kristenjestin.mue.ui.components.MueTab
 import fr.kristenjestin.mue.ui.entry.EntryScreen
 import fr.kristenjestin.mue.ui.food.FoodNavHost
-import fr.kristenjestin.mue.ui.profile.ProfileScreen
+import fr.kristenjestin.mue.ui.profile.ProfileNavHost
 import fr.kristenjestin.mue.ui.progress.ProgressScreen
 import fr.kristenjestin.mue.ui.theme.MueMotion
 import fr.kristenjestin.mue.ui.theme.MueTheme
@@ -48,11 +48,12 @@ import fr.kristenjestin.mue.ui.timer.timerViewModel
  * entry providers, a stack per tab to keep the five screens alive) would only re-describe that
  * one integer.
  *
- * Two tabs hold several screens — `Activity` and, since PRD_FOOD 7, `Food` — and each keeps its
- * stack to itself in its own host: the shell stays a selection, and the bar above it never learns
- * that a sub-screen is open. The one thing `Activity` reports back is which screen is on top,
- * because the banner hides while the timer's own screen is showing the very same timer. `Food`
- * reports nothing, because nothing in the chassis depends on what it is showing.
+ * Three tabs hold several screens — `Activity`, `Food` since PRD_FOOD 7, and `Profile` since
+ * PRD_SCALE 8 — and each keeps its stack to itself in its own host: the shell stays a selection,
+ * and the bar above it never learns that a sub-screen is open. The one thing `Activity` reports
+ * back is which screen is on top, because the banner hides while the timer's own screen is showing
+ * the very same timer. `Food` and `Profile` report nothing, because nothing in the chassis depends
+ * on what they are showing.
  */
 @Composable
 fun MueApp() {
@@ -128,7 +129,14 @@ fun MueApp() {
     ) { destination ->
         when (destination) {
             MueDestination.ENTRY -> EntryScreen(Modifier.fillMaxSize())
-            MueDestination.PROGRESS -> ProgressScreen(Modifier.fillMaxSize())
+
+            // PRD_SCALE 18.4. Le bloc « profil incomplet » de la composition corporelle propose
+            // d'aller compléter le profil ; le châssis est le seul endroit qui sache changer
+            // d'onglet, et sans cette ligne le bouton serait à l'écran sans rien faire.
+            MueDestination.PROGRESS -> ProgressScreen(
+                modifier = Modifier.fillMaxSize(),
+                onOpenProfile = { selection.select(MueDestination.PROFILE) },
+            )
             MueDestination.ACTIVITY -> ActivityNavHost(
                 modifier = Modifier.fillMaxSize(),
                 onRouteChanged = { route -> activityRouteKey = route.key },
@@ -140,7 +148,12 @@ fun MueApp() {
             // the timer banner has no reason to hide for anything inside Food.
             MueDestination.FOOD -> FoodNavHost(Modifier.fillMaxSize())
 
-            MueDestination.PROFILE -> ProfileScreen(Modifier.fillMaxSize())
+            // PRD_SCALE 8. Le troisième onglet à tenir plusieurs écrans, et il garde sa pile
+            // pour lui comme les deux autres : `Profile > Scales`, la fiche d'une balance et le
+            // flux d'appairage sont des réglages d'appareil, invisibles depuis les écrans
+            // principaux. Il ne rapporte rien au châssis — rien dans la coque ne dépend de ce
+            // qu'il affiche.
+            MueDestination.PROFILE -> ProfileNavHost(Modifier.fillMaxSize())
         }
     }
 }

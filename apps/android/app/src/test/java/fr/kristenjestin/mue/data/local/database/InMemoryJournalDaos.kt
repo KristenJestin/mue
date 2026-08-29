@@ -107,34 +107,68 @@ class InMemoryJournal {
     }
 }
 
-/** [MeasurementDao] over [InMemoryJournal]; every default method on it runs unchanged. */
+/**
+ * [MeasurementDao] over [InMemoryJournal]; every default method on it runs unchanged.
+ *
+ * `body_composition` est tenue ici comme une seconde table indexée par la date, et la cascade
+ * `ON DELETE` du schéma est reproduite à la main dans [deleteByDate] — pas pour prouver la
+ * cascade, qui est une propriété de SQLite et reste dans la suite instrumentée, mais pour que le
+ * code partagé de [MeasurementDao.upsertAggregate] s'exécute ici sur un état cohérent.
+ */
 class InMemoryMeasurementDao(private val journal: InMemoryJournal) : MeasurementDao {
 
     private val rows = MutableStateFlow<Map<String, MeasurementEntity>>(emptyMap())
+    private val compositions = MutableStateFlow<Map<String, BodyCompositionEntity>>(emptyMap())
 
-    override fun observeAll(): Flow<List<MeasurementEntity>> =
-        rows.map { it.values.sortedBy { row -> row.date } }
+    private fun joined(row: MeasurementEntity) =
+        MeasurementWithComposition(row, compositions.value[row.date])
 
-    override fun observeInWindow(start: String?, end: String?): Flow<List<MeasurementEntity>> =
+    override fun observeAll(): Flow<List<MeasurementWithComposition>> =
+        rows.map { all -> all.values.sortedBy { row -> row.date }.map(::joined) }
+
+    override fun observeInWindow(
+        start: String?,
+        end: String?,
+    ): Flow<List<MeasurementWithComposition>> =
         observeAll().map { all ->
-            all.filter { (start == null || it.date >= start) && (end == null || it.date <= end) }
+            all.filter {
+                (start == null || it.measurement.date >= start) &&
+                    (end == null || it.measurement.date <= end)
+            }
         }
 
-    override fun observeLatest(): Flow<MeasurementEntity?> = observeAll().map { it.lastOrNull() }
+    override fun observeLatest(): Flow<MeasurementWithComposition?> =
+        observeAll().map { it.lastOrNull() }
 
-    override suspend fun getAll(): List<MeasurementEntity> =
-        rows.value.values.sortedBy { it.date }
+    override suspend fun getAll(): List<MeasurementWithComposition> =
+        rows.value.values.sortedBy { it.date }.map(::joined)
 
-    override suspend fun findByDate(date: String): MeasurementEntity? = rows.value[date]
+    override suspend fun findByDate(date: String): MeasurementWithComposition? =
+        rows.value[date]?.let(::joined)
 
     override suspend fun count(): Int = rows.value.size
+
+    override suspend fun compositionCount(): Int = compositions.value.size
+
+    override suspend fun findComposition(date: String): BodyCompositionEntity? =
+        compositions.value[date]
 
     override suspend fun upsert(entity: MeasurementEntity) {
         rows.value = rows.value + (entity.date to entity)
     }
 
+    override suspend fun upsertComposition(entity: BodyCompositionEntity) {
+        compositions.value = compositions.value + (entity.date to entity)
+    }
+
+    override suspend fun deleteCompositionOf(date: String) {
+        compositions.value = compositions.value - date
+    }
+
     override suspend fun deleteByDate(date: String) {
         rows.value = rows.value - date
+        // `ON DELETE CASCADE` de `body_composition` (BR-SCALE-007).
+        compositions.value = compositions.value - date
     }
 
     override suspend fun enqueueMutation(mutation: SyncMutationEntity) = journal.enqueue(mutation)

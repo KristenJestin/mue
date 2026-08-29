@@ -1,6 +1,14 @@
 package fr.kristenjestin.mue.ui.entry
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,10 +19,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,14 +38,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextMeasurer
@@ -47,6 +66,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.kristenjestin.mue.domain.model.Weight
@@ -61,6 +81,9 @@ import fr.kristenjestin.mue.ui.components.MueScreenScaffold
 import fr.kristenjestin.mue.ui.components.MueScreenTitle
 import fr.kristenjestin.mue.ui.components.MueText
 import fr.kristenjestin.mue.ui.components.rememberMueHaptics
+import fr.kristenjestin.mue.ui.scale.ScaleMessages
+import fr.kristenjestin.mue.ui.scale.ScalePermissions
+import fr.kristenjestin.mue.ui.scale.ScaleTestTags
 import fr.kristenjestin.mue.ui.theme.LocalReduceMotion
 import fr.kristenjestin.mue.ui.theme.MueMinTouchTarget
 import fr.kristenjestin.mue.ui.theme.MueMotion
@@ -97,6 +120,38 @@ private const val HeroTrailWeight = 1.5f
 fun EntryScreen(modifier: Modifier = Modifier) {
     val viewModel: EntryViewModel = viewModel(factory = EntryViewModel.Factory)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    /*
+     * FR-SCALE-020: the search runs while this screen is on screen, and not one moment longer.
+     *
+     * `LifecycleStartEffect` rather than `LaunchedEffect` because the two ways of leaving are
+     * different events and both have to stop the scan: switching tab removes this composable,
+     * and locking the phone leaves it composed while the process goes to the background. A
+     * `LaunchedEffect` would survive the second one and keep the radio scanning in a pocket,
+     * which is the one thing PRD_SCALE 3.7 rules out entirely.
+     */
+    LifecycleStartEffect(viewModel) {
+        viewModel.onEntryVisible()
+        onStopOrDispose { viewModel.onEntryHidden() }
+    }
+
+    /*
+     * FR-SCALE-020: the phone stays awake while the search session runs, so it can be put down
+     * before stepping on the scale, and goes back to normal the instant a stable weight lands,
+     * the session expires or this screen leaves.
+     *
+     * Driven from the session state rather than from a flag of the Bluetooth layer, which
+     * `ScaleSessionSource` does not expose: the four states that make up a search session are
+     * exactly the window PRD_SCALE 20 describes, so the fact is derivable here and does not need
+     * to cross the domain boundary. `onDispose` releases it unconditionally — a screen that goes
+     * away mid-session must not leave the phone lit.
+     */
+    val view = LocalView.current
+    DisposableEffect(view, state.scale.keepScreenOn) {
+        view.keepScreenOn = state.scale.keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     EntryContent(
         state = state,
@@ -111,6 +166,26 @@ fun EntryScreen(modifier: Modifier = Modifier) {
         onDateSelected = viewModel::onDateSelected,
         onSave = viewModel::onSave,
         onSaveConfirmationFinished = viewModel::onSaveConfirmationFinished,
+        /*
+         * FR-SCALE-025: a system screen only ever opens on a deliberate tap, and none of these
+         * opens a dialog of Mue's own. The intents are built here rather than in the ViewModel
+         * because a `ViewModel` has no `Context` and must not acquire one; the ViewModel is still
+         * told, so it can retry the session or remember that the notice has been given.
+         */
+        onScaleAction = { action ->
+            viewModel.onScaleAction(action)
+            val intent = when (action) {
+                // La relance ne quitte pas Mue : le `ViewModel` a déjà rouvert la session.
+                EntryScaleAction.RESTART_SEARCH -> null
+                EntryScaleAction.ENABLE_BLUETOOTH -> ScalePermissions.enableBluetoothIntent(context)
+                EntryScaleAction.OPEN_APP_SETTINGS -> ScalePermissions.appSettingsIntent(context)
+                EntryScaleAction.OPEN_LOCATION_SETTINGS ->
+                    ScalePermissions.systemLocationSettingsIntent()
+            }
+            // A settings screen that no ROM ships is not an error worth showing anyone: the
+            // status line stays, the weigh-in by hand was never blocked (BR-SCALE-011).
+            intent?.let { runCatching { context.startActivity(it) } }
+        },
         modifier = modifier,
     )
 }
@@ -129,6 +204,7 @@ internal fun EntryContent(
     onDateSelected: (LocalDate) -> Unit,
     onSave: () -> Unit,
     onSaveConfirmationFinished: () -> Unit,
+    onScaleAction: (EntryScaleAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacing = MueTheme.spacing
@@ -144,10 +220,55 @@ internal fun EntryContent(
      * uses and it catches up when the ruler stops.
      */
     val ruler = rememberRulerState(state.weight)
+
+    /*
+     * PRD_SCALE 19: a weigh-in arriving from the scale *moves* the ruler to its value instead of
+     * teleporting it there, over the same 180 ms the rest of this screen moves in.
+     *
+     * Which revision travels and which one jumps is decided by `arrivalRevision` rather than by
+     * the value: the history seed, `−` / `+` and the keyboard all reach this effect the same way,
+     * and only the one the scale posted may glide. Reduced motion collapses it to the direct
+     * change of value that section asks for.
+     */
+    val glide = MueMotion.spec<Float>(MueMotion.ManualEntryMillis)
     LaunchedEffect(state.weightRevision) {
         // A gesture in flight owns the value: the history seed arriving mid-drag must not
         // snatch it back (PRD FR-ENTRY-001).
-        if (!ruler.interacting) ruler.jumpTo(state.weight.hundredthsKg)
+        if (ruler.interacting) return@LaunchedEffect
+        val arrived = state.scale.fromScale && state.scale.arrivalRevision == state.weightRevision
+        if (arrived && !reduceMotion) {
+            ruler.glideTo(state.weight.hundredthsKg, glide)
+        } else {
+            ruler.jumpTo(state.weight.hundredthsKg)
+        }
+    }
+
+    /*
+     * PRD_SCALE 11: « la valeur suit le flux, marquée comme non définitive ».
+     *
+     * **Le flux instable pilote la règle sans jamais devenir [EntryUiState.weight]**, qui est ce
+     * que `Save measurement` enregistre. C'est la contrainte entière de cette section, et elle est
+     * tenue par le chemin et non par un garde : une trame ne passe pas par `postWeight`, donc
+     * n'incrémente pas `weightRevision`, donc n'entre pas dans la valeur enregistrable — elle
+     * arrive ici, sur l'objet qui détient la position vivante de la règle, exactement là où
+     * arrivent les pixels d'un glissement du doigt. BR-SCALE-001 est vrai par construction et pas
+     * seulement parce qu'un bouton est grisé.
+     *
+     * Deux raisons de ne pas emprunter l'effet ci-dessus. Il n'a qu'une clé, `weightRevision`, que
+     * le flux ne doit surtout pas faire avancer ; et il *glisse* vers sa cible sur 180 ms, ce qui
+     * pour une trame toutes les 200 ms produirait une règle perpétuellement en retard d'une
+     * animation. Une trame est un fait déjà arrivé : elle se pose (`jumpTo`), et c'est la mesure
+     * stable qui suit qui a droit au glissement de PRD_SCALE 19.
+     *
+     * `ofHundredthsOrNull` et non le constructeur qui borne : une trame hors domaine est
+     * abandonnée, jamais tirée vers la borne la plus proche.
+     */
+    val live = state.scale.liveHundredths
+    LaunchedEffect(live) {
+        // Un doigt sur la règle a repris la valeur (FR-SCALE-022) : le `ViewModel` a déjà clos la
+        // session, et la trame en vol ne doit pas la lui arracher entre-temps.
+        if (live == null || ruler.interacting) return@LaunchedEffect
+        Weight.ofHundredthsOrNull(live)?.let { ruler.jumpTo(it.hundredthsKg) }
     }
 
     LaunchedEffect(state.saveFlareCount) {
@@ -163,7 +284,7 @@ internal fun EntryContent(
 
     MueScreenScaffold(
         modifier = modifier,
-        trailing = { MueHeaderChip(EntryFormat.headerDate(state.date, state.today)) },
+        trailing = { EntryHeaderChips(state = state, onAction = onScaleAction) },
     ) {
         MueScreenTitle(
             title = ScreenTitle,
@@ -197,6 +318,15 @@ internal fun EntryContent(
         val slotTopPadding = lerp(spacing.xl, spacing.sm, manualProgress)
         val slotMinHeight = lerp(WeightRulerHeight, 0.dp, manualProgress)
 
+        /*
+         * Exactement trois choses s'éteignent pendant le flux instable, et ce sont les trois qui
+         * se battraient avec lui pour la même valeur : `−` / `+`, la saisie au clavier et
+         * `Save measurement`. La règle, elle, reste tactile — un glissement est la façon
+         * documentée de reprendre la valeur (FR-SCALE-022) — et le champ de date, les onglets et
+         * tout le reste ne bougent pas (BR-SCALE-011).
+         */
+        val streaming = state.scale.streaming
+
         HeroReadout(
             ruler = ruler,
             manualEntry = state.manualEntry,
@@ -204,11 +334,17 @@ internal fun EntryContent(
             // value the keyboard refuses to accept, which `Done` deliberately will not do.
             onClick = if (state.manualEntry) onDismissManualEntry else onOpenManualEntry,
             onStep = { steps, held -> stepWithHaptics(state.weight, steps, held, haptics, onStep) },
-            stepsEnabled = !state.manualEntry,
+            stepsEnabled = !state.manualEntry && !streaming,
+            keyboardEnabled = !streaming,
             atLowerStop = state.isAtLowerStop,
             atUpperStop = state.isAtUpperStop,
             controlsAlpha = 1f - manualProgress,
             modifier = Modifier.padding(top = heroTopPadding),
+        )
+
+        ScaleNote(
+            scale = state.scale,
+            modifier = Modifier.padding(top = spacing.sm),
         )
 
         Box(
@@ -260,6 +396,8 @@ internal fun EntryContent(
             )
         }
 
+        ScaleFootnotes(scale = state.scale)
+
         MuePickerField(
             label = "Measurement date",
             value = EntryFormat.date(state.date),
@@ -270,16 +408,30 @@ internal fun EntryContent(
 
         MuePrimaryButton(
             label = SaveLabel,
+            // BR-SCALE-001 : une valeur qui bouge n'est pas enregistrable. Le bouton est éteint,
+            // et `EntryViewModel.onSave` refuse de son côté — un bouton grisé est une protection
+            // d'interface, la règle, elle, est métier.
+            enabled = !streaming,
             success = state.justSaved,
             onSuccessFinished = onSaveConfirmationFinished,
             onClick = {
                 // The scale reports where it stopped, so a save landed on mid-glide would
                 // otherwise record the value the finger left rather than the one on screen.
-                onWeightChange(Weight.ofHundredthsClamped(ruler.displayedHundredths))
+                //
+                // Except while the ruler is travelling to a weigh-in it was *sent* to
+                // (PRD_SCALE 19): there the screen's weight is already the destination, and
+                // publishing the position of a glide in progress would both record a value on
+                // the way and read as a manual correction, stripping the provenance and the
+                // impedance off the very measurement being saved (BR-SCALE-013).
+                if (!ruler.gliding) {
+                    onWeightChange(Weight.ofHundredthsClamped(ruler.displayedHundredths))
+                }
                 onSave()
             },
             modifier = Modifier.padding(top = spacing.md),
         )
+
+        SaveBlockedReason(scale = state.scale)
 
         Spacer(modifier = Modifier.height(spacing.screenBottom))
     }
@@ -313,6 +465,7 @@ private fun HeroReadout(
     onClick: () -> Unit,
     onStep: (steps: Int, held: Boolean) -> Unit,
     stepsEnabled: Boolean,
+    keyboardEnabled: Boolean,
     atLowerStop: Boolean,
     atUpperStop: Boolean,
     controlsAlpha: Float,
@@ -338,6 +491,7 @@ private fun HeroReadout(
                     ruler = ruler,
                     style = rememberHeroValueStyle(),
                     manualEntry = manualEntry,
+                    enabled = keyboardEnabled,
                     onClick = onClick,
                 )
             }
@@ -364,12 +518,20 @@ private fun HeroReadout(
  * The live position is read here and nowhere above, so a drag rebuilds one text node instead
  * of the screen. The digit roll is dropped for as long as the scale is moving: rolling is how
  * one reading becomes another, and a drag has no readings, only a blur (PRD FR-ENTRY-002).
+ *
+ * That same live position is what the unstable stream writes into (PRD_SCALE 11), so this node —
+ * and the ruler's draw scope — is the entire cost of a frame arriving. The number the reader
+ * watches move is therefore never [EntryUiState.weight], which is what gets saved.
+ *
+ * [enabled] is the keyboard's gate and nothing else: while frames arrive, opening the field would
+ * put a second author on a value the scale is already writing.
  */
 @Composable
 private fun HeroValue(
     ruler: RulerState,
     style: TextStyle,
     manualEntry: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val weight = Weight.ofHundredthsClamped(ruler.displayedHundredths)
@@ -383,6 +545,7 @@ private fun HeroValue(
         modifier = Modifier
             .clip(MueTheme.shapes.field)
             .clickable(
+                enabled = enabled,
                 onClickLabel = if (manualEntry) "Go back to the scale" else "Type your weight",
                 role = Role.Button,
                 onClick = onClick,
@@ -584,6 +747,373 @@ private fun Modifier.fullBleed(gutter: Dp): Modifier = layout { measurable, cons
     layout(constraints.maxWidth, placeable.height) { placeable.place(-bleed, 0) }
 }
 
+/**
+ * The one line a paired scale adds beside the value, and the only one (PRD_SCALE 19).
+ *
+ * **Discreet by construction.** It is a caption in the quiet text colour, under the readout and
+ * above the ruler, and it never becomes a card, an accent or a badge: the weight is the subject
+ * of this screen and nothing here may compete with it.
+ *
+ * The slot is a fixed height so that a measurement arriving does not shove the ruler down the
+ * screen under the finger — and the whole composable returns without emitting anything when no
+ * scale is paired, which is PRD_SCALE 18.1's "strictly the base PRD's screen" taken literally:
+ * not an invisible box, not a zero-height spacer, nothing.
+ *
+ * **It no longer reports the link.** Searching, connecting, the radio being off — all of that
+ * moved to the header chip, which answers the question actually being asked ("is it talking to my
+ * scale?") in the place the eye goes for it. What is left here belongs to the *value*: what to do
+ * to produce one, and what the one on screen is worth — the invitation to step on, and the mark
+ * that the number is not final. Never both: only one of the two can be true at a time.
+ *
+ * **The provenance mark left with it, and this is a deliberate departure from FR-SCALE-022.**
+ * That rule asks for the provenance of a received value to be indicated near the value, and it
+ * used to be a `From your scale` line right here. The amber chip in the header is lit for exactly
+ * one reason — the value on screen came from the scale — so the line was the same fact said a
+ * second time, in the one place PRD_SCALE 19 forbids anything from competing with the weight. The
+ * chip is now the sole carrier of the provenance: colour, spoken description and announcement.
+ * The arbitration is recorded here so a later reading finds a decision and not an omission.
+ *
+ * Two things had to move with it, and neither is optional:
+ *  - **the announcement** (PRD_SCALE 20). The mark was the live region that said a stable
+ *    measurement had arrived, *with its value*. It is on the chip now, once per arrival — see
+ *    [ScaleLinkChip] and `EntryScaleUiState.linkChip`.
+ *  - **what fills the slot**. Nothing takes the mark's place here: the caption [HeroReadout] draws
+ *    just above falls back to `SLIDE TO ADJUST` the moment a value is on screen, rather than
+ *    leaving a hole. It is also what FR-SCALE-022 actually wants said about a received weight —
+ *    it is immediately yours to change.
+ */
+@Composable
+private fun ScaleNote(
+    scale: EntryScaleUiState,
+    modifier: Modifier = Modifier,
+) {
+    if (!scale.paired) return
+
+    Box(
+        modifier = modifier.fillMaxWidth().height(ScaleNoteHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        /*
+         * PRD_SCALE 11 : la valeur suit le flux, *marquée comme non définitive*. Cette ligne est
+         * la marque, et elle est constante pendant toute la mesure — c'est ce qui la rend lisible
+         * pendant que le grand chiffre, lui, change à chaque trame.
+         *
+         * Plus rien ne la conditionne à `!fromScale` : cette garde n'existait que pour laisser la
+         * place à la marque de provenance dans la même boîte. Sans elle, une session relancée
+         * derrière une valeur déjà reçue dit de nouveau quoi faire, ce qui est le seul cas où les
+         * deux champs sont vrais ensemble (FR-SCALE-023).
+         */
+        val note = when {
+            scale.streaming -> ScaleMessages.NOT_FINAL_YET
+            scale.indicator == EntryScaleIndicator.STEP_ON -> ScaleMessages.STEP_ON_THE_SCALE
+            else -> null
+        }
+        if (note != null) {
+            MueText(
+                text = note,
+                style = MueTheme.typography.hint,
+                color = MueTheme.colors.textTertiary,
+                modifier = Modifier.testTag(ScaleTestTags.ENTRY_INDICATOR),
+            )
+        }
+    }
+}
+
+/**
+ * What a paired scale may say above the date row: a value it refused, and a hint.
+ *
+ * Both sit at the bottom, beside the save error and away from the weight, and both are absent by
+ * default. Neither disables anything: BR-SCALE-011 makes every function of Mue available with no
+ * Bluetooth, no permission and no scale in range, so the ruler, the keyboard, the date and
+ * `Save measurement` keep working underneath whatever is shown here.
+ *
+ * The third footnote — the actionable line of PRD_SCALE 18.5 — is gone from this block. It says
+ * where the *link* stands, and the link now lives in the header chip, whole and in one place.
+ */
+@Composable
+private fun ScaleFootnotes(scale: EntryScaleUiState) {
+    val colors = MueTheme.colors
+    val typography = MueTheme.typography
+    val spacing = MueTheme.spacing
+
+    // FR-SCALE-024: said once, and the screen is otherwise left exactly as it was — the value on
+    // the ruler, the date and the provenance are all untouched by a reading Mue will not record.
+    if (scale.outOfRange) {
+        MueText(
+            text = ScaleMessages.MEASUREMENT_OUT_OF_RANGE,
+            style = typography.caption,
+            color = colors.textSecondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = spacing.sm)
+                .testTag(ScaleTestTags.OUT_OF_RANGE_NOTICE),
+        )
+    }
+
+    // PRD_SCALE 18.3: only when the driver reported an impedance it could not measure. A weight
+    // saved before the impedance arrived, or a session that simply timed out, leaves this absent.
+    if (scale.barefootHint) {
+        MueText(
+            text = ScaleMessages.BAREFOOT_HINT,
+            style = typography.caption,
+            color = colors.textSecondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = spacing.sm)
+                .testTag(ScaleTestTags.BAREFOOT_HINT),
+        )
+    }
+}
+
+/**
+ * The one sentence under `Save measurement`, and the only thing on this screen that explains a
+ * control being off (BR-SCALE-001, FR-SCALE-023).
+ *
+ * The slot is reserved for as long as a scale is paired rather than appearing with the sentence:
+ * a line materialising under the button would push the whole hero block up by its own height in
+ * the middle of a weigh-in. It does not exist at all without a scale, so nobody's screen grew
+ * (PRD_SCALE 18.1).
+ */
+@Composable
+private fun SaveBlockedReason(scale: EntryScaleUiState) {
+    if (!scale.paired) return
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = MueTheme.spacing.sm)
+            .height(ScaleNoteHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (scale.streaming) {
+            MueText(
+                text = ScaleMessages.WAITING_TO_SETTLE,
+                style = MueTheme.typography.caption,
+                color = MueTheme.colors.textTertiary,
+                modifier = Modifier.testTag(ScaleTestTags.SAVE_BLOCKED_REASON),
+            )
+        }
+    }
+}
+
+/**
+ * The right of the header: the link, then the date — and each of them only when it has something
+ * to say.
+ *
+ * **The link chip exists only with a scale registered** (FR-SCALE-020, PRD_SCALE 18.1): without
+ * one this row is the single date chip the base PRD shipped, in the slot it has always had.
+ *
+ * **The date chip exists only away from today.** `Today` is the default state of this screen, and
+ * a permanent chip repeating a default is a chip nobody reads — which is also what made the slot
+ * available. It costs nothing: a received weigh-in selects today (BR-SCALE-009), so there is no
+ * moment where the two are competing for attention with anything to say.
+ */
+@Composable
+private fun EntryHeaderChips(
+    state: EntryUiState,
+    onAction: (EntryScaleAction) -> Unit,
+) {
+    val chip = state.scale.linkChip
+    val dated = !state.isToday
+    // Rien à dire, donc rien du tout — pas une `Row` vide, pas un espace réservé. C'est le même
+    // littéralisme que `ScaleNote`, et c'est ce qui rend vrai « l'en-tête est celui d'avant le
+    // module » pour quelqu'un sans balance, un jour où la date est aujourd'hui (PRD_SCALE 18.1).
+    if (chip == null && !dated) return
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(MueTheme.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Le poids descend jusqu'ici parce que l'annonce d'arrivée le contient : elle se compose
+        // avec la valeur telle que l'écran l'affiche, jamais avec une seconde mise en forme.
+        chip?.let { ScaleLinkChip(chip = it, weight = state.weight, onAction = onAction) }
+        if (dated) MueHeaderChip(EntryFormat.headerDate(state.date))
+    }
+}
+
+/**
+ * The whole state of the link, in a chip the size of the one that used to say `Today`.
+ *
+ * Three things carry it and they are deliberately not words: the colour (amber while the session
+ * lives or while the value on screen came from the scale, grey otherwise), the dot, and whether
+ * that dot breathes. What is *not* written there is the scale's name — it defaults to the model,
+ * `HB BODY FAT`, and would burst the chip; identity belongs to `Profile > Scales` (FR-SCALE-012).
+ *
+ * **The label never goes quiet under an action** (FR-SCALE-023). The chip used to drop its label
+ * once the weight had landed, which was right while it was decoration and became wrong the day it
+ * started offering `Try again` in that state: a tappable chip that says nothing tappable is worse
+ * than no button, since the only clue left would be a touch target nobody can see.
+ *
+ * **A screen reader loses none of it** (PRD_SCALE 20). The description is the full sentence in
+ * every state, label or no label, and the pane title names the region so `Connecting` is heard as
+ * a fact about the scale rather than about the screen.
+ *
+ * **This chip is now the screen's only live region**, and it speaks for exactly two changes: the
+ * scale becoming unusable, and a stable measurement arriving *with its value*. The second one used
+ * to belong to the `From your scale` mark under the readout; that mark repeated what the amber of
+ * this chip already says, so it went, and the announcement came here rather than disappearing with
+ * it (see [ScaleNote] for the FR-SCALE-022 arbitration).
+ *
+ * **Once per arrival, and never once per frame.** Nothing here decides that: the announcement is a
+ * field of the state, `EntryScaleUiState.linkChip` only carries it in the branch reached *after* a
+ * measurement has landed, and the unstable stream reaches the `indicator` branch, which announces
+ * nothing. So the description changes once, when the reading is posted; a recomposition that
+ * changes nothing about the scale rebuilds the same semantics and Compose stays silent.
+ *
+ * The arrival's description is composed here and not in the state, because it needs the weight
+ * *as this screen formats it* — the announcement and the visible value can then never disagree.
+ * It states the arrival and keeps the offer, so the button never goes nameless while it speaks.
+ *
+ * The tap comes with every state that has something to offer and with nothing else — never during
+ * a live session, where there is nothing to ask for. It opens no dialog and no system screen by
+ * itself: [onAction] carries the intent back to the screen, which is the only place a `Context`
+ * exists.
+ */
+@Composable
+private fun ScaleLinkChip(
+    chip: EntryLinkChip,
+    weight: Weight,
+    onAction: (EntryScaleAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MueTheme.colors
+    val spacing = MueTheme.spacing
+    val shape = MueTheme.shapes.pill
+    val container = if (chip.active) colors.accentSoft else colors.surface
+    val content = if (chip.active) colors.onAccentSoft else colors.textTertiary
+    val action = chip.action
+
+    /*
+     * PRD_SCALE 20 : l'arrivée est dite **avec sa valeur**, et l'offre reste dite avec elle.
+     *
+     * `EntryScaleUiState` s'arrête à *quoi* annoncer parce qu'il ne formate aucun poids ; la phrase
+     * se termine ici, sur le `Weight` que le lecteur voit à l'instant même. L'indisponibilité, elle,
+     * n'a besoin de rien de l'écran : sa phrase est déjà dans `chip.description`.
+     */
+    val spoken = when (chip.announcement) {
+        EntryScaleAnnouncement.MEASUREMENT_RECEIVED ->
+            ScaleMessages.measurementReceivedThenTryAgain(EntryFormat.spokenWeight(weight))
+        else -> chip.description
+    }
+
+    Box(
+        /*
+         * FR-SCALE-023 et FR-SCALE-025 : le geste est offert, donc il a la taille d'une cible
+         * tactile — la même règle pour la relance que pour les quatre états de PRD_SCALE 18.5. Les
+         * états qui n'attendent rien, c'est-à-dire les sessions en cours, gardent la hauteur de la
+         * pastille de date, et l'en-tête avec.
+         *
+         * La hauteur, le clic et le nom accessible sont **sur le même nœud**. La pastille dessinée
+         * est plus basse que quarante-huit points, et il ne suffit pas de lui réserver la place :
+         * une hauteur portée par la boîte pendant que le clic vit sur le fond coloré à l'intérieur
+         * donnerait une cible aussi petite qu'avant, avec la place d'une grande. C'est la boîte qui
+         * s'écoute, la ligne colorée reste à sa taille, et le doigt attrape les deux. C'est la
+         * construction de `MuePill`, pour la même raison et jusqu'à son `indication = null` : une
+         * onde qui déborderait la pastille dessinerait le rectangle de la cible, qui n'a pas à se
+         * voir.
+         */
+        modifier = modifier
+            .then(
+                if (action != null) {
+                    Modifier
+                        .heightIn(min = MueMinTouchTarget)
+                        .clickable(
+                            interactionSource = null,
+                            indication = null,
+                            role = Role.Button,
+                            onClick = { onAction(action) },
+                        )
+                } else {
+                    Modifier
+                }
+            )
+            .testTag(ScaleTestTags.ENTRY_STATUS)
+            .semantics(mergeDescendants = true) {
+                paneTitle = ScaleMessages.SCALE_STATUS_LABEL
+                contentDescription = spoken
+                if (chip.announcement != null) liveRegion = LiveRegionMode.Polite
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(spacing.xs),
+            modifier = Modifier
+                .clip(shape)
+                .background(container)
+                .border(1.dp, colors.surfaceBorder, shape)
+                .padding(horizontal = LinkChipHorizontalPadding, vertical = spacing.sm),
+        ) {
+            ScaleLinkDot(
+                tint = if (chip.active) colors.accent else colors.textQuiet,
+                pulsing = chip.pulsing,
+            )
+            chip.label?.let { label ->
+                MueText(
+                    text = label,
+                    style = MueTheme.typography.chip,
+                    color = content,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The dot, which breathes while something is happening and holds still once it has happened.
+ *
+ * The breathing branch is a branch and not a flag so that no infinite animation runs on a screen
+ * where nothing is in flight — an `InfiniteTransition` invalidates its reader on every frame, and
+ * this screen has a gesture that cannot afford neighbours. The value is read inside
+ * [Modifier.graphicsLayer], so even while it does run the cost is a layer property and never a
+ * recomposition.
+ *
+ * Under reduced animations the dot simply stops breathing: the colour and the label already carry
+ * the state, so nothing is lost by removing the movement (PRD 14).
+ */
+@Composable
+private fun ScaleLinkDot(tint: Color, pulsing: Boolean) {
+    val dot = Modifier.size(LinkDotSize).clip(CircleShape).background(tint)
+    if (pulsing && !LocalReduceMotion.current) {
+        val transition = rememberInfiniteTransition(label = "scaleLinkDot")
+        val breath = transition.animateFloat(
+            initialValue = LinkDotRestAlpha,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(LinkDotBreathMillis, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "scaleLinkDotAlpha",
+        )
+        Box(modifier = Modifier.graphicsLayer { alpha = breath.value }.then(dot))
+    } else {
+        Box(modifier = dot)
+    }
+}
+
+/**
+ * The height the scale's line occupies, whatever it currently says — or nothing at all.
+ *
+ * Reserved rather than measured so that a weigh-in landing mid-adjustment cannot move the ruler
+ * out from under a finger. It only exists once a scale is paired, so the screen of someone
+ * without one is not a pixel taller (PRD_SCALE 18.1).
+ */
+private val ScaleNoteHeight: Dp = 22.dp
+
+/**
+ * The link chip's own gutter, narrower than [MueHeaderChip]'s fourteen: it carries a dot as well
+ * as a word, and the two of them at the date chip's padding would make it the widest thing in the
+ * header — which is exactly what PRD_SCALE 19 rules out.
+ */
+private val LinkChipHorizontalPadding: Dp = 10.dp
+
+/** Just large enough to read as a state, small enough never to read as a control. */
+private val LinkDotSize: Dp = 6.dp
+
+/** How faint the dot goes at the bottom of a breath, and how long one breath takes. */
+private const val LinkDotRestAlpha = 0.35f
+private const val LinkDotBreathMillis = 750
+
 // --- Previews -----------------------------------------------------------------------
 
 private fun previewState(
@@ -593,17 +1123,20 @@ private fun previewState(
     manualInput: String = "",
     manualError: String? = null,
     justSaved: Boolean = false,
+    daysBack: Long = 0,
+    scale: EntryScaleUiState = EntryScaleUiState.ABSENT,
 ): EntryUiState {
     val today = LocalDate.of(2026, 8, 23)
     return EntryUiState(
         weight = requireNotNull(Weight.ofKilogramsOrNull(weight)),
-        date = today,
+        date = today.minusDays(daysBack),
         today = today,
         greeting = greeting,
         manualEntry = manualEntry,
         manualInput = manualInput,
         manualError = manualError,
         justSaved = justSaved,
+        scale = scale,
     )
 }
 
@@ -623,6 +1156,7 @@ private fun EntryPreview(state: EntryUiState) {
             onDateSelected = {},
             onSave = {},
             onSaveConfirmationFinished = {},
+            onScaleAction = {},
         )
     }
 }
@@ -654,3 +1188,68 @@ private fun EntryManualErrorPreview() = EntryPreview(
 @Preview(name = "Entry · saved", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
 @Composable
 private fun EntrySavedPreview() = EntryPreview(previewState(justSaved = true))
+
+/** The date chip, which only exists here: away from today, where it finally says something. */
+@Preview(name = "Entry · another day", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryAnotherDayPreview() = EntryPreview(previewState(daysBack = 3))
+
+/*
+ * The scale module on `Entry` (PRD_SCALE 12.2). Four previews for the four things it can add,
+ * and the first of them is the one that matters most: the screen without a scale, which has to
+ * stay pixel for pixel the one above (PRD_SCALE 18.1).
+ */
+
+@Preview(name = "Entry · looking", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleSearchingPreview() = EntryPreview(
+    previewState(
+        scale = EntryScaleUiState(
+            paired = true,
+            indicator = EntryScaleIndicator.STEP_ON,
+            keepScreenOn = true,
+        ),
+    )
+)
+
+/**
+ * The unstable stream, which is the state the whole layout is arbitrated around: the value on the
+ * ruler is the scale's, the three controls that would fight it are off and everything else — the
+ * ruler under the finger first of all — is untouched.
+ */
+@Preview(name = "Entry · measuring", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleMeasuringPreview() = EntryPreview(
+    previewState(
+        weight = 85.75,
+        scale = EntryScaleUiState(
+            paired = true,
+            indicator = EntryScaleIndicator.MEASURING,
+            liveHundredths = 8_575,
+            keepScreenOn = true,
+        ),
+    )
+)
+
+@Preview(name = "Entry · from the scale", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleReceivedPreview() = EntryPreview(
+    previewState(
+        weight = 74.35,
+        scale = EntryScaleUiState(paired = true, fromScale = true),
+    )
+)
+
+@Preview(name = "Entry · Bluetooth off", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleUnavailablePreview() = EntryPreview(
+    previewState(
+        scale = EntryScaleUiState(paired = true, status = EntryScaleStatus.BLUETOOTH_OFF),
+    )
+)
+
+@Preview(name = "Entry · out of range", showBackground = true, backgroundColor = 0xFF101012, heightDp = 780)
+@Composable
+private fun EntryScaleOutOfRangePreview() = EntryPreview(
+    previewState(scale = EntryScaleUiState(paired = true, outOfRange = true))
+)

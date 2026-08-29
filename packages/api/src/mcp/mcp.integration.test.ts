@@ -32,7 +32,7 @@ import {
   PAIRING_PATH,
   type PairingWindow,
 } from "./index";
-import { CLOCK_SKEW_TOLERANCE_DAYS } from "@mue/contracts";
+import { AGGREGATE_TYPES, CLOCK_SKEW_TOLERANCE_DAYS } from "@mue/contracts";
 import { MUE_MCP_PROTOCOL_VERSION, PRD_REQUESTED_PROTOCOL_VERSION } from "./protocol";
 
 /**
@@ -3876,4 +3876,528 @@ describe("the deletion permission of section 15.2", () => {
     },
     OAUTH_TIMEOUT_MS,
   );
+});
+
+/**
+ * PRD_SCALE 22, end to end: the scale module as an agent meets it.
+ *
+ * Two of these tests are regressions and are worth naming as such, because both bugs were
+ * *silent* -- no error, no rejection, no log line, a tool result that looked entirely correct
+ * next to a column that had just been emptied:
+ *
+ *  - an agent asked to correct a height deleted the person's sex, and with it every body
+ *    composition FR-BODY-001 could ever compute afterwards;
+ *  - an agent asked to correct a weight deleted that day's impedance and composition, which is
+ *    the one quantity FR-BODY-004 says is not replaceable.
+ *
+ * Neither is a fault in a rule. Both are what a *narrow read* does to an aggregate that is
+ * written whole: section 12.2 makes an upsert state everything, so a field the tool could not
+ * read back was a field it stated as absent, and BR-SCALE-007 and section 13.4 then did exactly
+ * what they say. The shape of the mistake is general, so the assertions are about the loop --
+ * read, restate, read again -- and not about the two fields it happened to bite first.
+ */
+describe("PRD_SCALE 22 — the scale module through the MCP catalogue", () => {
+  let agent: Agent;
+  let client: Client;
+
+  beforeAll(async () => {
+    agent = await newAgent("Scale agent", CATALOGUE_SCOPES);
+    client = await connect(agent);
+  }, OAUTH_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  /**
+   * The estimates of `@mue/contracts`' own `measurement-v1-valid.json`: 78.45 kg at 171 cm,
+   * 27 years old, male, 520 ohm.
+   *
+   * They are what PRD_SCALE 13.2's published equations give for those inputs, and that is what
+   * makes "read back unchanged" mean anything here. The server recalculates every composition
+   * it is sent, so invented numbers would come back *corrected* and every assertion below would
+   * still pass while agreeing with no publication.
+   */
+  const ESTIMATES = {
+    bodyFatDeciPercent: 290,
+    fatFreeMassCg: 5_567,
+    bodyWaterDeciPercent: 519,
+    restingEnergyKcal: 1_723,
+  } as const;
+
+  const COMPOSITION = {
+    formulaId: "mue-foot-to-foot-v1",
+    formulaVersion: 1,
+    inputHeightCm: 171,
+    inputAgeYears: 27,
+    inputSex: "male",
+    ...ESTIMATES,
+  } as const;
+
+  const WEIGHT_CG = 7_845;
+  const IMPEDANCE_OHM = 520;
+
+  interface MeasurementView {
+    date: string;
+    weightCg: number;
+    sourceType: string;
+    impedanceOhm: number | null;
+    bodyComposition: { inputWeightCg: number; inputHeightCm: number; inputAgeYears: number } | null;
+  }
+
+  interface UpsertResult {
+    measurement: MeasurementView;
+    scaleReadingsRemoved: boolean;
+    rounded: boolean;
+  }
+
+  interface ProfileResult {
+    profile: {
+      heightCm: number | null;
+      birthDate: string | null;
+      sex: string | null;
+      revision: string;
+    };
+  }
+
+  /** A weighing off a scale, complete, on a day of this block's own. */
+  async function weighOnScale(date: string): Promise<UpsertResult> {
+    return (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightCg: WEIGHT_CG,
+      impedanceOhm: IMPEDANCE_OHM,
+      bodyComposition: COMPOSITION,
+    })) as UpsertResult;
+  }
+
+  async function compositionRows(date: string) {
+    return handle.database.db
+      .select()
+      .from(schema.bodyComposition)
+      .where(and(eq(schema.bodyComposition.userId, userId), eq(schema.bodyComposition.date, date)));
+  }
+
+  async function measurementRows(date: string) {
+    return handle.database.db
+      .select()
+      .from(schema.measurements)
+      .where(and(eq(schema.measurements.userId, userId), eq(schema.measurements.date, date)));
+  }
+
+  // --- the sex, and the read that was missing from its loop -------------------------------
+
+  test("an agent correcting a height leaves the sex the phone recorded alone", async () => {
+    // The regression, reproduced the only way it exists: the sex has to have been set by
+    // *someone else*, because section 13.4's merge needs a base to compare against and the
+    // base is the journal snapshot at the revision the author quotes. So the phone's push is
+    // seeded -- the row at a new revision, and the snapshot that revision was journalled with.
+    // Set through this tool instead, the payload and the base would agree trivially and the
+    // bug would not appear at all.
+    const before = (await callOk(client, "mue.get_health_profile", {})) as ProfileResult;
+    const revision = BigInt(before.profile.revision) + 1n;
+    await handle.database.db
+      .update(schema.healthProfile)
+      .set({
+        sex: "female",
+        revision,
+        originType: "android",
+        originId: "device-1",
+        lastMutationId: "seed-sex-from-phone",
+      })
+      .where(eq(schema.healthProfile.userId, userId));
+    await handle.database.db.insert(schema.syncJournal).values({
+      userId,
+      sequence: 9_101n,
+      aggregateType: "healthProfile",
+      aggregateId: "me",
+      operation: "upsert",
+      revision,
+      payloadSchemaVersion: 1,
+      payload: {
+        heightCm: before.profile.heightCm,
+        birthDate: before.profile.birthDate,
+        sex: "female",
+      },
+      deletedAt: null,
+      originType: "android",
+      originId: "device-1",
+      mutationId: "seed-sex-from-phone",
+      // Behind the instant `get_sync_status` asserts, so seeding a phone push here does not
+      // move the freshness another test in this file pins.
+      recordedAt: new Date("2026-08-19T06:30:00.000Z"),
+    });
+
+    // Half the loop, and the half that was absent: a tool that cannot read a field cannot
+    // restate it, and on this aggregate not restating a field deletes it.
+    const read = (await callOk(client, "mue.get_health_profile", {})) as ProfileResult;
+    expect(read.profile.sex).toBe("female");
+
+    const after = (await callOk(client, "mue.update_health_profile", {
+      heightCm: 181,
+    })) as ProfileResult;
+
+    // What was asked for.
+    expect(after.profile.heightCm).toBe(181);
+    // And nothing else. The sex is the field the bug took; the birth date is here because the
+    // rule is "an update touches what it names", not "an update happens to keep the sex".
+    expect(after.profile.sex).toBe("female");
+    expect(after.profile.birthDate).toBe(before.profile.birthDate);
+
+    const rows = await handle.database.db
+      .select()
+      .from(schema.healthProfile)
+      .where(eq(schema.healthProfile.userId, userId));
+    expect(rows[0]!.sex).toBe("female");
+    expect(rows[0]!.heightCm).toBe(181);
+    expect(rows[0]!.birthDate).toBe(before.profile.birthDate);
+  });
+
+  test("an agent states a sex only when it is told one, and clears it when asked", async () => {
+    const set = (await callOk(client, "mue.update_health_profile", {
+      sex: "male",
+    })) as ProfileResult;
+    expect(set.profile.sex).toBe("male");
+    // Setting one field still leaves the others where they were.
+    expect(set.profile.heightCm).toBe(181);
+
+    const cleared = (await callOk(client, "mue.update_health_profile", {
+      clearSex: true,
+    })) as ProfileResult;
+    // Null and not an absent key: the tool answers with all three fields always present, so
+    // "the person has not said" reads the same way for each of them. On the wire the payload
+    // omits the key instead, because `sexSchema` refuses a null there.
+    expect(cleared.profile.sex).toBeNull();
+    expect(cleared.profile.heightCm).toBe(181);
+    const rows = await handle.database.db
+      .select()
+      .from(schema.healthProfile)
+      .where(eq(schema.healthProfile.userId, userId));
+    expect(rows[0]!.sex).toBeNull();
+
+    // Stating one and clearing it in the same call is a contradiction, not a precedence rule.
+    const error = await callError(client, "mue.update_health_profile", {
+      sex: "male",
+      clearSex: true,
+    });
+    expect(error.code).toBe("sync.invalid_payload");
+    expect(error.field).toBe("clearSex");
+
+    // Restored for the tests that follow, and asserted rather than assumed.
+    const back = (await callOk(client, "mue.update_health_profile", {
+      sex: "female",
+    })) as ProfileResult;
+    expect(back.profile.sex).toBe("female");
+  });
+
+  // --- the composition, and the read that was missing from its loop ------------------------
+
+  test("an agent restating a weight keeps the composition that day carries", async () => {
+    // The second regression. `upsert_weight_measurement` submitted `{date, weightCg}`, which
+    // section 12.2 makes a *complete* statement of the aggregate and BR-SCALE-007 therefore
+    // reads as "this day has no composition" -- so recording 78.45 kg on a day that already
+    // held 78.45 kg deleted the impedance and the estimates.
+    const date = "2026-06-10";
+    const first = await weighOnScale(date);
+    expect(first.measurement.impedanceOhm).toBe(IMPEDANCE_OHM);
+    expect(first.measurement.bodyComposition).toMatchObject({
+      ...COMPOSITION,
+      // Filled in by the tool from the weight, because BR-SCALE-015 makes them one value.
+      inputWeightCg: WEIGHT_CG,
+    });
+    // The agent authored this row, so it says `agent` and not `scale`. There is no input for
+    // the business provenance and that is deliberate: an agent has no scale, and letting it
+    // claim one would be section 14.4's invented value with a health reading attached. What it
+    // may do is relay a composition another client computed, which is what it just did.
+    expect(first.measurement.sourceType).toBe("agent");
+
+    // Now the row as a *phone* would have left it: a weighing that really did come off a
+    // scale. `source_type` is the only part of that this server is ever told, and the rest of
+    // this test is about a provenance an agent must not silently rewrite.
+    await handle.database.db
+      .update(schema.measurements)
+      .set({ sourceType: "scale" })
+      .where(and(eq(schema.measurements.userId, userId), eq(schema.measurements.date, date)));
+
+    // The agent is told a weight and nothing else -- the ordinary case, and the one that used
+    // to destroy data.
+    const again = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightKg: 78.45,
+    })) as UpsertResult;
+    expect(again.measurement.weightCg).toBe(WEIGHT_CG);
+    expect(again.measurement.impedanceOhm).toBe(IMPEDANCE_OHM);
+    expect(again.measurement.bodyComposition).toMatchObject(ESTIMATES);
+    expect(again.scaleReadingsRemoved).toBe(false);
+    // Restating a weight that did not change is not a re-authoring of it. Rewriting `scale` to
+    // `agent` here would lose a fact nothing can recover, for a call that changed nothing.
+    expect(again.measurement.sourceType).toBe("scale");
+
+    // And the child row itself, because a tool result is an echo and this is the storage.
+    const rows = await compositionRows(date);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.fatFreeMassCg).toBe(ESTIMATES.fatFreeMassCg);
+    expect((await measurementRows(date))[0]!.impedanceOhm).toBe(IMPEDANCE_OHM);
+  });
+
+  test("changing the weight removes the readings taken with it, and says so", async () => {
+    // The other half of the same rule, and the reason "keep everything" would have been wrong.
+    // PRD_SCALE 21.1: an impedance was measured at the same instant as the weight it came
+    // with, so reattaching it to a corrected one *"en ferait une donnée fausse"*. BR-SCALE-015
+    // makes it structural as well -- `inputWeightCg` must equal the parent's weight, so a
+    // carried-forward composition on a changed weight is a payload the contract itself refuses.
+    const date = "2026-06-11";
+    await weighOnScale(date);
+
+    const corrected = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightKg: 78.5,
+    })) as UpsertResult;
+    expect(corrected.measurement.weightCg).toBe(7_850);
+    expect(corrected.measurement.impedanceOhm).toBeNull();
+    expect(corrected.measurement.bodyComposition).toBeNull();
+    // Told, not left to be discovered: this is the one outcome of this tool a person would be
+    // surprised by, and section 14.4's whole posture is that an agent is given what it needs
+    // to say what happened.
+    expect(corrected.scaleReadingsRemoved).toBe(true);
+    // A weight an agent authored says so, rather than claiming to have been typed by hand.
+    expect(corrected.measurement.sourceType).toBe("agent");
+
+    expect(await compositionRows(date)).toHaveLength(0);
+
+    // Section 13.2 and BR-SCALE-007: the replaced version is removed, never lost. The journal
+    // is not swept, so what stood before is still readable.
+    const journal = await handle.database.db
+      .select({ payload: schema.syncJournal.payload })
+      .from(schema.syncJournal)
+      .where(
+        and(
+          eq(schema.syncJournal.userId, userId),
+          eq(schema.syncJournal.aggregateType, "measurement"),
+          eq(schema.syncJournal.aggregateId, date),
+        ),
+      );
+    const withComposition = journal.filter(
+      (entry) => (entry.payload as { bodyComposition?: unknown }).bodyComposition !== undefined,
+    );
+    expect(withComposition.length).toBeGreaterThan(0);
+  });
+
+  test("an impedance with no composition makes the whole round trip", async () => {
+    // FR-BODY-004 and BR-SCALE-008: the reading is kept even when nothing can be estimated
+    // from it, and PRD_SCALE 22 has it synchronise for that exact reason -- FR-BODY-006's
+    // retroactive calculation needs the same material on every client. This is the ordinary
+    // state of the first weighings, before anyone has entered a sex.
+    const date = "2026-06-12";
+    const written = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightKg: 71,
+      impedanceOhm: 505,
+    })) as UpsertResult;
+    expect(written.measurement.impedanceOhm).toBe(505);
+    expect(written.measurement.bodyComposition).toBeNull();
+
+    const read = (await callOk(client, "mue.get_weight_measurement", { date })) as {
+      measurement: MeasurementView;
+    };
+    expect(read.measurement.impedanceOhm).toBe(505);
+    expect(read.measurement.bodyComposition).toBeNull();
+
+    const listed = (await callOk(client, "mue.list_weight_measurements", {
+      from: date,
+      to: date,
+    })) as { measurements: MeasurementView[] };
+    expect(listed.measurements).toHaveLength(1);
+    expect(listed.measurements[0]!.impedanceOhm).toBe(505);
+
+    expect((await measurementRows(date))[0]!.impedanceOhm).toBe(505);
+
+    // It survives a restatement of the same weight, exactly as a composition does.
+    const again = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightKg: 71,
+    })) as UpsertResult;
+    expect(again.measurement.impedanceOhm).toBe(505);
+
+    // And removing it is something that has to be said.
+    const removed = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightKg: 71,
+      clearImpedanceOhm: true,
+    })) as UpsertResult;
+    expect(removed.measurement.impedanceOhm).toBeNull();
+    expect((await measurementRows(date))[0]!.impedanceOhm).toBeNull();
+  });
+
+  test("a formula set this server does not implement is refused, and nothing is written", async () => {
+    // PRD_SCALE 22 asks for the refusal in as many words, and this is it travelling the whole
+    // chain: the tool builds the payload, `applyWrite` submits it, and the refusal comes from
+    // `packages/domain/src/sync/measurement.ts` -- the same handler a phone's push reaches --
+    // with the field it names still attached when the agent reads it.
+    //
+    // It costs the whole mutation, unlike every other composition failure, and that is the
+    // right price: answering with this build's numbers under a version the caller named would
+    // store, under a version it believes it understands, integers a different equation
+    // produced, and no later migration could tell the two apart.
+    const date = "2026-06-13";
+    for (const [field, wrong] of [
+      ["formulaVersion", { ...COMPOSITION, formulaVersion: 2 }],
+      ["formulaId", { ...COMPOSITION, formulaId: "some-other-formula-v3" }],
+    ] as const) {
+      const error = await callError(client, "mue.upsert_weight_measurement", {
+        date,
+        weightCg: WEIGHT_CG,
+        impedanceOhm: IMPEDANCE_OHM,
+        bodyComposition: wrong,
+      });
+      expect({ field, code: error.code }).toEqual({ field, code: "sync.invalid_payload" });
+      expect(error.field).toBe("payload.bodyComposition.formulaId");
+      // Section 16 and 12.5: the refusal names the formula set and no measured value.
+      expect(error.message).not.toContain(String(WEIGHT_CG));
+      expect(error.message).not.toContain(String(IMPEDANCE_OHM));
+    }
+
+    // The weight goes with it. That is deliberate and is the one case where it does: a
+    // composition the *equations* refuse is dropped and the weighing stands, but a formula set
+    // this build cannot evaluate makes the whole payload uninterpretable.
+    expect(await measurementRows(date)).toHaveLength(0);
+  });
+
+  test("the server's own estimates stand, not the ones the agent sent", async () => {
+    // PRD_SCALE 22: *"les valeurs dérivées fournies par le client ne font pas autorité."* The
+    // four snapshot inputs are testimony and are kept as stated; the four estimates are
+    // arithmetic and are redone. The agent finds out by being handed back what was stored.
+    const date = "2026-06-14";
+    const data = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightCg: WEIGHT_CG,
+      impedanceOhm: IMPEDANCE_OHM,
+      bodyComposition: { ...COMPOSITION, bodyFatDeciPercent: 111, restingEnergyKcal: 999 },
+    })) as UpsertResult;
+
+    expect(data.measurement.bodyComposition).toMatchObject(ESTIMATES);
+    expect(data.measurement.bodyComposition!.inputHeightCm).toBe(COMPOSITION.inputHeightCm);
+    expect(data.measurement.bodyComposition!.inputAgeYears).toBe(COMPOSITION.inputAgeYears);
+    expect((await compositionRows(date))[0]!.bodyFatDeciPercent).toBe(ESTIMATES.bodyFatDeciPercent);
+  });
+
+  test("a composition offered without the impedance it came from is refused, not dropped", async () => {
+    // BR-SCALE-008 and FR-BODY-001: a composition is estimated *from* an impedance, so one
+    // whose weighing carries none is an estimate of nothing. The handler would drop it and keep
+    // the weight -- right for a payload arriving off the wire, where the author is gone -- but a
+    // tool has a caller in front of it, and telling it what is missing is what lets it fix the
+    // call rather than discover the absence on a later read.
+    const date = "2026-06-17";
+    const missing = await callError(client, "mue.upsert_weight_measurement", {
+      date,
+      weightCg: WEIGHT_CG,
+      bodyComposition: COMPOSITION,
+    });
+    expect(missing.code).toBe("sync.invalid_payload");
+    expect(missing.field).toBe("impedanceOhm");
+    expect(await measurementRows(date)).toHaveLength(0);
+
+    // Same refusal when the impedance is removed in the very call that states a composition.
+    await weighOnScale(date);
+    const contradiction = await callError(client, "mue.upsert_weight_measurement", {
+      date,
+      weightCg: WEIGHT_CG,
+      clearImpedanceOhm: true,
+      bodyComposition: COMPOSITION,
+    });
+    expect(contradiction.field).toBe("impedanceOhm");
+    // Refused before anything was submitted, so the weighing is exactly as it was.
+    expect((await measurementRows(date))[0]!.impedanceOhm).toBe(IMPEDANCE_OHM);
+    expect(await compositionRows(date)).toHaveLength(1);
+
+    // And clearing the impedance on its own does take the composition with it, because the
+    // estimate has lost the only measurement it was ever an estimate of.
+    const cleared = (await callOk(client, "mue.upsert_weight_measurement", {
+      date,
+      weightCg: WEIGHT_CG,
+      clearImpedanceOhm: true,
+    })) as UpsertResult;
+    expect(cleared.measurement.impedanceOhm).toBeNull();
+    expect(cleared.measurement.bodyComposition).toBeNull();
+    expect(await compositionRows(date)).toHaveLength(0);
+  });
+
+  test("no tool can create a composition without the weighing it belongs to", async () => {
+    // BR-SCALE-006 and PRD_SCALE 22: *"il n'existe pas d'outil indépendant capable de créer une
+    // composition orpheline."* Asserted structurally rather than by trying the tools that do
+    // not exist -- there is one input named `bodyComposition` in the whole catalogue, and it is
+    // a field of the weight upsert.
+    const carriers = MUE_TOOLS.filter((tool) => "bodyComposition" in tool.inputSchema).map(
+      (tool) => tool.name,
+    );
+    expect(carriers).toEqual(["mue.upsert_weight_measurement"]);
+
+    // And nothing can address one over the wire either: a composition has no aggregate type,
+    // so no envelope, no revision and no tombstone can name one.
+    expect([...AGGREGATE_TYPES]).not.toContain("bodyComposition");
+
+    // The one tool that carries it still cannot be called without a weight, so there is no
+    // path -- not even through it -- to a composition with no parent.
+    const date = "2026-06-15";
+    const error = await callError(client, "mue.upsert_weight_measurement", {
+      date,
+      impedanceOhm: IMPEDANCE_OHM,
+      bodyComposition: COMPOSITION,
+    });
+    expect(error.code).toBe("sync.missing_required_field");
+    expect(error.field).toBe("weightKg");
+    expect(await measurementRows(date)).toHaveLength(0);
+    expect(await compositionRows(date)).toHaveLength(0);
+  });
+
+  test("nothing an agent can read identifies the scale that took the reading", async () => {
+    // PRD_SCALE 16.2 and 22: the local identifier, the Bluetooth address and the advertised
+    // name never leave the phone. The strongest form of that is not a filter someone
+    // remembered to apply -- it is that the server was never told, so there is nowhere for one
+    // to leak from. Both halves are asserted: the columns, and the answers.
+    const columns = await handle.database.sql`
+      select table_name, column_name from information_schema.columns
+      where table_schema = 'mue_app' and table_name in ('measurements', 'body_composition')
+    `;
+    const names = (columns as unknown as { table_name: string; column_name: string }[]).map(
+      (column) => `${column.table_name}.${column.column_name}`,
+    );
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      expect({ name, identifying: /scale|address|device|advertis/i.test(name) }).toEqual({
+        name,
+        identifying: false,
+      });
+    }
+
+    // And the answers themselves, over a day that really was weighed on a scale -- the row is
+    // left as a phone would have left it, so `sourceType` is the one the rule is about.
+    const date = "2026-06-16";
+    await weighOnScale(date);
+    await handle.database.db
+      .update(schema.measurements)
+      .set({ sourceType: "scale" })
+      .where(and(eq(schema.measurements.userId, userId), eq(schema.measurements.date, date)));
+    const answers = JSON.stringify([
+      await callOk(client, "mue.get_weight_measurement", { date }),
+      await callOk(client, "mue.list_weight_measurements", { from: date, to: date }),
+      await callOk(client, "mue.upsert_weight_measurement", { date, weightCg: WEIGHT_CG }),
+      await callOk(client, "mue.get_weight_statistics", { from: date, to: date }),
+    ]).toLowerCase();
+    for (const forbidden of [
+      "sourcescaleid",
+      "scaleid",
+      "macaddress",
+      "bluetooth",
+      "advertisedname",
+      "devicename",
+    ]) {
+      expect({ forbidden, present: answers.includes(forbidden) }).toEqual({
+        forbidden,
+        present: false,
+      });
+    }
+    // The business provenance does travel, and is the only thing about the scale that does:
+    // it says a scale weighed the person and says nothing about which one.
+    expect(answers).toContain('"sourcetype":"scale"');
+  });
 });

@@ -65,6 +65,7 @@ class PushOnWriteWiringTest {
         application.container.sync.outbox.healthProfileUpsert(
             heightCm = 178,
             birthDate = LocalDate.of(1998, 11, 18),
+            sex = null,
         )
 
         val ids = collectRequestIds(forMillis = QUIET_WINDOW_PLUS_SLACK)

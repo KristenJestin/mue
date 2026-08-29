@@ -10,7 +10,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import fr.kristenjestin.mue.data.repository.DataStoreUserProfileRepository
 import fr.kristenjestin.mue.data.sync.SyncOutbox
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserProfile
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -81,7 +83,7 @@ class HealthProfileOutboxDaoTest {
         assertEquals(HealthProfileEntity.ROW_ID, pending.single().aggregateId)
         assertEquals(SyncMutationEntity.OP_UPSERT, pending.single().op)
         assertEquals(
-            """{"heightCm":178,"birthDate":"1990-04-12"}""",
+            """{"heightCm":178,"birthDate":"1990-04-12","sex":null}""",
             pending.single().payload,
         )
     }
@@ -96,7 +98,7 @@ class HealthProfileOutboxDaoTest {
         repository.save(UserProfile("Kristen", null, null))
 
         val payload = syncDao.pendingMutations(10).single().payload
-        assertEquals("""{"heightCm":null,"birthDate":null}""", payload)
+        assertEquals("""{"heightCm":null,"birthDate":null,"sex":null}""", payload)
         assertTrue("the display name must not reach the wire", payload?.contains("Kristen") != true)
     }
 
@@ -105,7 +107,7 @@ class HealthProfileOutboxDaoTest {
     fun aFailingJournalWriteTakesTheProfileWithIt() = runTest {
         syncDao.enqueueMutation(
             SyncOutbox(newMutationId = { "mutation-0" }, now = { fixedNow })
-                .healthProfileUpsert(160, null)
+                .healthProfileUpsert(160, null, null)
         )
         nextId = 0
 
@@ -115,6 +117,40 @@ class HealthProfileOutboxDaoTest {
 
         assertTrue("expected a constraint failure, got $error", error is SQLiteConstraintException)
         assertNull("the write must not survive its own journal", healthProfileDao.get())
+    }
+
+    /**
+     * PRD_SCALE FR-PROFILE-007 et 22 : le sexe vit dans `health_profile`, pas dans DataStore, et
+     * rejoint l'agrégat synchronisé. L'arbitrage est celui de PRD_SCALE 21.1 renversé pour la
+     * raison qui avait déjà fait déménager la taille : une donnée synchronisée doit pouvoir être
+     * appliquée dans la même transaction que son curseur.
+     */
+    @Test
+    fun theSexIsStoredInRoomAndJournalledWithTheProfile() = runTest {
+        repository.save(UserProfile("Kristen", 178, LocalDate.of(1990, 4, 12), Sex.FEMALE))
+
+        assertEquals("female", healthProfileDao.get()?.sex)
+        assertEquals(
+            """{"heightCm":178,"birthDate":"1990-04-12","sex":"female"}""",
+            syncDao.pendingMutations(10).single().payload,
+        )
+        assertEquals(Sex.FEMALE, repository.profile.first().sex)
+    }
+
+    /** Un profil sans sexe reste parfaitement valide (FR-BODY-001) : c'est une absence. */
+    @Test
+    fun clearingTheSexIsAnUpsertStatingNull() = runTest {
+        repository.save(UserProfile("Kristen", 178, null, Sex.MALE))
+        syncDao.deleteMutation("mutation-0")
+
+        repository.save(UserProfile("Kristen", 178, null, null))
+
+        assertNull(healthProfileDao.get()?.sex)
+        assertEquals(
+            """{"heightCm":178,"birthDate":null,"sex":null}""",
+            syncDao.pendingMutations(10).single().payload,
+        )
+        assertNull(repository.profile.first().sex)
     }
 
     /** The profile is an aggregate the server can acknowledge, so it needs its identity row. */
@@ -160,7 +196,7 @@ class HealthProfileOutboxDaoTest {
 
         val pending = syncDao.pendingMutations(10).single()
         assertEquals(SyncMutationEntity.OP_UPSERT, pending.op)
-        assertEquals("""{"heightCm":178,"birthDate":null}""", pending.payload)
+        assertEquals("""{"heightCm":178,"birthDate":null,"sex":null}""", pending.payload)
         assertEquals(
             emptyList<String>(),
             syncDao.tombstones(SyncAggregateStateEntity.TYPE_HEALTH_PROFILE).map { it.aggregateId },

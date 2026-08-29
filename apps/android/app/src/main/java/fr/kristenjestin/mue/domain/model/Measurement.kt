@@ -65,8 +65,39 @@ value class Weight private constructor(val hundredthsKg: Int) : Comparable<Weigh
  *
  * The date is a pure local date with no time and no zone, which makes a
  * timezone-induced off-by-one-day impossible (PRD 11.1).
+ *
+ * Le module balance en fait un petit agrégat (PRD_SCALE 21.1) : provenance, impédance brute et
+ * composition corporelle facultative voyagent **avec** le poids et s'écrivent dans une seule
+ * transaction. Tous les champs ajoutés ont une valeur par défaut, de sorte qu'une saisie manuelle
+ * s'écrit toujours `Measurement(date, weight)` et qu'aucun appelant antérieur au module n'a eu à
+ * changer.
+ *
+ * @property source D'où vient ce poids (PRD_SCALE 21.1). Retoucher à la main un poids reçu le
+ *   ramène à [MeasurementSource.MANUAL] et retire [sourceScaleId], [impedanceOhm] et
+ *   [bodyComposition] (BR-SCALE-013, BR-SCALE-009).
+ * @property sourceScaleId [ScaleDevice.id] de la balance émettrice. **Strictement local, jamais
+ *   synchronisé** (PRD_SCALE 22) : cet identifiant ne désigne rien en dehors de ce téléphone.
+ *   Passe à `null` quand la balance est oubliée, sans que la mesure ni sa provenance ne bougent
+ *   (BR-SCALE-010).
+ * @property impedanceOhm Impédance corporelle totale mesurée en même temps que le poids.
+ *
+ *   **Portée par la mesure et non par [BodyComposition]** (FR-BODY-004, BR-SCALE-008). Une
+ *   impédance parfaitement exploitable est produite dès les premières pesées, alors que le profil
+ *   est encore incomplet — c'est le cas normal tant que le sexe n'est pas renseigné. Rangée dans
+ *   la composition, elle disparaîtrait exactement dans ce cas : des semaines de mesures seraient
+ *   perdues sans recours le jour où le profil est complété, c'est-à-dire précisément le jour où le
+ *   calcul rétroactif de FR-BODY-006 en aurait besoin. Un entier de deux octets ne coûte rien à
+ *   conserver ; sa perte est définitive. `null` lorsque la balance a signalé une mesure impossible
+ *   (BR-SCALE-005).
+ * @property bodyComposition Estimation dérivée, enfant facultatif qui ne peut exister seul
+ *   (BR-SCALE-006). Un payload sans composition **supprime** la composition antérieure de cette
+ *   date, dans la même transaction (BR-SCALE-007).
  */
 data class Measurement(
     val date: LocalDate,
     val weight: Weight,
+    val source: MeasurementSource = MeasurementSource.MANUAL,
+    val sourceScaleId: String? = null,
+    val impedanceOhm: Int? = null,
+    val bodyComposition: BodyComposition? = null,
 )

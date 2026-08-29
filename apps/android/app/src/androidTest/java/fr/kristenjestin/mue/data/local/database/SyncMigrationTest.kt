@@ -256,7 +256,7 @@ class SyncMigrationTest {
         withMigratedDatabase { database ->
             val measurements = database.measurementDao().getAll()
             assertEquals(seeded.size, measurements.size)
-            assertEquals(7_450, measurements.first { it.date == "2026-08-23" }.weightCg)
+            assertEquals(7_450, measurements.first { it.measurement.date == "2026-08-23" }.measurement.weightCg)
 
             assertNull("no server is paired yet", database.syncDao().syncState())
             assertNull("nothing has been seeded yet", database.healthProfileDao().get())

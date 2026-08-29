@@ -1,0 +1,191 @@
+{
+  "_readme": [
+    "Vecteurs de test versionnés du jeu de formules mue-foot-to-foot-v1 (PRD_SCALE 13.2).",
+    "",
+    "Ce fichier est le contrat entre les deux implémentations exigées par PRD_SCALE 13.2 : Kotlin sur",
+    "Android (BodyCompositionCalculatorTest le rejoue entièrement) et TypeScript sur le serveur, dans une",
+    "phase ultérieure. Un même payload doit produire les mêmes entiers stockés des deux côtés.",
+    "",
+    "FORMAT",
+    "  cases[].id      identifiant stable du cas.",
+    "  cases[].why     ce que le cas protège ; en français, comme le reste des commentaires du dépôt.",
+    "  cases[].input   weightCg (centièmes de kg), heightCm, ageYears (âge entier À LA DATE DE LA MESURE,",
+    "                  jamais à la date du calcul), sex (\"female\" | \"male\" | null), impedanceOhm (null =",
+    "                  absente). La date de la mesure n'entre dans aucune équation : elle n'est que",
+    "                  l'identité de la composition produite, et n'est donc pas un paramètre ici.",
+    "  cases[].expect  outcome, plus les quatre entiers stockés quand outcome vaut \"calculated\", plus",
+    "                  missing[] pour \"missing-profile-input\" et check pour \"physically-implausible\".",
+    "",
+    "ISSUES POSSIBLES (champ outcome)",
+    "  calculated             composition calculée ; les quatre entiers sont exigés au caractère près.",
+    "  impedance-unusable     impédance absente, nulle ou négative (BR-SCALE-005).",
+    "  missing-profile-input  taille, date de naissance ou sexe absent ; missing[] dit lesquels.",
+    "  age-out-of-domain      âge hors de 20..75 inclus, apprécié à la date de la mesure.",
+    "  bmi-out-of-domain      IMC hors de 15.8..43.1 inclus.",
+    "  physically-implausible un contrôle de sortie de PRD_SCALE 13.2 a échoué ; check dit lequel.",
+    "",
+    "ORDRE DES PORTES : impédance, puis entrées de profil, puis âge, puis IMC, puis calcul, puis contrôles",
+    "de sortie. Le premier refus l'emporte. L'impédance passe avant le profil pour qu'une saisie manuelle",
+    "ne se lise jamais comme un profil incomplet.",
+    "",
+    "ARITHMÉTIQUE (à reproduire à l'identique)",
+    "  Tout est décimal, jamais flottant. Échelle de travail : 12 décimales. Arrondi : HALF_UP",
+    "  (la mi-chemin s'éloigne de zéro). Chaque multiplication et chaque division est arrondie à 12",
+    "  décimales dès qu'elle est formée ; les additions et soustractions sont exactes. L'arrondi vers les",
+    "  entiers de stockage n'est appliqué qu'une seule fois, à la fin (PRD_SCALE 21.1).",
+    "",
+    "  imc            = weightCg * 100 / heightCm^2",
+    "  weightKg       = weightCg / 100",
+    "  impedanceIndex = heightCm^2 / impedanceOhm",
+    "  ffmKg          = 13.055 + 0.204*weightKg + 0.394*impedanceIndex - 0.136*ageYears + 8.125*sexCoef",
+    "                   sexCoef = 0 (female) | 1 (male)",
+    "  fatMassKg      = weightKg - ffmKg",
+    "  bodyFatPct     = (fatMassKg * 100) / weightKg",
+    "  bodyWaterKg    = ffmKg * 0.732",
+    "  bodyWaterPct   = (bodyWaterKg * 100) / weightKg",
+    "  restingEnergy  = 10*weightKg + 6.25*heightCm - 5*ageYears + (female ? -161 : 5)",
+    "",
+    "  bodyFatDeciPercent   = round(bodyFatPct * 10)",
+    "  fatFreeMassCg        = round(ffmKg * 100)",
+    "  bodyWaterDeciPercent = round(bodyWaterPct * 10)",
+    "  restingEnergyKcal    = round(restingEnergy)",
+    "",
+    "  Les quatre cas half-up-* portent une mi-chemin exacte sur chacune de ces quatre sorties : ce sont",
+    "  eux qui échouent en premier si un portage arrondit en Double ou choisit HALF_EVEN.",
+    "",
+    "CONTRÔLES DE SORTIE (après calcul, jamais de valeur ramenée dans les bornes)",
+    "  0 < ffmKg <= weightKg ; 0 < bodyFatPct < 100 ; bodyWaterKg <= weightKg ; 0 < bodyWaterPct < 100 ;",
+    "  restingEnergy > 0. Les mêmes bornes sont rejouées sur les entiers stockés, pour qu'un arrondi ne",
+    "  puisse pas afficher 0.0 % ou 100.0 %.",
+    "",
+    "TypeScript reproduit tout cela sans dépendance avec BigInt : les grandeurs sont des entiers d'échelle",
+    "10^12, mul(a,b) = round(a*b / 10^12), div(a,b) = round(a*10^12 / b), l'arrondi half-up positif étant",
+    "floor((2n + d) / (2d)). C'est l'implémentation qui a produit ce fichier."
+  ],
+  "formulaId": "mue-foot-to-foot-v1",
+  "formulaVersion": 1,
+  "workingScale": 12,
+  "rounding": "HALF_UP",
+  "cases": [
+    {
+      "id": "hardware-female",
+      "why": "Relevé sur la balance de référence le 26/08/2026 : 85,75 kg et 545 ohms. Taille et âge plausibles, profil féminin.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": "female", "impedanceOhm": 545 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 431, "fatFreeMassCg": 4883, "bodyWaterDeciPercent": 417, "restingEnergyKcal": 1639 }
+    },
+    {
+      "id": "hardware-male",
+      "why": "Le même relevé matériel, profil masculin : le terme de sexe ajoute 8,125 kg de masse maigre et la dépense au repos passe de -161 à +5.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 336, "fatFreeMassCg": 5695, "bodyWaterDeciPercent": 486, "restingEnergyKcal": 1805 }
+    },
+    {
+      "id": "age-lower-bound-20",
+      "why": "Borne basse du domaine d'âge, incluse (FR-BODY-001).",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 20, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 314, "fatFreeMassCg": 5886, "bodyWaterDeciPercent": 502, "restingEnergyKcal": 1875 }
+    },
+    {
+      "id": "age-just-below-19",
+      "why": "Un an sous la borne : refusé, le poids reste valide et l'impédance reste enregistrée sur la mesure.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 19, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "age-out-of-domain" }
+    },
+    {
+      "id": "age-upper-bound-75",
+      "why": "Borne haute du domaine d'âge, incluse.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 75, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 401, "fatFreeMassCg": 5138, "bodyWaterDeciPercent": 439, "restingEnergyKcal": 1600 }
+    },
+    {
+      "id": "age-just-above-76",
+      "why": "Un an au-dessus de la borne : refusé.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 76, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "age-out-of-domain" }
+    },
+    {
+      "id": "bmi-lower-bound-15.8",
+      "why": "IMC exactement 15,8 (63,20 kg pour 200 cm) : borne incluse.",
+      "input": { "weightCg": 6320, "heightCm": 200, "ageYears": 30, "sex": "male", "impedanceOhm": 700 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 169, "fatFreeMassCg": 5251, "bodyWaterDeciPercent": 608, "restingEnergyKcal": 1737 }
+    },
+    {
+      "id": "bmi-just-below-15.7875",
+      "why": "Le pas de poids valide juste en dessous (63,15 kg, BR-003 impose un multiple de 0,05 kg) : IMC 15,7875, refusé. L'IMC de la porte n'est pas arrondi : 15,7875 ne devient pas 15,8.",
+      "input": { "weightCg": 6315, "heightCm": 200, "ageYears": 30, "sex": "male", "impedanceOhm": 700 },
+      "expect": { "outcome": "bmi-out-of-domain" }
+    },
+    {
+      "id": "bmi-upper-bound-43.1",
+      "why": "IMC exactement 43,1 (172,40 kg pour 200 cm) : borne incluse.",
+      "input": { "weightCg": 17240, "heightCm": 200, "ageYears": 40, "sex": "male", "impedanceOhm": 400 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 476, "fatFreeMassCg": 9031, "bodyWaterDeciPercent": 383, "restingEnergyKcal": 2779 }
+    },
+    {
+      "id": "bmi-just-above-43.1125",
+      "why": "Le pas de poids valide juste au-dessus : IMC 43,1125, refusé. Un arrondi à une décimale l'aurait laissé entrer.",
+      "input": { "weightCg": 17245, "heightCm": 200, "ageYears": 40, "sex": "male", "impedanceOhm": 400 },
+      "expect": { "outcome": "bmi-out-of-domain" }
+    },
+    {
+      "id": "half-up-fat-free-mass",
+      "why": "La masse maigre vaut exactement 52,125 kg : 5212,5 centièmes, mi-chemin exacte, arrondie à 5213 (HALF_UP).",
+      "input": { "weightCg": 6000, "heightCm": 165, "ageYears": 20, "sex": "female", "impedanceOhm": 363 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 131, "fatFreeMassCg": 5213, "bodyWaterDeciPercent": 636, "restingEnergyKcal": 1370 }
+    },
+    {
+      "id": "half-up-body-fat",
+      "why": "La masse grasse vaut exactement 32,65 % : 326,5 dixièmes, mi-chemin exacte, arrondie à 327.",
+      "input": { "weightCg": 8000, "heightCm": 165, "ageYears": 20, "sex": "female", "impedanceOhm": 394 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 327, "fatFreeMassCg": 5388, "bodyWaterDeciPercent": 493, "restingEnergyKcal": 1570 }
+    },
+    {
+      "id": "half-up-body-water",
+      "why": "L'eau corporelle vaut exactement 35,55 % : 355,5 dixièmes, mi-chemin exacte, arrondie à 356.",
+      "input": { "weightCg": 9150, "heightCm": 165, "ageYears": 26, "sex": "female", "impedanceOhm": 660 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 514, "fatFreeMassCg": 4444, "bodyWaterDeciPercent": 356, "restingEnergyKcal": 1655 }
+    },
+    {
+      "id": "half-up-resting-energy",
+      "why": "La dépense au repos vaut exactement 1804,5 kcal : mi-chemin exacte, arrondie à 1805. En Double, 10 x 85,70 ne vaut pas toujours 857 exactement.",
+      "input": { "weightCg": 8570, "heightCm": 178, "ageYears": 34, "sex": "male", "impedanceOhm": 545 },
+      "expect": { "outcome": "calculated", "bodyFatDeciPercent": 336, "fatFreeMassCg": 5694, "bodyWaterDeciPercent": 486, "restingEnergyKcal": 1805 }
+    },
+    {
+      "id": "implausible-fat-free-mass-above-weight",
+      "why": "Impédance aberrante (150 ohms) dans un domaine d'âge et d'IMC valide : la masse maigre sort à 109,78 kg pour 60 kg de poids. Refusé, jamais ramené dans les bornes (PRD_SCALE 13.2).",
+      "input": { "weightCg": 6000, "heightCm": 175, "ageYears": 30, "sex": "male", "impedanceOhm": 150 },
+      "expect": { "outcome": "physically-implausible", "check": "fat-free-mass-above-weight" }
+    },
+    {
+      "id": "impedance-unusable-zero",
+      "why": "Impédance nulle : non exploitable (BR-SCALE-005).",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": "female", "impedanceOhm": 0 },
+      "expect": { "outcome": "impedance-unusable" }
+    },
+    {
+      "id": "impedance-unusable-absent",
+      "why": "Aucune impédance : pesée en chaussettes, marqueur d'absence du pilote, ou saisie manuelle. Aucun message d'erreur.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": "female", "impedanceOhm": null },
+      "expect": { "outcome": "impedance-unusable" }
+    },
+    {
+      "id": "impedance-unusable-negative",
+      "why": "Impédance négative : impossible physiquement, traitée comme une absence.",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": "female", "impedanceOhm": -12 },
+      "expect": { "outcome": "impedance-unusable" }
+    },
+    {
+      "id": "missing-sex",
+      "why": "Profil sans sexe, impédance parfaitement exploitable : le poids et l'impédance sont enregistrés, la composition est absente (FR-BODY-001, PRD_SCALE 18.4).",
+      "input": { "weightCg": 8575, "heightCm": 178, "ageYears": 34, "sex": null, "impedanceOhm": 545 },
+      "expect": { "outcome": "missing-profile-input", "missing": ["sex"] }
+    },
+    {
+      "id": "missing-height-and-birth-date",
+      "why": "Deux entrées manquantes : le motif les nomme toutes les deux, dans l'ordre taille, date de naissance, sexe.",
+      "input": { "weightCg": 8575, "heightCm": null, "ageYears": null, "sex": "female", "impedanceOhm": 545 },
+      "expect": { "outcome": "missing-profile-input", "missing": ["height", "birthDate"] }
+    }
+  ]
+}

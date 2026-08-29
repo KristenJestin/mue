@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -154,6 +155,21 @@ export const mutationLog = mueApp.table(
  * The primary key is the business key Android already enforces, so the two
  * sides merge on the same thing and no identity conversion is needed.
  * `weight_cg` is centigrams, exactly as Room stores it.
+ *
+ * ## What PRD_SCALE 22 added here, and what it deliberately did not
+ *
+ * A weighing now carries a business provenance and the raw impedance the scale
+ * measured. Both are columns of the *measurement*, and the second one is the
+ * whole of FR-BODY-004: an impedance survives a profile that cannot yet produce
+ * a composition, which is the ordinary state of the first weighings, and it is
+ * the material FR-BODY-006's retroactive calculation needs on every client.
+ *
+ * **There is no column for the scale itself, and there never will be.**
+ * PRD_SCALE 16.2 and 22 are explicit: `sourceScaleId`, the Bluetooth address and
+ * the advertised name never leave the phone. `sourceScaleId` would not even
+ * denote anything here -- it is a UUID one installation minted at pairing, and a
+ * second phone could not resolve it. This is an absent column and not a nullable
+ * one left empty, because a nullable column is one that eventually gets filled.
  */
 export const measurements = mueApp.table(
   "measurements",
@@ -163,6 +179,28 @@ export const measurements = mueApp.table(
       .references(() => user.id, { onDelete: "cascade" }),
     date: date("date", { mode: "string" }).notNull(),
     weightCg: integer("weight_cg").notNull(),
+    /**
+     * `manual`, `scale`, `agent` or `server` (PRD_SCALE 21.1), the same four
+     * `MeasurementSource.wireValue`s Room holds.
+     *
+     * Not null with a default, and the default is what makes the migration
+     * additive: every row written before the scale module is back-filled with
+     * `manual`, which is exactly what Android's own migration does and what the
+     * wire means by omitting the field. It is a plain text column with no check
+     * constraint, like `activity_sessions.movement` and `foods.source`: business
+     * enums are stated once, in `@mue/contracts`, and a second spelling of the
+     * list here is a second place for it to fall out of date.
+     */
+    sourceType: text("source_type").notNull().default("manual"),
+    /**
+     * Raw impedance in ohms, **on the measurement and not on the composition**
+     * (FR-BODY-004, BR-SCALE-008).
+     *
+     * Null is an absence and never a value: BR-SCALE-005 makes a scale's refusal
+     * to measure an absence, and FR-BODY-002 puts zero, a negative reading and
+     * the driver's own no-reading marker in the same class.
+     */
+    impedanceOhm: integer("impedance_ohm"),
     ...aggregateMetadata(),
   },
   (t) => [
@@ -174,7 +212,86 @@ export const measurements = mueApp.table(
 );
 
 /**
- * Section 13.4: one aggregate, one row per user. Both fields are nullable
+ * The optional composition of one weighing (PRD_SCALE 21.1), and the four
+ * estimates it holds with the exact snapshot of the inputs they came from.
+ *
+ * ## Why it carries no section 12.1 metadata
+ *
+ * Every other table in this file spreads `aggregateMetadata()`, and this one
+ * must not. PRD_SCALE 22: *"`BodyComposition` n'est pas un agrégat synchronisé
+ * indépendant. Elle voyage dans le payload complet de `Measurement`, qui porte
+ * seul les métadonnées communes de §12.1."* A revision here would be a second
+ * revision for one aggregate, and the two would drift the first time a
+ * measurement was replaced; an `origin_type` here would claim a composition can
+ * be authored by someone other than the author of its weighing; a `deleted_at`
+ * here would be a tombstone for a row that has no identity of its own to keep
+ * alive. There is no `aggregateType` for a composition, no envelope branch and
+ * no way to address one on the wire, so there is nothing for that metadata to
+ * describe. It is a **child row**, not a small aggregate.
+ *
+ * ## The composite foreign key is BR-SCALE-006 and BR-SCALE-007
+ *
+ * `(user_id, date)` references `measurements(user_id, date)`, which is both its
+ * own primary key and the parent's, so PostgreSQL already has every index the
+ * constraint needs. `on delete cascade` is BR-SCALE-006 made structural -- a
+ * composition cannot exist without its weighing, and no handler has to remember
+ * it -- and it is the half of BR-SCALE-007 that a *hard* delete performs: the
+ * retention sweep of `retention.ts` removes expired tombstoned measurements, and
+ * their compositions go with them in the same statement.
+ *
+ * The *soft* half is not the database's to do. A section 12.1 delete writes a
+ * tombstone rather than removing the row, and an `UPDATE` fires no cascade, so
+ * `measurement.ts` deletes the composition explicitly inside the same
+ * transaction. `on update cascade` mirrors Android's declaration and costs
+ * nothing: the key is a business date, so it does move when a weighing is
+ * re-dated.
+ *
+ * ## Every value is a whole count of its storage unit
+ *
+ * PRD_SCALE 13.2 requires the Kotlin and the TypeScript implementations to
+ * produce **the same stored integers** for one payload, and PRD_SCALE 21.1
+ * rounds exactly once, on the way in. No float enters this table, so nothing can
+ * be rounded a second time.
+ */
+export const bodyComposition = mueApp.table(
+  "body_composition",
+  {
+    userId: text("user_id").notNull(),
+    /** The identity of the parent weighing; a composition has no other. */
+    date: date("date", { mode: "string" }).notNull(),
+    /** `mue-foot-to-foot-v1` today. Stored, never assumed (FR-BODY-004). */
+    formulaId: text("formula_id").notNull(),
+    formulaVersion: integer("formula_version").notNull(),
+    /** Always the parent's `weight_cg` (BR-SCALE-015), kept with the snapshot. */
+    inputWeightCg: integer("input_weight_cg").notNull(),
+    inputHeightCm: integer("input_height_cm").notNull(),
+    /** Whole years **at the date of the weighing**, never at the date of the calculation. */
+    inputAgeYears: integer("input_age_years").notNull(),
+    /** `female` or `male`: the term the equation actually took (FR-BODY-004). */
+    inputSex: text("input_sex").notNull(),
+    /** Tenths of a percent. */
+    bodyFatDeciPercent: integer("body_fat_deci_percent").notNull(),
+    /** Hundredths of a kilogram. */
+    fatFreeMassCg: integer("fat_free_mass_cg").notNull(),
+    /** Tenths of a percent. */
+    bodyWaterDeciPercent: integer("body_water_deci_percent").notNull(),
+    /** Mifflin-St Jeor, rounded to the kilocalorie. */
+    restingEnergyKcal: integer("resting_energy_kcal").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.date] }),
+    foreignKey({
+      columns: [t.userId, t.date],
+      foreignColumns: [measurements.userId, measurements.date],
+      name: "body_composition_measurement_fk",
+    })
+      .onDelete("cascade")
+      .onUpdate("cascade"),
+  ],
+);
+
+/**
+ * Section 13.4: one aggregate, one row per user. Every field is nullable
  * because the profile exists before it is filled in, and each may be merged
  * separately when they were not modified concurrently.
  */
@@ -184,6 +301,22 @@ export const healthProfile = mueApp.table("health_profile", {
     .references(() => user.id, { onDelete: "cascade" }),
   heightCm: integer("height_cm"),
   birthDate: date("birth_date", { mode: "string" }),
+  /**
+   * `female` or `male`, and null for the unstated state (PRD_SCALE 22,
+   * FR-PROFILE-007).
+   *
+   * Null and *absent* are the same fact here, and that is the one conversion
+   * this column owes: `HealthProfilePayloadV1.sex` is `.optional()` rather than
+   * `.nullable()`, so an unstated sex is a missing key on the wire. A handler
+   * that wrote `sex: null` into a journalled payload would produce a snapshot
+   * `pull` can no longer parse. See `health-profile.ts`.
+   *
+   * It lives in this aggregate and not beside the four estimates it feeds
+   * because PRD_SCALE 22 puts it here, under section 13.4's field-by-field
+   * merge. FR-PROFILE-007 also settles what it is for: the body-composition
+   * equations, and nothing else. The BMI does not read it.
+   */
+  sex: text("sex"),
   ...aggregateMetadata(),
 });
 

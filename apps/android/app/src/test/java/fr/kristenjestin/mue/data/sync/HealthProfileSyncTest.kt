@@ -168,7 +168,11 @@ class HealthProfileSyncTest {
     @Test
     fun whatTheOutboxWritesIsWhatTheWireReads() {
         val outbox = SyncOutbox(newMutationId = { "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6071" })
-        val row = outbox.healthProfileUpsert(heightCm = 171, birthDate = LocalDate.of(1998, 11, 18))
+        val row = outbox.healthProfileUpsert(
+            heightCm = 171,
+            birthDate = LocalDate.of(1998, 11, 18),
+            sex = null,
+        )
 
         val envelope = assertIs<HealthProfileUpsertMutationDto>(
             SyncWire.toEnvelope(row, SyncWire.androidOrigin("device-7f3c1a04")),
@@ -185,7 +189,7 @@ class HealthProfileSyncTest {
     @Test
     fun aClearedProfileCrossesAsNullsRatherThanAsAnEmptyPayload() {
         val outbox = SyncOutbox(newMutationId = { "0198f0a2-4d5e-7f60-9a1b-2c3d4e5f6072" })
-        val row = outbox.healthProfileUpsert(heightCm = null, birthDate = null)
+        val row = outbox.healthProfileUpsert(heightCm = null, birthDate = null, sex = null)
 
         val envelope = assertIs<HealthProfileUpsertMutationDto>(
             SyncWire.toEnvelope(row, SyncWire.androidOrigin("device-7f3c1a04")),

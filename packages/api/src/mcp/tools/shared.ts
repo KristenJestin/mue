@@ -2,10 +2,12 @@ import {
   type AggregateType,
   instantSchema,
   localDateSchema,
+  measurementSourceTypeSchema,
   type MueError,
   type MutationOp,
   originTypeSchema,
   revisionSchema,
+  sexSchema,
   WEIGHT_MAX_CENTIGRAMS,
   WEIGHT_MIN_CENTIGRAMS,
   WEIGHT_STEP_CENTIGRAMS,
@@ -118,12 +120,82 @@ export const freshnessShape = {
     ),
 };
 
+/**
+ * The body composition of PRD_SCALE 12.3, as a tool reports it.
+ *
+ * `bodyCompositionV1Schema` is not reused verbatim, and the difference is the audience. The
+ * contract's version is a *wire* schema whose bounds refuse a malformed payload; this one is a
+ * catalogue entry an agent reads to understand what the four numbers are, so every field
+ * carries the sentence FR-BODY-003 and PRD_SCALE 13.3 require -- these are estimates, in whole
+ * storage units, from equations validated on a population that is not everyone.
+ *
+ * There is deliberately no tool that takes this object on its own. BR-SCALE-006 makes a
+ * composition an optional child of a weighing that cannot exist alone, and PRD_SCALE 22 says it
+ * in as many words: *"il n'existe pas d'outil indépendant capable de créer une composition
+ * orpheline."* Here that is structural rather than a rule someone enforces -- it appears only
+ * inside a measurement, on the way in and on the way out.
+ */
+export const bodyCompositionViewSchema = z.object({
+  formulaId: z
+    .string()
+    .describe("The published formula set these estimates come from, e.g. `mue-foot-to-foot-v1`."),
+  formulaVersion: z.int().describe("Which version of that formula set produced them."),
+  inputWeightCg: z
+    .int()
+    .describe("The weight the equations were fed. Always equal to the measurement's `weightCg`."),
+  inputHeightCm: z.int().describe("The height the equations were fed, in whole centimetres."),
+  inputAgeYears: z
+    .int()
+    .describe(
+      "The whole age on the day of the weighing, not today's age. Editing the profile later never rewrites this.",
+    ),
+  inputSex: sexSchema.describe(
+    "The sex term the equations were fed. Recorded because the estimate depends on it.",
+  ),
+  bodyFatDeciPercent: z
+    .int()
+    .describe("Estimated body fat in tenths of a percent: 231 is 23.1%. An estimate, not a scan."),
+  fatFreeMassCg: z
+    .int()
+    .describe("Estimated fat-free mass in hundredths of a kilogram: 5567 is 55.67 kg."),
+  bodyWaterDeciPercent: z
+    .int()
+    .describe("Estimated body water in tenths of a percent, from an average hydration factor."),
+  restingEnergyKcal: z
+    .int()
+    .describe(
+      "Resting energy expenditure in whole kilocalories (Mifflin-St Jeor). Computed from weight, height, age and sex -- the scale does not measure it.",
+    ),
+});
+
 export const weightMeasurementViewSchema = z.object({
   date: localDateSchema.describe("The day the weight belongs to. One measurement per day."),
   weightCg: z
     .int()
     .describe("Weight in hundredths of a kilogram, the exact integer the phone stores."),
   weightKg: z.number().describe("`weightCg` divided by 100, for display only."),
+  /*
+   * PRD_SCALE 21.1 and 22's three additions, reported by every weight read and by the upsert.
+   *
+   * They are on this shared shape rather than on one tool, because the three tools describe the
+   * same record and a field visible through one of them and not another is how a caller comes to
+   * believe a composition was not stored. It is also what makes `mue.upsert_weight_measurement`
+   * able to restate what it did not change: see its own note on BR-SCALE-007.
+   */
+  sourceType: measurementSourceTypeSchema.describe(
+    "How the weight was obtained: typed by hand, read from a scale, written by an agent, or by the server. Which scale is never reported: its identifier, address and name stay on the phone.",
+  ),
+  impedanceOhm: z
+    .int()
+    .nullable()
+    .describe(
+      "Raw bioimpedance in ohms, measured by the scale at the same time as the weight. Null when none was usable -- a scale that could not measure one reports an absence, never a zero. It is a field of the measurement, so it is present even when no composition could be estimated.",
+    ),
+  bodyComposition: bodyCompositionViewSchema
+    .nullable()
+    .describe(
+      "Estimated composition for this weighing, or null when there is none. Absence is ordinary: it needs an impedance, a height, a birth date and a sex, and an age and BMI inside the range the equation was developed for.",
+    ),
   ...metadataShape,
 });
 

@@ -3,6 +3,7 @@ import {
   type HealthProfilePayloadV1,
   type MutationEnvelope,
   healthProfilePayloadV1Schema,
+  sexSchema,
 } from "@mue/contracts";
 import { type Transaction, appendToJournal, schema } from "@mue/db";
 import { and, eq } from "drizzle-orm";
@@ -90,6 +91,20 @@ const { healthProfile, syncJournal } = schema;
  * Telling a seeded value from an edited one is a fact about the client, and no client has
  * a column for it.
  *
+ * ## The third field, and why it needed no third rule
+ *
+ * PRD_SCALE 22 puts the sex in this aggregate — *"le sexe rejoint l'agrégat `HealthProfile`"* —
+ * under these same rules, and it is the merge that had to be checked rather than extended.
+ * `sex` is optional where its two neighbours are nullable (the contract explains why: it arrives
+ * after every existing client was written), so the trap is a client that has never heard of it
+ * erasing a sex another device set.
+ *
+ * It does not, and the reason is that **absence is stable**. Such a client sends no `sex`, and
+ * the base snapshot it quotes — written by a client just as unaware — has none either. So
+ * `incoming === base` between two `undefined`s, the first row of the table above applies
+ * unchanged, and the stored value stands. That is asserted rather than argued: see "a client
+ * that has never heard of `sex` preserves the one another device set".
+ *
  * ## Section 16, and why no message below quotes a value
  *
  * "Les journaux techniques n'enregistrent pas les secrets ni les payloads de santé
@@ -99,10 +114,23 @@ const { healthProfile, syncJournal } = schema;
  * place they have no reason to appear.
  */
 
+/**
+ * The two values the aggregate's `sex` may take, taken from the payload type
+ * rather than restated.
+ *
+ * `@mue/contracts` exports `SEXES` and `sexSchema` but no type alias, and adding
+ * one there would be a change to a contract this module only consumes. Deriving
+ * it from `HealthProfilePayloadV1` also makes it impossible for this file to
+ * disagree with the wire: a third value added to the enum arrives here on its
+ * own.
+ */
+type Sex = NonNullable<HealthProfilePayloadV1["sex"]>;
+
 interface ProfileState {
   readonly revision: bigint;
   readonly heightCm: number | null;
   readonly birthDate: string | null;
+  readonly sex: string | null;
 }
 
 async function readState(tx: Transaction, userId: string): Promise<ProfileState | undefined> {
@@ -111,10 +139,31 @@ async function readState(tx: Transaction, userId: string): Promise<ProfileState 
       revision: healthProfile.revision,
       heightCm: healthProfile.heightCm,
       birthDate: healthProfile.birthDate,
+      sex: healthProfile.sex,
     })
     .from(healthProfile)
     .where(eq(healthProfile.userId, userId));
   return rows[0];
+}
+
+/**
+ * The stored sex, read back into the shape the payload states it in.
+ *
+ * `health_profile.sex` is a nullable column and `HealthProfilePayloadV1.sex` is
+ * an *optional* key, so this conversion exists and has to happen exactly once.
+ * The wire schema is `sexSchema.optional()`, which refuses `null`: a merged
+ * payload carrying `sex: null` would be journalled, and `pull` re-parses every
+ * entry it returns through `syncChangeSchema` -- so it would stop the cursor
+ * dead on a change the server itself wrote. An unreadable snapshot is also an
+ * unusable merge base, so the damage would compound on the next edit.
+ *
+ * It is parsed rather than cast. The column is plain text, and a value that is
+ * neither `female` nor `male` is not a sex this build knows; treating it as one
+ * would put it back on the wire, where the schema refuses it.
+ */
+function storedSex(value: string | null): Sex | undefined {
+  const parsed = sexSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -172,7 +221,39 @@ function stateField<T>(incoming: T | null, stored: T | null): T | null {
   return incoming === null ? stored : incoming;
 }
 
-/** Section 13.4's merge, over the two fields the profile has. */
+/**
+ * The same rule for `sex`, whose unstated form is an absent key rather than a null.
+ *
+ * PRD_SCALE FR-PROFILE-007 makes the field optional, and `measurement.ts`'s neighbour in the
+ * contract spells out why the shape differs from its two nullable neighbours: `heightCm` and
+ * `birthDate` are stated by every client that has ever spoken this contract, and `sex` arrives
+ * afterwards, so requiring it would make every existing client's payload suddenly incomplete.
+ *
+ * The reasoning above transfers unchanged, because the question it asks is not about `null` but
+ * about *assertion*: a stated value is one, and the form a client uses to say nothing is not.
+ * For `sex` that form is `undefined`, so that is what yields to what is stored.
+ */
+function stateOptionalField<T>(incoming: T | undefined, stored: T | undefined): T | undefined {
+  return incoming === undefined ? stored : incoming;
+}
+
+/**
+ * A merged profile as the wire states it: `sex` present only when there is one.
+ *
+ * `exactOptionalPropertyTypes` makes `{ sex: undefined }` a different value from an absent key,
+ * and only the second is what `sexSchema.optional()` describes. This matters twice over: the
+ * merged object is journalled, and `pull` re-parses every journalled change, so an explicit
+ * `undefined` serialised as `null` would stop a cursor on a change the server itself wrote.
+ */
+function profileOf(
+  heightCm: number | null,
+  birthDate: string | null,
+  sex: Sex | undefined,
+): HealthProfilePayloadV1 {
+  return { heightCm, birthDate, ...(sex === undefined ? {} : { sex }) };
+}
+
+/** Section 13.4's merge, over the three fields the profile has. */
 export function mergeHealthProfile(
   incoming: HealthProfilePayloadV1,
   base: HealthProfilePayloadV1 | undefined,
@@ -187,16 +268,27 @@ export function mergeHealthProfile(
   // revision whose journal snapshot this build cannot read back — because they leave the
   // server in the same position: holding a payload it has no basis to interpret.
   if (base === undefined) {
-    return {
-      heightCm: stateField(incoming.heightCm, stored.heightCm),
-      birthDate: stateField(incoming.birthDate, stored.birthDate),
-    };
+    return profileOf(
+      stateField(incoming.heightCm, stored.heightCm),
+      stateField(incoming.birthDate, stored.birthDate),
+      stateOptionalField(incoming.sex, stored.sex),
+    );
   }
 
-  return {
-    heightCm: mergeField(incoming.heightCm, base.heightCm, stored.heightCm),
-    birthDate: mergeField(incoming.birthDate, base.birthDate, stored.birthDate),
-  };
+  // Three independent fields, one rule, applied field by field — which is the whole of rule 2.
+  //
+  // `sex` needs no special case here, and that is the point PRD_SCALE 22's addition turns on:
+  // **absence is stable**. A client written before this field existed sends no `sex` and quoted
+  // a base snapshot that has none either, so `incoming === base` holds between two `undefined`s,
+  // the third column of the table above applies, and a sex another device set is preserved
+  // rather than erased by a phone that has never heard of it. It is also what makes clearing one
+  // expressible: an author editing a version that *had* a sex and sending none has moved the
+  // field, exactly as sending a different one would have.
+  return profileOf(
+    mergeField(incoming.heightCm, base.heightCm, stored.heightCm),
+    mergeField(incoming.birthDate, base.birthDate, stored.birthDate),
+    mergeField(incoming.sex, base.sex, stored.sex),
+  );
 }
 
 async function applyUpsert(
@@ -223,7 +315,9 @@ async function applyUpsert(
   const state = await readState(tx, context.userId);
   const base = await readBase(tx, context.userId, mutation.baseRevision);
   const stored: HealthProfilePayloadV1 | undefined =
-    state === undefined ? undefined : { heightCm: state.heightCm, birthDate: state.birthDate };
+    state === undefined
+      ? undefined
+      : profileOf(state.heightCm, state.birthDate, storedSex(state.sex));
 
   const merged = mergeHealthProfile(mutation.payload, base, stored);
   const revision = (state?.revision ?? 0n) + 1n;
@@ -234,6 +328,10 @@ async function applyUpsert(
       userId: context.userId,
       heightCm: merged.heightCm,
       birthDate: merged.birthDate,
+      // The one place the optional key becomes a nullable column: an unstated
+      // sex is a null here and a missing key on the wire, and nothing else in
+      // this file may make that conversion (PRD_SCALE FR-PROFILE-007).
+      sex: merged.sex ?? null,
       revision,
       createdAt: now,
       updatedAt: now,
@@ -255,6 +353,7 @@ async function applyUpsert(
       set: {
         heightCm: merged.heightCm,
         birthDate: merged.birthDate,
+        sex: merged.sex ?? null,
         revision,
         updatedAt: now,
         deletedAt: null,

@@ -23,9 +23,9 @@ import org.junit.runner.RunWith
  * section, beside `Haptic feedback`, and what it opens is the screen itself — not a push into the
  * Food tab's stack, which is why `FoodPreferencesScreen` came over with the button.
  *
- * The whole `ProfileScreen` is driven, ViewModels and all, because the stack is the thing under
- * test and it lives in that composable rather than in the stateless one every other `Profile`
- * test uses.
+ * The whole tab is driven, ViewModels and all, because the stack is the thing under test: it
+ * lives in `ProfileNavHost`, beside the scale sub-screens, rather than in the stateless
+ * `ProfileScreen` every other `Profile` test uses.
  */
 @RunWith(AndroidJUnit4::class)
 class ProfileFoodPreferencesTest {
@@ -84,7 +84,7 @@ class ProfileFoodPreferencesTest {
     // region harness
 
     private fun start() {
-        compose.setContent { MueTheme { ProfileScreen(Modifier.fillMaxSize()) } }
+        compose.setContent { MueTheme { ProfileNavHost(Modifier.fillMaxSize()) } }
         compose.waitForIdle()
     }
 

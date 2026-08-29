@@ -5,9 +5,12 @@ import fr.kristenjestin.mue.domain.logic.Bmi
 import fr.kristenjestin.mue.domain.logic.BmiCategory
 import fr.kristenjestin.mue.domain.logic.MueValidation
 import fr.kristenjestin.mue.domain.model.Measurement
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserPreferences
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.testing.measurementOf
+import fr.kristenjestin.mue.ui.scale.FakeScaleRepository
+import fr.kristenjestin.mue.ui.scale.scaleDeviceOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -607,10 +610,113 @@ class ProfileViewModelTest {
 
     // endregion
 
+    // region le sexe, facultatif (PRD_SCALE FR-PROFILE-007)
+
+    @Test
+    fun `le sexe se charge depuis le profil enregistré`() = runTest {
+        val harness = harness(profile = UserProfile("Kris", 180, sex = Sex.FEMALE))
+
+        assertEquals(Sex.FEMALE, harness.state().sex)
+    }
+
+    @Test
+    fun `un profil sans sexe est vide et le reste`() = runTest {
+        assertNull(harness().state().sex)
+    }
+
+    @Test
+    fun `choisir un sexe l'enregistre avec le reste du profil`() = runTest {
+        val harness = harness()
+
+        harness.viewModel.onHeightChange("180")
+        harness.viewModel.onSexChange(Sex.MALE)
+        harness.viewModel.saveProfile()
+        harness.state()
+
+        assertEquals(Sex.MALE, harness.profiles.stored.sex)
+        assertEquals(180, harness.profiles.stored.heightCm)
+    }
+
+    /**
+     * FR-PROFILE-007 : « un champ vide est valide et ne bloque jamais l'enregistrement ». L'état
+     * non renseigné doit donc être **atteignable**, pas seulement être l'état de départ : un champ
+     * facultatif qu'on ne peut plus vider n'est pas facultatif.
+     */
+    @Test
+    fun `revenir à l'état non renseigné est possible et s'enregistre`() = runTest {
+        val harness = harness(profile = UserProfile(sex = Sex.FEMALE))
+
+        harness.viewModel.onSexChange(null)
+        harness.viewModel.saveProfile()
+        harness.state()
+
+        assertNull(harness.state().sex)
+        assertNull(harness.profiles.stored.sex)
+        assertEquals(1, harness.profiles.saveCount)
+    }
+
+    @Test
+    fun `un profil sans sexe s'enregistre sans la moindre erreur`() = runTest {
+        val harness = harness()
+
+        harness.viewModel.onHeightChange("180")
+        harness.viewModel.saveProfile()
+        val state = harness.state()
+
+        assertNull(state.saveError)
+        assertNull(state.heightError)
+        assertNull(state.birthDateError)
+        assertTrue(state.profileSaved)
+        assertNull(harness.profiles.stored.sex)
+    }
+
+    /**
+     * FR-PROFILE-007 : **l'IMC n'utilise pas le sexe** et son affichage n'en dépend en rien. Les
+     * catégories adultes de PRD FR-BMI-002 sont les mêmes pour tout le monde, et ce test le
+     * verrouille en comparant les trois lectures possibles du champ sur les mêmes données.
+     */
+    @Test
+    fun `l'IMC est identique quel que soit le sexe`() = runTest {
+        val readings = listOf(null, Sex.FEMALE, Sex.MALE).map { sex ->
+            val harness = harness(
+                profile = UserProfile(heightCm = 180, birthDate = LocalDate.of(1992, 4, 16)),
+                measurements = listOf(measurementOf("2026-08-23", 74.5)),
+            )
+            harness.viewModel.onSexChange(sex)
+            harness.state().bmi
+        }
+
+        assertEquals(1, readings.distinct().size, "$readings")
+        assertTrue(readings.first() is Bmi.Classified, "${readings.first()}")
+    }
+
+    // endregion
+
+    // region les balances associées (FR-SCALE-010)
+
+    @Test
+    fun `sans balance associée le compte est nul`() = runTest {
+        assertEquals(0, harness().state().pairedScaleCount)
+    }
+
+    @Test
+    fun `le compte suit les balances enregistrées`() = runTest {
+        val scales = FakeScaleRepository(
+            listOf(scaleDeviceOf(id = "a"), scaleDeviceOf(id = "b", displayName = "Two")),
+        )
+
+        val harness = harness(scaleRepository = scales)
+
+        assertEquals(2, harness.state().pairedScaleCount)
+    }
+
+    // endregion
+
     private class ProfileHarness(
         val profiles: FakeUserProfileRepository,
         val preferences: FakeUserPreferencesRepository,
         val measurements: FakeMeasurementRepository,
+        val scales: FakeScaleRepository,
         val exporter: FakeWeightDataExporter,
         val viewModel: ProfileViewModel,
         private val collectedEvents: List<ProfileEvent>,
@@ -636,6 +742,7 @@ class ProfileViewModelTest {
         today: LocalDate = TODAY,
         profileRepository: FakeUserProfileRepository = FakeUserProfileRepository(profile),
         measurementRepository: FakeMeasurementRepository = FakeMeasurementRepository(measurements),
+        scaleRepository: FakeScaleRepository = FakeScaleRepository(),
         exporter: FakeWeightDataExporter = FakeWeightDataExporter(),
     ): ProfileHarness {
         val preferencesRepository = FakeUserPreferencesRepository(preferences)
@@ -643,6 +750,7 @@ class ProfileViewModelTest {
             profileRepository = profileRepository,
             preferencesRepository = preferencesRepository,
             measurementRepository = measurementRepository,
+            scaleRepository = scaleRepository,
             exporter = exporter,
             savedStateHandle = savedState,
             today = { today },
@@ -658,6 +766,7 @@ class ProfileViewModelTest {
             profiles = profileRepository,
             preferences = preferencesRepository,
             measurements = measurementRepository,
+            scales = scaleRepository,
             exporter = exporter,
             viewModel = viewModel,
             collectedEvents = collected,

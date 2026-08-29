@@ -10,6 +10,7 @@ import fr.kristenjestin.mue.data.local.database.HealthProfileDao
 import fr.kristenjestin.mue.data.local.database.HealthProfileEntity
 import fr.kristenjestin.mue.data.sync.SyncOutbox
 import fr.kristenjestin.mue.domain.logic.MueValidation
+import fr.kristenjestin.mue.domain.model.Sex
 import fr.kristenjestin.mue.domain.model.UserProfile
 import fr.kristenjestin.mue.domain.repository.UserProfileRepository
 import kotlinx.coroutines.CoroutineDispatcher
@@ -34,7 +35,12 @@ import java.time.format.DateTimeParseException
  * write that rolled back would leave the phone claiming a height the server never accepted.
  *
  * [UserProfileRepository] is unchanged on purpose: every screen and every fake still sees one
- * profile with three fields, and none of them has to know it now comes from two files.
+ * profile, and none of them has to know it now comes from two files.
+ *
+ * Le sexe de PRD_SCALE FR-PROFILE-007 rejoint la moitié Room, et non le fichier de préférences que
+ * la lettre de PRD_SCALE 21.1 désignait. Le motif est celui qui a déjà fait déménager la taille et
+ * la date de naissance : PRD_SCALE 22 le synchronise dans l'agrégat `HealthProfile`, et une donnée
+ * synchronisée doit pouvoir être appliquée dans la même transaction que son curseur.
  */
 class DataStoreUserProfileRepository(
     private val dataStore: DataStore<Preferences>,
@@ -62,6 +68,11 @@ class DataStoreUserProfileRepository(
             displayName = displayName,
             heightCm = health?.heightCm,
             birthDate = health?.birthDate?.toLocalDateOrNull(),
+            // `Sex.fromWire` accepte le `null` de la colonne et renvoie `null` aussi bien pour
+            // l'absence que pour une valeur illisible : dans les deux cas le profil est incomplet
+            // au sens de FR-BODY-001, et le comportement attendu est le même — le poids
+            // s'enregistre, la composition est simplement absente.
+            sex = Sex.fromWire(health?.sex),
         )
     }.flowOn(ioDispatcher)
 
@@ -91,10 +102,12 @@ class DataStoreUserProfileRepository(
                 HealthProfileEntity(
                     heightCm = profile.heightCm,
                     birthDate = profile.birthDate?.toString(),
+                    sex = profile.sex?.wireValue,
                 ),
                 outbox.healthProfileUpsert(
                     heightCm = profile.heightCm,
                     birthDate = profile.birthDate,
+                    sex = profile.sex,
                 ),
             )
         }
