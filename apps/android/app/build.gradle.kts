@@ -93,7 +93,7 @@ android {
             versionNameSuffix = "-debug"
             resValue("string", "app_name", "Mue Debug")
             // Oxblood behind the amber. Unmistakable at 48 dp, and no asset was drawn for it.
-            resValue("color", "launcher_background", "#14301C")
+            resValue("color", "launcher_background", "#1E7A47")
         }
 
         release {
@@ -142,7 +142,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "Mue Beta")
             // Deep indigo behind the same amber: a different application at a glance, no new asset.
-            resValue("color", "launcher_background", "#11223A")
+            resValue("color", "launcher_background", "#2D5BA8")
         }
 
         /*
@@ -297,7 +297,7 @@ androidComponents.finalizeDsl { extension ->
             // installs under `.debug` still labelled `Mue`, which is the exact confusion the
             // three names exist to prevent — a launcher entry that reads as the daily app.
             resValue("string", "app_name", "Mue Debug")
-            resValue("color", "launcher_background", "#14301C")
+            resValue("color", "launcher_background", "#1E7A47")
         }
     }
 }
