@@ -63,7 +63,8 @@ packages/
   domain/            services métier serveur, implémentation unique des règles
   ui/                primitives shadcn (embryonnaire)
 infra/               compose.dev.yml, scripts initdb, procédure de déploiement
-scripts/             gen-openapi.ts, admin.ts, dev-tls-cert.ts, mue-server.ps1
+`scripts/` — gen-openapi.ts, admin.ts, dev-tls-cert.ts, mue-server.ps1, entrypoint.ts
+              (l'entrée du conteneur : migration puis serveur, voir §4.7)
 ```
 
 `packages/design-tokens` et `packages/ui` ne portent aujourd'hui qu'un
@@ -349,7 +350,7 @@ bun run --filter @mue/contracts openapi:check    # échoue si le fichier est pé
 # Migrations Drizzle : génère, retire la qualification de schéma, puis vérifie.
 bun run --filter @mue/db generate
 bun run --filter @mue/db verify:sql              # le contrôle seul
-bun run --filter @mue/db migrate                 # applique (jamais au démarrage)
+bun run --filter @mue/db migrate                 # applique (le conteneur le fait à son démarrage)
 
 # Catalogue alimentaire Ciqual (asset Android) et ses fixtures de test.
 bun run --filter @mue/ciqual source:verify
@@ -536,10 +537,21 @@ supprime la clé de signature JWKS. Le téléphone ne s'authentifie alors plus :
 clé chiffrée sous un autre secret ne peut pas être déchiffrée, et le symptôme est
 un `401` nu, sans trace dans aucun journal.
 
-Ni la production ni `mue_dev` ne sont jamais migrées automatiquement au
-démarrage d'un processus : les migrations sont une étape explicite du
-déploiement, jamais un effet de bord de `n` processus qui démarrent en même
-temps.
+Le lanceur de migration (`scripts/entrypoint.ts`) applique les migrations **au
+démarrage du conteneur**, avant que le serveur n'écoute. C'était une étape
+manuelle du déploiement, et ce n'est plus le cas parce que la raison de la
+manœuvrer a disparu : `migrate()` prend un `pg_advisory_lock` depuis sa première
+version, donc deux migrations simultanées se **sérialisent** — la seconde attend,
+puis constate qu'il n'y a rien à faire. Le danger visé par l'ancienne règle
+(« `n` processus qui démarrent en même temps ») n'existe donc plus.
+
+Ce qui reste garanti, et qui compte plus que le déclencheur : la migration est
+**décidée**, pas subie — elle précède l'écoute du port, et son échec sort en
+erreur plutôt que de laisser servir une application à demi migrée. Le lanceur
+reste additif, testé depuis la version 1, refuse toute instruction interdite et
+n'émet aucun DDL de schéma. Le chemin manuel (`bun run --filter @mue/db migrate`,
+ou `bun run packages/db/src/migrate.ts` dans le conteneur) reste disponible pour
+migrer sans démarrer le serveur.
 
 ---
 

@@ -115,7 +115,15 @@ EXPOSE 3000
 # base.
 USER bun
 
-# Ni `bun install`, ni migration, ni création de schéma au démarrage. Les migrations sont une
-# étape explicite du déploiement (PRD 20.3) : `n` conteneurs qui démarrent ensemble ne doivent
-# pas migrer en concurrence.
-CMD ["bun", "run", "apps/platform/dist/server/main.js"]
+# Le premier acte du conteneur est la migration, et le serveur ne démarre que si elle a
+# réussi. C'était une étape manuelle du déploiement, et c'en était une parce que plusieurs
+# conteneurs qui migrent en concurrence se marchent dessus — ce que `migrate()` ne risque
+# plus : il prend un `pg_advisory_lock` (`packages/db/src/migrate.ts`), donc deux migrations
+# simultanées se sérialisent et la seconde ne trouve rien à faire.
+#
+# Ce qui reste vrai, et que la ligne ci-dessous respecte : la migration est **décidée**, pas
+# subie. Elle précède l'écoute du port, son échec sort en erreur, et le conteneur ne sert
+# jamais avec un schéma à moitié appliqué. Le chemin manuel
+# (`bun run packages/db/src/migrate.ts`) reste disponible pour migrer sans démarrer le
+# serveur. `scripts/entrypoint.ts` porte le raisonnement en entier.
+CMD ["sh", "-c", "bun run scripts/entrypoint.ts && exec bun run apps/platform/dist/server/main.js"]
