@@ -606,3 +606,75 @@ export const agentAudit = pgTable(
     check("agent_audit_result_check", sql`${t.result} in ('ok', 'error')`),
   ],
 );
+
+/**
+ * La clé d'API qu'un agent présente sur `/mcp`, et rien d'autre.
+ *
+ * ## Pourquoi une table à Mue plutôt qu'une ligne dans `oauthClient`
+ *
+ * Un client OAuth et une clé d'API ne sont pas la même chose et ne peuvent pas
+ * partager une ligne sans mentir sur l'un des deux. Un client OAuth
+ * s'enregistre, se voit refuser ou accorder des portées sur une page de
+ * consentement, et détient des jetons qui expirent ; une clé est fabriquée par
+ * le propriétaire, remise à un agent qu'il a choisi, et vit jusqu'à ce qu'il la
+ * révoque. La colonne qui porterait l'un ou l'autre devrait être nulle une fois
+ * sur deux, et `revoked`/`disabled` auraient deux significations selon la ligne.
+ *
+ * ## Pourquoi il n'y a **aucune** colonne de portées
+ *
+ * Décision du propriétaire, et elle tient à l'échelle du projet : Mue a un seul
+ * compte, sur son propre serveur, et une clé est un accès que le propriétaire
+ * s'accorde à lui-même. Une clé vaut donc le jeu de portées complet, et l'unique
+ * conséquence à connaître est écrite ici pour ne pas être découverte : **une
+ * clé peut supprimer** (le scope `data:delete` compris). Le jour où cela gêne,
+ * la réponse est une colonne booléenne unique, pas neuf colonnes de portées.
+ * La mécanique de portées reste en place en amont (`@mue/auth`) : chaque outil
+ * continue de déclarer la sienne, et `isToolPermitted` continue de filtrer le
+ * catalogue. C'est le trousseau qui est simplifié, pas le contrôle.
+ *
+ * ## Pourquoi l'empreinte et jamais le jeton
+ *
+ * Le jeton en clair n'est affiché qu'une fois, à la création, et ne peut plus
+ * être relu ensuite — y compris par un `SELECT` sur cette table. Ce qui vit ici
+ * est un SHA-256 hexadécimal, ce qui suffit largement : un jeton de 32 octets
+ * aléatoires n'est pas attaquable par dictionnaire, donc une fonction lente
+ * n'achèterait rien et coûterait un calcul à chaque appel d'outil.
+ *
+ * ## Pourquoi révoquer est un horodatage et non un `DELETE`
+ *
+ * Même raison que celle qui garde la ligne `oauthClient` intacte dans
+ * `revokeAgent` : `agent_audit` nomme l'identifiant de la clé, et une ligne
+ * effacée rendrait l'audit illisible. Une clé révoquée reste donc listée, avec
+ * son `revoked_at`, et son jeton ne résout plus.
+ *
+ * Pas de métadonnées de §12.1 : comme `agent_audit`, ce n'est pas un agrégat
+ * synchronisé. Rien de cette table ne part vers le téléphone.
+ */
+export const mcpKey = pgTable(
+  "mcp_key",
+  {
+    id: text("id").primaryKey(),
+    /** Le compte dont cette clé ouvre les données. Un seul en pratique. */
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Ce que le propriétaire a écrit pour la reconnaître : « coach », « Cursor ». */
+    label: text("label").notNull(),
+    /** SHA-256 hexadécimal du jeton. Le jeton lui-même n'est stocké nulle part. */
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Le dernier appel d'outil qui a présenté cette clé. Écrit au mieux, et pas
+     * à chaque requête : la page de réglages a besoin de « vue récemment », pas
+     * d'une écriture par appel d'outil.
+     */
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    // La recherche d'un jeton est une égalité sur cette colonne, et l'unicité
+    // est ce qui empêche deux clés de se résoudre l'une pour l'autre.
+    uniqueIndex("mcp_key_token_hash_key").on(t.tokenHash),
+    index("mcp_key_user_idx").on(t.userId, t.revokedAt),
+  ],
+);
