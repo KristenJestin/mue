@@ -31,3 +31,16 @@ export {
   type AgentSummary,
   type SessionSummary,
 } from "./administration";
+export {
+  API_KEY_PREFIX,
+  MAX_API_KEY_LABEL_LENGTH,
+  createApiKey,
+  hashApiKeyToken,
+  isApiKeyToken,
+  listApiKeys,
+  resolveApiKey,
+  revokeApiKey,
+  type ApiKeySummary,
+  type CreatedApiKey,
+  type ResolvedApiKey,
+} from "./api-keys";
