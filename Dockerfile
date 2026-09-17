@@ -94,6 +94,20 @@ COPY --from=build /repo/apps/platform/dist apps/platform/dist
 # `migrate` de `infra/compose.yml`.
 COPY --from=build /repo/packages packages
 
+# Le CLI d'administration voyage avec l'image, et pas seulement le serveur.
+#
+# `scripts/admin.ts` est ce qui reste possible quand l'interface Web ne l'est plus : la
+# section 15.3 l'exige comme chemin de révocation documenté, et depuis que les agents se
+# branchent par une clé d'API, c'est **aussi** la seule manière de fabriquer une clé en
+# production — elle a besoin du `DATABASE_URL` du déploiement, qui ne vit que dans ce
+# conteneur. Sans cette ligne, l'image est complète et la commande est introuvable.
+#
+# Copié depuis le contexte et non depuis `build` : c'est du TypeScript source, il n'est pas
+# compilé, et l'étape de construction ne le reçoit pas. Il s'exécute contre `packages/`,
+# qui est juste au-dessus — même raison que `packages/db/src/migrate.ts` deux paragraphes
+# plus haut.
+COPY scripts scripts
+
 EXPOSE 3000
 
 # Le conteneur n'exécute rien en tant que root. L'image `oven/bun` fournit déjà cet
