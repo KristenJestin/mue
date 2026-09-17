@@ -42,11 +42,14 @@
 // Internal packages are consumed as TypeScript source anyway, so this resolves
 // to exactly what `@mue/auth` exports.
 import {
+  createApiKey,
   createDevelopmentAccount,
   listAgents,
+  listApiKeys,
   listSessions,
   MIN_PASSWORD_LENGTH,
   revokeAgent,
+  revokeApiKey,
   revokeSession,
 } from "../packages/auth/src/index";
 import { createDatabase } from "../packages/db/src/index";
@@ -66,12 +69,90 @@ const USAGE = `mue admin
   sessions revoke <sessionId>    drop one session: that device stops syncing
   agents list                    every OAuth client, what it was granted and its last use
   agents revoke <clientId>       disable an agent and revoke its live tokens
+  keys list [email]              every API key, revoked ones included
+  keys create <label> [email]    mint an API key for an agent, and print it once
+  keys revoke <keyId> [email]    refuse a key from the next request onwards
   accounts create <email> [name] seed a development account the phone can pair with
+
+An argument is optional wherever an email is: this server holds one account, so
+the commands find it. They refuse to guess once a second account exists.
 
 ${PASSWORD_VARIABLE} carries the password for "accounts create"; with a
 terminal on stdin the command asks for it instead. It is never an argument --
 see readPassword() for why. Minimum ${MIN_PASSWORD_LENGTH} characters.
 `;
+
+/**
+ * Le compte que la commande vise, sans le demander quand il n'y a pas de doute.
+ *
+ * Cette base porte un seul compte humain : exiger une adresse à chaque fois
+ * serait une cérémonie, et deviner serait pire le jour où il y en a deux. D'où
+ * les trois issues, dans cet ordre : une adresse donnée est crue et doit
+ * exister ; sans adresse, un seul compte est pris ; **deux comptes font échouer
+ * la commande** au lieu d'en choisir un. Une clé créée sur le mauvais compte
+ * n'est pas réparable depuis cette commande, et se découvre en production.
+ */
+async function soleAccount(
+  handle: ReturnType<typeof createDatabase>,
+  email: string | undefined,
+): Promise<{ readonly id: string; readonly email: string }> {
+  if (email !== undefined) {
+    const rows = await handle.sql<{ id: string; email: string }[]>`
+      select id, email from "user" where email = ${email} limit 1
+    `;
+    const found = rows[0];
+    if (found === undefined) fail(`no account ${email}`);
+    return found;
+  }
+
+  const rows = await handle.sql<{ id: string; email: string }[]>`
+    select id, email from "user" order by "createdAt" asc limit 2
+  `;
+  const first = rows[0];
+  if (first === undefined) {
+    fail("no account on this server. Seed one first: accounts create <email> [name]");
+  }
+  if (rows.length > 1) {
+    fail("this server holds more than one account; name one: keys create <label> <email>");
+  }
+  return first;
+}
+
+/**
+ * Le texte d'une clé fraîchement créée, et tout ce qu'il faut pour s'en servir.
+ *
+ * Le jeton n'est affiché qu'ici, une fois. Il n'est pas rappelable : la base
+ * n'en garde que le SHA-256, donc une clé perdue se remplace — c'est écrit à
+ * l'écran plutôt que dans une documentation que personne ne relit.
+ */
+function createdKeyText(
+  token: string,
+  keyId: string,
+  label: string,
+  email: string,
+  origin: string,
+): string {
+  return [
+    `key ${keyId} created for ${email}, label "${label}"`,
+    "",
+    `  ${token}`,
+    "",
+    "This is the only time the token is printed: only its SHA-256 is stored, so a",
+    "  lost key is replaced, never recovered.",
+    "",
+    "An agent presents it as a bearer header. For Hermes, on this server:",
+    "",
+    `    hermes config set MUE_MCP_KEY ${token}`,
+    "",
+    "then, in config.yaml:",
+    "",
+    "    mcp_servers:",
+    "      mue:",
+    `        url: ${origin}/mcp`,
+    "        headers:",
+    '          Authorization: "Bearer ${MUE_MCP_KEY}"',
+  ].join("\n");
+}
 
 /**
  * Where the password comes in, and the one place it must never come in from.
@@ -250,6 +331,52 @@ async function main(argv: readonly string[]): Promise<void> {
           `${result.refreshTokensRevoked} refresh token(s), ` +
           `${result.consentsRemoved} consent(s) removed`,
       );
+      return;
+    }
+
+    if (subject === "keys" && action === "list") {
+      const account = await soleAccount(handle, argument);
+      const keys = await listApiKeys(handle, account.id);
+      if (keys.length === 0) {
+        console.log(`no keys for ${account.email}`);
+        return;
+      }
+      for (const key of keys) {
+        console.log(
+          [
+            key.id,
+            key.label,
+            key.revokedAt === null ? "active" : "REVOKED",
+            `created ${when(key.createdAt)}`,
+            `last used ${when(key.lastUsedAt)}`,
+          ].join("  "),
+        );
+      }
+      return;
+    }
+
+    if (subject === "keys" && action === "create") {
+      if (argument === undefined) fail("keys create needs a label");
+      const account = await soleAccount(handle, name);
+      const created = await createApiKey(handle, { userId: account.id, label: argument });
+      console.log(
+        createdKeyText(
+          created.token,
+          created.key.id,
+          created.key.label,
+          account.email,
+          (process.env.BETTER_AUTH_URL ?? "https://<origin>").replace(/\/+$/, ""),
+        ),
+      );
+      return;
+    }
+
+    if (subject === "keys" && action === "revoke") {
+      if (argument === undefined) fail("keys revoke needs a key id");
+      const account = await soleAccount(handle, name);
+      const revoked = await revokeApiKey(handle, account.id, argument);
+      console.log(revoked ? `revoked key ${argument}` : `no live key ${argument}`);
+      if (!revoked) process.exitCode = 1;
       return;
     }
 

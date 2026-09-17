@@ -410,10 +410,22 @@ posé avant le démarrage de Bun, passer par `scripts/mue-server.ps1` (§4.9).
 ```sh
 bun --env-file=.env run scripts/admin.ts sessions list
 bun --env-file=.env run scripts/admin.ts agents revoke <clientId>
+bun --env-file=.env run scripts/admin.ts keys create <libellé> [email]
+bun --env-file=.env run scripts/admin.ts keys list [email]
+bun --env-file=.env run scripts/admin.ts keys revoke <keyId> [email]
 bun --env-file=.env run scripts/admin.ts accounts create <email> [nom]
 bun run scripts/dev-tls-cert.ts            # autorité + certificat de dev
 ./scripts/mue-server.ps1 start|stop|restart|status|logs
 ```
+
+`keys create` est ce qui remplace l'appairage pour un agent : elle imprime le
+jeton une seule fois — la base n'en garde que le SHA-256, donc une clé perdue se
+remplace au lieu de se retrouver — et affiche la configuration exacte à coller
+côté agent. `keys revoke` horodate la ligne au lieu de l'effacer, parce que
+`agent_audit` et `sync_journal` nomment l'identifiant de la clé : une clé révoquée
+reste listée, et ce qu'elle a écrit reste attribuable. L'email est facultatif
+tant que le serveur ne porte qu'un compte ; avec deux comptes, ces trois
+commandes refusent de deviner et le demandent.
 
 `accounts create` sème un compte de développement, parce que le client Android
 n'a pas de parcours d'inscription (§4.6) et que le propriétaire recrée `mue_dev`
