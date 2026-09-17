@@ -49,6 +49,7 @@ export {
 } from "./registration";
 export { createMcpApp, createOAuthDiscoveryApp, MCP_PATH, type McpRouteOptions } from "./route";
 export { buildMcpServer, type BuildMcpServerOptions } from "./server";
+export { authenticateApiKey, readBearerToken, type ApiKeyAuth } from "./key-auth";
 export type {
   ActivityStatistics,
   AgentAuditEntry,

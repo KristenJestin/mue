@@ -2,9 +2,11 @@ import { requireMcpAuth } from "@better-auth/mcp";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import { oauthIssuer, type AuthHandle } from "@mue/auth";
 import type { MueError } from "@mue/contracts";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { unauthenticated } from "./errors";
+import type { AgentIdentity } from "./identity";
 import { IdentityError, isAgentRevoked, readAgentIdentity } from "./identity";
+import { authenticateApiKey } from "./key-auth";
 import { buildMcpServer } from "./server";
 import { MUE_TOOLS } from "./tools";
 import type { MueMcpServices } from "./services";
@@ -99,6 +101,47 @@ export function createMcpApp(options: McpRouteOptions): Hono {
   app.get(MCP_PATH, methodNotAllowed);
   app.delete(MCP_PATH, methodNotAllowed);
 
+  /**
+   * Le service d'un appel authentifié, quel que soit ce qui l'a authentifié.
+   *
+   * Extrait pour que les deux chemins — la clé d'API et l'OAuth — partagent
+   * exactement le même transport, le même catalogue et la même fermeture. Deux
+   * copies de ce bloc divergeraient sur un détail (une option de transport, un
+   * `onInternalError`) et l'endpoint se comporterait différemment selon la
+   * manière dont le client s'est identifié, ce qu'aucun test ne lit facilement.
+   */
+  const serve = async (c: Context, identity: AgentIdentity): Promise<Response> => {
+    const server = buildMcpServer({
+      identity,
+      services,
+      ...(options.onInternalError === undefined
+        ? {}
+        : { onInternalError: options.onInternalError }),
+    });
+
+    const transport = new StreamableHTTPTransport({
+      // `sessionIdGenerator` is deliberately absent, not `undefined`: absent is
+      // what the SDK reads as stateless, and `exactOptionalPropertyTypes` refuses
+      // to let the two be written the same way. Stateless means nothing survives
+      // the request, so no client can resume into another agent's authorization.
+      //
+      // One JSON response per POST. V1 has no server-initiated message, so an SSE
+      // body would be a stream that never carries a second frame -- and it is what
+      // lets the server be closed as soon as the response is built.
+      enableJsonResponse: true,
+      enableDnsRebindingProtection: true,
+      allowedHosts: [allowedHost],
+    });
+
+    try {
+      await server.connect(transport);
+      const response = await transport.handleRequest(c);
+      return response ?? new Response(null, { status: 202 });
+    } finally {
+      await server.close();
+    }
+  };
+
   app.post(MCP_PATH, async (c) => {
     if (!isOriginAllowed(c.req.raw, config.trustedOrigins)) {
       return jsonRpcError(
@@ -106,6 +149,23 @@ export function createMcpApp(options: McpRouteOptions): Hono {
         { code: "auth.forbidden", message: "Origin not allowed.", retryable: false },
         403,
       );
+    }
+
+    /**
+     * Les clés d'abord, l'OAuth ensuite.
+     *
+     * L'ordre est le fond et non le détail : une clé de Mue n'est jamais
+     * présentée à Better Auth, et un refus sur une clé ne publie aucun
+     * challenge — un client qui vient de voir sa clé révoquée ne doit pas être
+     * envoyé vers une page de consentement qu'il ne peut pas utiliser.
+     * `@mue/api/src/mcp/key-auth.ts` porte les trois issues et leurs raisons.
+     */
+    const keyAuth = await authenticateApiKey(database, c.req.header("authorization") ?? null);
+    if (keyAuth.kind === "refused") {
+      return jsonRpcError(-32001, unauthenticated("This API key is not accepted."), 401);
+    }
+    if (keyAuth.kind === "identity") {
+      return serve(c, keyAuth.identity);
     }
 
     const guarded = requireMcpAuth(
@@ -130,35 +190,7 @@ export function createMcpApp(options: McpRouteOptions): Hono {
           );
         }
 
-        const server = buildMcpServer({
-          identity,
-          services,
-          ...(options.onInternalError === undefined
-            ? {}
-            : { onInternalError: options.onInternalError }),
-        });
-
-        const transport = new StreamableHTTPTransport({
-          // `sessionIdGenerator` is deliberately absent, not `undefined`: absent is
-          // what the SDK reads as stateless, and `exactOptionalPropertyTypes` refuses
-          // to let the two be written the same way. Stateless means nothing survives
-          // the request, so no client can resume into another agent's authorization.
-          //
-          // One JSON response per POST. V1 has no server-initiated message, so an SSE
-          // body would be a stream that never carries a second frame -- and it is what
-          // lets the server be closed as soon as the response is built.
-          enableJsonResponse: true,
-          enableDnsRebindingProtection: true,
-          allowedHosts: [allowedHost],
-        });
-
-        try {
-          await server.connect(transport);
-          const response = await transport.handleRequest(c);
-          return response ?? new Response(null, { status: 202 });
-        } finally {
-          await server.close();
-        }
+        return serve(c, identity);
       },
       {
         resource: config.mcpResource,
