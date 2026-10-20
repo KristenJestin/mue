@@ -128,3 +128,7 @@ partagent cet espace avec `../proto/`, auquel ils renvoient, et avec les APKs.
 C'est délibéré : la racine est l'espace de travail, le dépôt ne porte que ce qui
 se construit. Conséquence à connaître : `git log` et `git blame` ne répondent
 plus sur les spécifications au-delà du commit qui les a sorties.
+
+## Licence
+
+Free software under the [AGPL-3.0](LICENSE). Two pieces keep their own licence: the Sora font of the Android application (SIL Open Font License 1.1, [`LICENSE-Sora.txt`](apps/android/app/LICENSE-Sora.txt)) and the Ciqual food table (Etalab Open Licence 2.0, see [`packages/ciqual/SOURCES.md`](packages/ciqual/SOURCES.md)).
